@@ -29,6 +29,11 @@ CORS_ORIGINS = [
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if docstore.ON_VERCEL and not docstore.USE_DATABASE:
+        logging.getLogger(__name__).warning(
+            "DATABASE_URL is not set: data is kept in %s and will be lost; add a Postgres database.",
+            docstore.DATA_PATH,
+        )
     bootstrap_admin_from_env()
     yield
     docstore.close_pool()
@@ -125,7 +130,10 @@ def public_config():
 
 # Single-service deployments (root Dockerfile, e.g. on Render) serve the built UI from
 # FRONTEND_DIST; with docker-compose nginx serves it and FRONTEND_DIST stays unset.
+# On Vercel the build command writes the UI to frontend/dist next to the backend.
 _FRONTEND_ENV = os.environ.get("FRONTEND_DIST", "").strip()
+if not _FRONTEND_ENV and docstore.ON_VERCEL:
+    _FRONTEND_ENV = str(Path(__file__).resolve().parents[2] / "frontend" / "dist")
 _FRONTEND: Optional[Path] = Path(_FRONTEND_ENV).resolve() if _FRONTEND_ENV else None
 
 if _FRONTEND is not None and (_FRONTEND / "index.html").is_file():

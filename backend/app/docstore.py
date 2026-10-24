@@ -24,7 +24,10 @@ from typing import Any, Dict, Iterator, Optional
 DATABASE_URL = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
 USE_DATABASE = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 
-DATA_PATH = pathlib.Path(os.environ.get("DATA_DIR", "data"))
+# Serverless hosts (Vercel) only allow writes under /tmp, which is wiped often: set
+# DATABASE_URL there. The /tmp default only keeps the app from crashing without it.
+ON_VERCEL = bool(os.environ.get("VERCEL"))
+DATA_PATH = pathlib.Path(os.environ.get("DATA_DIR") or ("/tmp/soilboring-data" if ON_VERCEL else "data"))
 if not USE_DATABASE:
     DATA_PATH.mkdir(parents=True, exist_ok=True)
 

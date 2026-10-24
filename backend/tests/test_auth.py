@@ -94,3 +94,34 @@ def test_bootstrap_admin_only_when_no_users(monkeypatch):
     assert auth.bootstrap_admin_from_env() == "boss@example.com"
     assert auth.bootstrap_admin_from_env() is None
     assert [u["role"] for u in auth.list_users()] == ["admin"]
+
+
+def test_first_run_setup_creates_one_admin_then_closes(client, monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    assert client.get("/api/auth/setup").json() == {"needed": True}
+    short = client.post("/api/auth/setup", json={"email": "first@example.com", "password": "short"})
+    assert short.status_code == 400
+    r = client.post("/api/auth/setup", json={"email": "First@Example.com", "password": "first-admin-1"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["role"] == "admin"
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {body['token']}"})
+    assert me.status_code == 200 and me.json()["role"] == "admin"
+    assert client.get("/api/auth/setup").json() == {"needed": False}
+    again = client.post("/api/auth/setup", json={"email": "evil@example.com", "password": "evil-admin-1"})
+    assert again.status_code == 409
+    assert [u["email"] for u in auth.list_users()] == ["First@Example.com"]
+
+
+def test_first_run_setup_respects_admin_email_and_switch(client, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "boss@example.com")
+    wrong = client.post("/api/auth/setup", json={"email": "other@example.com", "password": "first-admin-1"})
+    assert wrong.status_code == 403
+    assert auth.list_users() == []
+    monkeypatch.setenv("ALLOW_FIRST_RUN_SETUP", "false")
+    assert client.get("/api/auth/setup").json() == {"needed": False}
+    off = client.post("/api/auth/setup", json={"email": "boss@example.com", "password": "first-admin-1"})
+    assert off.status_code == 403
+    monkeypatch.delenv("ALLOW_FIRST_RUN_SETUP")
+    ok = client.post("/api/auth/setup", json={"email": "BOSS@example.com", "password": "first-admin-1"})
+    assert ok.status_code == 201

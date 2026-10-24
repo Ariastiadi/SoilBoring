@@ -438,6 +438,36 @@ def delete_user(email: str, *, acting_email: Optional[str] = None) -> None:
         _save_users(users)
 
 
+def setup_needed() -> bool:
+    """True while no account exists yet (a fresh deployment)."""
+    return not _load_users()
+
+
+def first_run_setup_enabled() -> bool:
+    return (os.environ.get("ALLOW_FIRST_RUN_SETUP") or "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def create_first_admin(email: str, password: str) -> Dict[str, str]:
+    """First-run setup from the web UI: the first account becomes an admin.
+
+    Only possible while no account exists. If ADMIN_EMAIL is set, only that address may be
+    used; ALLOW_FIRST_RUN_SETUP=false turns the feature off (then use ADMIN_PASSWORD or the CLI).
+    """
+    if not first_run_setup_enabled():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="First-run setup is disabled")
+    allowed = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+    with docstore.lock(USERS_DOC):
+        if _load_users():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Setup is already done; please sign in")
+        if allowed and (email or "").strip().lower() != allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Use the admin email configured on the server (ADMIN_EMAIL)"
+            )
+        created = create_user(email, password, "admin")
+    logger.info("Created initial admin account for %s via first-run setup", created["email"])
+    return created
+
+
 def bootstrap_admin_from_env() -> Optional[str]:
     """Create the first admin from ADMIN_EMAIL / ADMIN_PASSWORD if no users exist."""
     email = (os.environ.get("ADMIN_EMAIL") or "").strip()

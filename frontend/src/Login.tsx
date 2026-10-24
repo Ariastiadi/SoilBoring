@@ -1,30 +1,66 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getSetupStatus } from './api'
 
 type Props = {
   onLogin: (email: string, password: string) => Promise<void>
+  onSetup: (email: string, password: string) => Promise<void>
   title: string
 }
 
-export default function Login({ onLogin, title }: Props) {
+const MIN_PASSWORD_LENGTH = 8
+
+export default function Login({ onLogin, onSetup, title }: Props) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  // A fresh deployment has no accounts yet: offer to create the first admin instead of signing in.
+  const [setupMode, setSetupMode] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    getSetupStatus().then(needed => {
+      if (active) setSetupMode(needed)
+    })
+    return () => { active = false }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (busy) return
     if (!email.trim() || !password.trim()) {
       setError('Email and password are required')
       return
     }
+    if (setupMode) {
+      if (password.length < MIN_PASSWORD_LENGTH) {
+        setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+        return
+      }
+      if (password !== confirm) {
+        setError('The two passwords do not match')
+        return
+      }
+    }
     setError('')
-    setStatus('Signing in...')
+    setBusy(true)
+    setStatus(setupMode ? 'Creating admin account...' : 'Signing in...')
     try {
-      await onLogin(email.trim(), password)
+      if (setupMode) {
+        await onSetup(email.trim(), password)
+      } else {
+        await onLogin(email.trim(), password)
+      }
       setStatus('Signed in')
     } catch (err: any) {
       setStatus('')
-      setError(err?.message || 'Login failed')
+      // Someone finished setup in the meantime: fall back to the normal sign-in form.
+      if (setupMode && err?.status === 409) setSetupMode(false)
+      setError(err?.message || (setupMode ? 'Setup failed' : 'Login failed'))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -32,7 +68,9 @@ export default function Login({ onLogin, title }: Props) {
     <div className="card" style={{ maxWidth: '480px', margin: '4rem auto', padding: '2rem' }}>
       <h2 style={{ marginTop: 0 }}>{title}</h2>
       <p style={{ color: 'var(--muted)', marginBottom: '1.5rem' }}>
-        Sign in with your assigned operator email and password to log boreholes.
+        {setupMode
+          ? 'Welcome! No accounts exist yet. Create the first administrator account; you can add operators afterwards under Users.'
+          : 'Sign in with your assigned operator email and password to log boreholes.'}
       </p>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
@@ -41,7 +79,7 @@ export default function Login({ onLogin, title }: Props) {
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            placeholder="operator@example.com"
+            placeholder={setupMode ? 'admin@example.com' : 'operator@example.com'}
             autoComplete="username"
             required
           />
@@ -52,12 +90,25 @@ export default function Login({ onLogin, title }: Props) {
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            placeholder="Password"
-            autoComplete="current-password"
+            placeholder={setupMode ? `At least ${MIN_PASSWORD_LENGTH} characters` : 'Password'}
+            autoComplete={setupMode ? 'new-password' : 'current-password'}
+            minLength={setupMode ? MIN_PASSWORD_LENGTH : undefined}
             required
           />
         </label>
-        <button type="submit">Sign In</button>
+        {setupMode && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
+            Repeat password
+            <input
+              type="password"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </label>
+        )}
+        <button type="submit" disabled={busy}>{setupMode ? 'Create admin account' : 'Sign In'}</button>
         {status && <span style={{ color: 'var(--muted)' }}>{status}</span>}
         {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
       </form>

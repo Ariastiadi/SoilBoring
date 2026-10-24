@@ -1,7 +1,16 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from ..auth import TOKEN_TTL, authenticate_user, change_own_password, generate_token, get_current_user
+from ..auth import (
+    TOKEN_TTL,
+    authenticate_user,
+    change_own_password,
+    create_first_admin,
+    first_run_setup_enabled,
+    generate_token,
+    get_current_user,
+    setup_needed,
+)
 from ..models import Email
 
 
@@ -18,6 +27,19 @@ def login(payload: LoginRequest):
     user = authenticate_user(payload.email, payload.password)
     token = generate_token(user["email"])
     return {"token": token, "email": user["email"], "role": user.get("role", "general"), "expires_in": TOKEN_TTL}
+
+
+@router.get("/setup")
+def setup_status():
+    """Whether the sign-in page should offer to create the first admin account."""
+    return {"needed": first_run_setup_enabled() and setup_needed()}
+
+
+@router.post("/setup", status_code=201)
+def first_run_setup(payload: LoginRequest):
+    user = create_first_admin(payload.email, payload.password)
+    token = generate_token(user["email"])
+    return {"token": token, "email": user["email"], "role": user["role"], "expires_in": TOKEN_TTL}
 
 
 @router.get("/me")

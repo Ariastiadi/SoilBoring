@@ -1,5 +1,6 @@
 """Single-service deployment: the API also serves the built UI (root Dockerfile)."""
 import importlib
+import os
 
 from fastapi.testclient import TestClient
 
@@ -52,4 +53,54 @@ def test_head_request_on_ui(tmp_path, monkeypatch):
             assert c.head("/").status_code == 200
     finally:
         monkeypatch.delenv("FRONTEND_DIST")
+        importlib.reload(main)
+
+
+def test_vercel_dependency_list_matches_requirements():
+    """pyproject.toml (Vercel) and backend/requirements.txt (Docker, dev) must not drift apart."""
+    import pathlib
+
+    import pytest
+
+    tomllib = pytest.importorskip("tomllib")  # Python 3.11+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    requirements = [
+        line.split("#", 1)[0].strip()
+        for line in (root / "backend" / "requirements.txt").read_text().splitlines()
+    ]
+    assert project["project"]["dependencies"] == [r for r in requirements if r]
+    assert project["tool"]["vercel"]["entrypoint"] == "backend.app.main:app"
+
+
+def test_vercel_defaults(tmp_path, monkeypatch):
+    """On Vercel the UI comes from frontend/dist and files may only be written under /tmp."""
+    import json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    config = json.loads((root / "vercel.json").read_text())
+    assert "backend/app/main.py" in config["functions"]
+    assert "frontend/dist" not in config["functions"]["backend/app/main.py"]["excludeFiles"]
+
+    original_data_dir = os.environ.get("DATA_DIR")
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("FRONTEND_DIST", raising=False)
+    monkeypatch.delenv("DATA_DIR", raising=False)
+    from backend.app import docstore, main
+
+    try:
+        docstore.close_pool()
+        importlib.reload(docstore)
+        assert docstore.ON_VERCEL
+        assert docstore.DATA_PATH.as_posix() == "/tmp/soilboring-data"
+        module = importlib.reload(main)
+        assert module._FRONTEND == (root / "frontend" / "dist").resolve()
+    finally:
+        # Put the shared modules back the way the other tests expect them.
+        monkeypatch.delenv("VERCEL")
+        if original_data_dir is not None:
+            monkeypatch.setenv("DATA_DIR", original_data_dir)
+        docstore.close_pool()
+        importlib.reload(docstore)
         importlib.reload(main)

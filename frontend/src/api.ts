@@ -125,6 +125,8 @@ async function parseJson<T>(response: Response, message: string, opts?: { skipUn
   return response.json() as Promise<T>;
 }
 
+export type Session = { token: string; email: string; role: User['role']; expires_in: number };
+
 export async function login(email: string, password: string) {
   const r = await fetch(`${BASE}/api/auth/login`, {
     method: "POST",
@@ -132,7 +134,28 @@ export async function login(email: string, password: string) {
     body: JSON.stringify({ email, password }),
   });
   // A wrong password is a 401 too, but it must not look like an expired session.
-  return parseJson<{ token: string; email: string; role: User['role']; expires_in: number }>(r, "Login failed", { skipUnauthorizedHandler: true });
+  return parseJson<Session>(r, "Login failed", { skipUnauthorizedHandler: true });
+}
+
+// True on a fresh deployment with no accounts: the sign-in page then offers to create the first admin.
+export async function getSetupStatus(): Promise<boolean> {
+  try {
+    const r = await fetch(`${BASE}/api/auth/setup`);
+    if (!r.ok) return false;
+    const body = await r.json();
+    return body?.needed === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function setupFirstAdmin(email: string, password: string) {
+  const r = await fetch(`${BASE}/api/auth/setup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return parseJson<Session>(r, "Setup failed", { skipUnauthorizedHandler: true });
 }
 
 export async function postReport(data: any) {

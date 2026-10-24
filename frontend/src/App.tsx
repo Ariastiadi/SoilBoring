@@ -8,7 +8,8 @@ import AboutSoilBoring from './tabs/AboutSoilBoring'
 import UserAdmin from './tabs/UserAdmin'
 import Login from './Login'
 import ChangePassword from './ChangePassword'
-import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
+import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler, setupFirstAdmin } from './api'
+import type { Session } from './api'
 
 type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users'
 type AuthState = { token: string; email: string; role: 'admin' | 'general'; expiresAt?: number } | null
@@ -69,8 +70,7 @@ export default function App() {
     return () => setUnauthorizedHandler(null)
   }, [])
 
-  const handleLogin = async (email: string, password: string) => {
-    const session = await loginApi(email, password)
+  const startSession = (session: Session) => {
     setAuth({
       token: session.token,
       email: session.email,
@@ -81,6 +81,14 @@ export default function App() {
     setShowPasswordForm(false)
     setNotice('')
     setTab('report')
+  }
+
+  const handleLogin = async (email: string, password: string) => {
+    startSession(await loginApi(email, password))
+  }
+
+  const handleSetup = async (email: string, password: string) => {
+    startSession(await setupFirstAdmin(email, password))
   }
 
   const handleLogout = () => {
@@ -128,7 +136,7 @@ export default function App() {
             {authNotice}
           </div>
         )}
-        <Login onLogin={handleLogin} title={appTitle(orgName)} />
+        <Login onLogin={handleLogin} onSetup={handleSetup} title={appTitle(orgName)} />
       </div>
     )
   }
