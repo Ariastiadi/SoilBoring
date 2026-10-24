@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { Details } from './api'
-import { coreSizeLabel } from './options'
+import { coreSizeLabel, methodLabel } from './options'
 import { t } from './i18n'
 
 type Row = Record<string, string | undefined>
@@ -18,6 +18,11 @@ function patternOf(uscs: string): Pattern {
   if (first.startsWith('S')) return 'sand'
   if (first.startsWith('G')) return 'gravel'
   return 'unknown'
+}
+
+// Shown when a layer has no written description.
+const USCS_NAMES: Record<Pattern, string> = {
+  clay: 'Clay', silt: 'Silt', sand: 'Sand', gravel: 'Gravel', organic: 'Organic soil', peat: 'Peat', unknown: '',
 }
 
 const FILL: Record<Pattern, string> = {
@@ -63,7 +68,7 @@ const fmt = (v: number | null | undefined, dp = 2) => (v === null || v === undef
 // Column layout in SVG units (1 unit ≈ 0.19 mm on A4 portrait).
 const W = 1000
 const COL = {
-  depth: [0, 60], graphic: [60, 130], desc: [130, 520], samples: [520, 610], spt: [610, 860], core: [860, 1000],
+  depth: [0, 75], graphic: [75, 140], desc: [140, 520], samples: [520, 610], spt: [610, 860], core: [860, 1000],
 } as const
 const H = 1150 // drawing height per page
 const N_MAX = 50
@@ -88,7 +93,7 @@ function Header({ report, page, pages }: { report: Row, page: number, pages: num
     [t('Coordinates'), report.Latitude && report.Longitude ? `${report.Latitude}, ${report.Longitude}` : ''],
     [t('Ground level (mRL)'), report.GroundElevation_mRL],
     [t('Dates'), `${report.StartDate || ''} – ${report.EndDate || ''}`],
-    [t('Method'), report.DrillingMethod],
+    [t('Method'), report.DrillingMethod ? methodLabel(report.DrillingMethod) : report.DrillingMethod],
     [t('Rig'), report.DrillRig],
     [t('Core size'), report.CoreSize ? coreSizeLabel(report.CoreSize) : ''],
     [t('Contractor'), report.Contractor],
@@ -137,7 +142,14 @@ function Sheet({ report, details, range, page, pages }: { report: Row, details: 
             ['depth', t('Depth (m)')], ['graphic', t('Log')], ['desc', t('Description')], ['samples', t('Samples')],
             ['spt', `SPT N (0–${N_MAX})`], ['core', 'TCR / RQD %'],
           ] as Array<[keyof typeof COL, string]>).map(([k, label]) => (
-            <text key={k} x={(COL[k][0] + COL[k][1]) / 2} y={-14} fontSize="15" textAnchor="middle" fontWeight="600">{label}</text>
+            k === 'depth' ? (
+              <text key={k} x={(COL[k][0] + COL[k][1]) / 2} y={-22} fontSize="12" textAnchor="middle" fontWeight="600">
+                <tspan x={(COL[k][0] + COL[k][1]) / 2}>{t('Depth')}</tspan>
+                <tspan x={(COL[k][0] + COL[k][1]) / 2} dy="14">(m)</tspan>
+              </text>
+            ) : (
+              <text key={k} x={(COL[k][0] + COL[k][1]) / 2} y={-14} fontSize="15" textAnchor="middle" fontWeight="600">{label}</text>
+            )
           ))}
           {Object.values(COL).map(([x0], i) => <line key={i} x1={x0} y1={-40} x2={x0} y2={H} stroke="#333" strokeWidth="1" />)}
           <rect x="0" y="-40" width={W} height={H + 40} fill="none" stroke="#333" strokeWidth="1.5" />
@@ -229,7 +241,7 @@ function Sheet({ report, details, range, page, pages }: { report: Row, details: 
               left: `${(COL.desc[0] / W) * 100}%`, width: `${((COL.desc[1] - COL.desc[0]) / W) * 100}%`,
               top: `${((y0 + 40) / (H + 60)) * 100}%`, height: `${((y1 - y0) / (H + 60)) * 100}%`,
             }}>
-              {l.uscs && <strong>{l.uscs}: </strong>}{l.description}
+              {l.uscs && <strong>{l.uscs}: </strong>}{l.description || (l.uscs ? t(USCS_NAMES[patternOf(l.uscs)]) : '')}
             </div>
           )
         })}

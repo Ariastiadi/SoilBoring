@@ -80,3 +80,14 @@ def test_activity_log_records_changes(client, admin_headers):
     assert client.get("/api/audit", headers=other).status_code == 403
     assert client.get("/api/audit?target=BH-10", headers=other).status_code == 200
     assert all("password" not in str(e).lower() for e in audit.list_events())
+
+
+def test_ai_context_includes_depth_data(client, admin_headers):
+    _log(client, admin_headers, BoreholeID="BH-11")
+    client.put("/api/details/BH-11", json={
+        "layers": [{"top": 0, "base": 4, "uscs": "CH", "description": "Lempung lunak"}],
+        "spt": [{"depth": 2, "seat": 1, "inc1": 2, "inc2": 3}, {"depth": 10, "seat": 30, "inc1": 50, "penetration_mm": 90}],
+    }, headers=admin_headers)
+    body = client.post("/api/ai/prompt", json={"question": "BH-11 strata"}, headers=admin_headers).json()
+    assert "0-4 CH Lempung lunak" in body["context"]
+    assert "2:5; 10:50/90mm" in body["context"]

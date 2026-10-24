@@ -65,7 +65,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .markdown th, .markdown td { border-bottom: 1px solid var(--border); padding: .4rem; text-align: left; }
 
 /* Tables used to edit depth data */
-.grid-table { width: 100%; border-collapse: collapse; }
+.grid-table { width: 100%; border-collapse: collapse; min-width: 620px; }
+.grid-table textarea { min-width: 12rem; }
 .grid-table th { text-align: left; font-size: .8rem; color: var(--muted); font-weight: 600; padding: .3rem; border-bottom: 1px solid var(--border); }
 .grid-table td { padding: .2rem; vertical-align: top; }
 .grid-table input, .grid-table select, .grid-table textarea { width: 100%; padding: .35rem .4rem; min-height: 0; }

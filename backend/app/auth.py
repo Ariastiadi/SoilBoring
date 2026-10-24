@@ -272,6 +272,9 @@ def authenticate_user(email: str, password: str, otp: Optional[str] = None, *, c
     # Password checks run one at a time under this lock, so "check the lockout" and
     # "record the failure" happen together: parallel guesses cannot slip past the
     # limit, and only real failures count (correct logins arriving at once are fine).
+    # The failure is recorded inside the lock but raised after it, so the record is committed
+    # (in database mode an exception inside the lock would roll it back).
+    failure: Optional[HTTPException] = None
     with docstore.lock(USERS_DOC):
         _check_throttle(email_key)
         users = _load_users()
@@ -280,21 +283,26 @@ def authenticate_user(email: str, password: str, otp: Optional[str] = None, *, c
         valid = _verify_password(password, user["password"] if user else _DUMMY_HASH)
         if not user or not valid:
             _record_failure(email_key)
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-        changed = False
-        if check_otp and user.get("totp_enabled"):
-            if not (otp or "").strip():
-                raise OTPRequired()
-            if not _accept_second_factor(user, otp or ""):
-                _record_failure(email_key)
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
-            changed = True
-        if _needs_rehash(user["password"]):
-            user["password"] = _hash_password(password)
-            changed = True
-        if changed:
-            users[email_key] = user
-            _save_users(users)
+            failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        else:
+            changed = False
+            if check_otp and user.get("totp_enabled"):
+                if not (otp or "").strip():
+                    raise OTPRequired()
+                if _accept_second_factor(user, otp or ""):
+                    changed = True
+                else:
+                    _record_failure(email_key)
+                    failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
+            if failure is None and _needs_rehash(user["password"]):
+                user["password"] = _hash_password(password)
+                changed = True
+            if failure is None and changed:
+                users[email_key] = user
+                _save_users(users)
+    if failure is not None:
+        raise failure
+    assert user is not None
     _clear_failures(email_key)
     return user
 
@@ -391,7 +399,7 @@ def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str,
 # User management
 # --------------------------------------------------------------------------- #
 
-def list_users() -> List[Dict[str, str]]:
+def list_users() -> List[Dict[str, Any]]:
     users = _load_users()
     return [
         {"email": u["email"], "role": u.get("role", "general"), "totp_enabled": bool(u.get("totp_enabled"))}
@@ -671,15 +679,19 @@ def reset_with_recovery_code(email: str, code: str, new_password: str) -> None:
     """Forgotten password: one recovery code proves the account owner (also turns off nothing else)."""
     _check_new_password(new_password)
     email_key = (email or "").strip().lower()
+    ok = False
     with docstore.lock(USERS_DOC):
         _check_throttle(email_key)
         users = _load_users()
         user = users.get(email_key)
         if not user or not _use_recovery_code(user, code or ""):
-            _record_failure(email_key)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email or recovery code is not correct")
-        user["password"] = _hash_password(new_password)
-        _save_users(users)
+            _record_failure(email_key)  # committed: raised only after the lock below
+        else:
+            user["password"] = _hash_password(new_password)
+            _save_users(users)
+            ok = True
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email or recovery code is not correct")
     _clear_failures(email_key)
 
 

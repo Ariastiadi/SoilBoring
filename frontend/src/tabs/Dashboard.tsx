@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { LocalNarrative } from '../LocalAI'
+import { methodLabel } from '../options'
+import { t } from '../i18n'
 
 function markdownBlock(text: string) {
   const html = DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
@@ -14,7 +16,7 @@ const metres = (value?: number | null) => (value === null || value === undefined
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardResponse | null>(null)
-  const [status, setStatus] = useState('Loading...')
+  const [status, setStatus] = useState(() => t('Loading...'))
 
   useEffect(() => {
     const load = async () => {
@@ -23,7 +25,7 @@ export default function Dashboard() {
         setData(payload)
         setStatus('')
       } catch (err: any) {
-        setStatus(`Error: ${err.message}`)
+        setStatus(t('Error: {message}', { message: err.message }))
       }
     }
     load()
@@ -46,15 +48,15 @@ export default function Dashboard() {
       {data && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Executive Summary</h3>
+            <h3 style={{ marginTop: 0 }}>{t('Executive Summary')}</h3>
             {periodLabel && (
               <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '.9rem' }}>
-                Performance Period: {periodLabel}
+                {t('Performance Period: {label}', { label: periodLabel })}
               </p>
             )}
             {data.project_list && data.project_list.length > 0 && (
               <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '.85rem' }}>
-                Projects in view: {data.project_list.join(', ')}
+                {t('Projects in view: {list}', { list: data.project_list.join(', ') })}
               </p>
             )}
             {narrativeHtml ? (
@@ -63,34 +65,34 @@ export default function Dashboard() {
               <LocalNarrative prompt={data.narrative_prompt} render={markdownBlock} />
             ) : (
               <p style={{ color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>
-                {data.narrative || 'Narrative unavailable. Try reloading once the AI service is online.'}
+                {data.narrative || t('Narrative unavailable. Try reloading once the AI service is online.')}
               </p>
             )}
           </div>
 
           <div className="kpis">
             <div className="kpi">
-              <h3>Total Boreholes</h3>
+              <h3>{t('Total Boreholes')}</h3>
               <p>{data.total_boreholes}</p>
             </div>
             <div className="kpi">
-              <h3>Total Meterage (m)</h3>
+              <h3>{t('Total Meterage (m)')}</h3>
               <p>{data.total_meterage_m ?? '-'}</p>
             </div>
             <div className="kpi">
-              <h3>Avg Final Depth (m)</h3>
+              <h3>{t('Avg Final Depth (m)')}</h3>
               <p>{data.avg_final_depth_m ?? '-'}</p>
             </div>
             <div className="kpi">
-              <h3>Avg GW Depth (m)</h3>
+              <h3>{t('Avg GW Depth (m)')}</h3>
               <p>{data.avg_groundwater_depth_m ?? '-'}</p>
             </div>
             <div className="kpi">
-              <h3>Active Projects</h3>
+              <h3>{t('Active Projects')}</h3>
               <p>{data.active_projects ?? '-'}</p>
             </div>
             <div className="kpi">
-              <h3>Top Contractor</h3>
+              <h3>{t('Top Contractor')}</h3>
               <p>{data.top_contractor ?? '-'}</p>
             </div>
           </div>
@@ -99,17 +101,17 @@ export default function Dashboard() {
             <div className="row">
               {methodBreakdown.length > 0 && (
                 <div className="card" style={{ flex: 1 }}>
-                  <h4 style={{ marginTop: 0 }}>Method Breakdown</h4>
+                  <h4 style={{ marginTop: 0 }}>{t('Method Breakdown')}</h4>
                   <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                     {methodBreakdown.map(([method, count]) => (
-                      <li key={method}>{method}: {count}</li>
+                      <li key={method}>{methodLabel(method)}: {count}</li>
                     ))}
                   </ul>
                 </div>
               )}
               {uscsBreakdown.length > 0 && (
                 <div className="card" style={{ flex: 1 }}>
-                  <h4 style={{ marginTop: 0 }}>USCS Classes</h4>
+                  <h4 style={{ marginTop: 0 }}>{t('USCS Classes')}</h4>
                   <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                     {uscsBreakdown.map(([cls, count]) => (
                       <li key={cls}>{cls}: {count}</li>
@@ -122,11 +124,11 @@ export default function Dashboard() {
 
           {recent.length > 0 && (
             <div className="card">
-              <h4 style={{ marginTop: 0 }}>Most Recent Activities</h4>
+              <h4 style={{ marginTop: 0 }}>{t('Most Recent Activities')}</h4>
               <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                 {recent.map((item, idx) => (
                   <li key={`${item?.borehole_id ?? 'row'}-${idx}`} style={{ marginBottom: '.35rem' }}>
-                    <strong>{item?.start_date ?? '-'}</strong> - {item?.borehole_id ?? 'BH ?'} {item?.project ? `@ ${item?.project}` : ''} ({item?.site ?? 'Site ?'}) | Depth {metres(item?.final_depth_m)}, GW {metres(item?.groundwater_depth_m)}
+                    <strong>{item?.start_date ?? '-'}</strong> - {item?.borehole_id ?? 'BH ?'} {item?.project ? `@ ${item?.project}` : ''} ({item?.site ?? t('Site ?')}) | {t('Depth {depth}, GW {gw}', { depth: metres(item?.final_depth_m), gw: metres(item?.groundwater_depth_m) })}
                   </li>
                 ))}
               </ul>

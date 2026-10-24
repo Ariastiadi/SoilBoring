@@ -11,7 +11,7 @@ import math
 import re
 import threading
 import time
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .config import local_now, timezone_label
 from .ollama_client import AIUnavailableError, ai_server_configured, ask_strict
@@ -387,8 +387,24 @@ _STOPWORDS = frozenset(
 )
 _CONTEXT_COLUMNS = (
     "BoreholeID", "Project", "Site", "StartDate", "Method", "FinalDepth_m", "USCS",
-    "GroundwaterDepth_m", "AvgSPT", "Contractor", "SoilDescription", "Remarks",
+    "GroundwaterDepth_m", "AvgSPT", "Contractor", "SoilDescription", "Remarks", "Strata_m", "SPT_N_by_depth",
 )
+
+
+def _depth_summary(depth: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    """Compact text of the depth data, e.g. "0-6 CH lempung; 6-20 SM" and "1.5:5; 18:50/80mm"."""
+    if not depth:
+        return "", ""
+    strata = "; ".join(
+        f"{layer.get('top'):g}-{layer.get('base'):g} {layer.get('uscs') or ''} {(layer.get('description') or '')[:60]}".strip()
+        for layer in depth.get("layers", [])
+    )
+    tests = []
+    for test in depth.get("spt", []):
+        n_value = int(test.get("inc1") or 0) + int(test.get("inc2") or 0)
+        pen = test.get("penetration_mm")
+        tests.append(f"{test.get('depth'):g}:{n_value}" + (f"/{pen}mm" if pen and pen < 300 else ""))
+    return strata[:400], "; ".join(tests)[:300]
 
 
 def _fmt_number(value: Optional[float]) -> str:
@@ -396,7 +412,11 @@ def _fmt_number(value: Optional[float]) -> str:
 
 
 def build_ai_context(
-    question: str, rows_raw: List[Dict[str, Any]], max_rows: int = 30, max_chars: Optional[int] = None
+    question: str,
+    rows_raw: List[Dict[str, Any]],
+    max_rows: int = 30,
+    max_chars: Optional[int] = None,
+    depth_data: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """Return the most relevant rows as a properly escaped CSV block (no prose).
 
@@ -435,6 +455,7 @@ def build_ai_context(
             r["contractor"],
             (r["soil_description"] or "")[:200],
             (r["remarks"] or "")[:200],
+            *_depth_summary((depth_data or {}).get(r["borehole_id"])),
         ])
         if max_chars is not None and buffer.tell() > max_chars:
             buffer.seek(before)

@@ -10,6 +10,7 @@
  *   the SHA-256 of the exact version this app was built with.
  */
 import type { ModelManager, Wllama } from '@wllama/wllama'
+import { t } from './i18n'
 
 export type LocalModel = {
   key: string
@@ -25,14 +26,14 @@ export const LOCAL_MODELS: LocalModel[] = [
   {
     key: 'qwen2.5-1.5b',
     name: 'Qwen 2.5 1.5B',
-    note: 'Better answers. For laptops/PCs and phones with 6 GB+ RAM.',
+    note: t('Better answers. For laptops/PCs and phones with 6 GB+ RAM.'),
     url: 'https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf',
     size: 986_048_768,
   },
   {
     key: 'qwen2.5-0.5b',
     name: 'Qwen 2.5 0.5B',
-    note: 'Smallest and fastest, simpler answers. For older phones.',
+    note: t('Smallest and fastest, simpler answers. For older phones.'),
     url: 'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
     size: 397_808_192,
   },
@@ -184,7 +185,7 @@ async function ensureEngine(onProgress?: (loaded: number) => void, signal?: Abor
     }
     if (!blob || (await sha256Hex(blob)) !== f.sha256) {
       await cm.delete(f.url).catch(() => {})
-      throw new Error('The AI engine download was damaged. Please try again.')
+      throw new Error(t('The AI engine download was damaged. Please try again.'))
     }
     const url = URL.createObjectURL(new Blob([blob], { type: f.type }))
     engineBlobUrls.set(f.url, url)
@@ -210,7 +211,7 @@ export async function refreshLocal(): Promise<void> {
 
 export async function downloadModel(key: string): Promise<void> {
   const info = modelInfo(key)
-  if (!info) throw new Error('Unknown model')
+  if (!info) throw new Error(t('Unknown model'))
   if (state.progress[key] !== undefined) return
   const abort = new AbortController()
   downloadAborts.set(key, abort)
@@ -231,7 +232,7 @@ export async function downloadModel(key: string): Promise<void> {
   } catch (e) {
     if (!abort.signal.aborted) {
       const msg = e instanceof Error ? e.message : String(e)
-      setState({ error: /quota|space/i.test(msg) ? 'Not enough free storage in this browser for the model.' : `Download failed: ${msg}` })
+      setState({ error: /quota|space/i.test(msg) ? t('Not enough free storage in this browser for the model.') : t('Download failed: {message}', { message: msg }) })
     }
   } finally {
     downloadAborts.delete(key)
@@ -262,7 +263,7 @@ async function ensureLoaded(key: string): Promise<Wllama> {
   if (loadingPromise) await loadingPromise.catch(() => {})
   if (engine && loadedKey === key) return engine
   const info = modelInfo(key)
-  if (!info) throw new Error('Unknown model')
+  if (!info) throw new Error(t('Unknown model'))
   setState({ loading: key })
   loadingPromise = (async () => {
     if (engine) {
@@ -273,7 +274,7 @@ async function ensureLoaded(key: string): Promise<Wllama> {
     const m = await mod()
     const mm = await getManager()
     const model = (await mm.getModels()).find(x => x.url === info.url)
-    if (!model) throw new Error(`${info.name} is not downloaded yet.`)
+    if (!model) throw new Error(t('{model} is not downloaded yet.', { model: info.name }))
     const urls = await ensureEngine()
     const compat = needsCompat()
     let compatWorker = ''
@@ -343,9 +344,9 @@ export async function chatLocal(
       } as any)
       for await (const chunk of stream as unknown as AsyncIterable<any>) {
         if (opts.signal?.aborted) break
-        const t = chunk?.choices?.[0]?.delta?.content
-        if (typeof t === 'string' && t) {
-          out += t
+        const piece = chunk?.choices?.[0]?.delta?.content
+        if (typeof piece === 'string' && piece) {
+          out += piece
           onText(out)
         }
       }
@@ -361,8 +362,8 @@ export async function chatLocal(
         void dead.exit().catch(() => {})
       }
       throw new Error(/memory|OOM|allocate/i.test(msg)
-        ? 'Not enough memory to run this model. Close other tabs or choose Qwen 2.5 0.5B.'
-        : `The on-device AI stopped (${msg.trim() || 'unknown error'}). Try again.`)
+        ? t('Not enough memory to run this model. Close other tabs or choose Qwen 2.5 0.5B.')
+        : t('The on-device AI stopped ({message}). Try again.', { message: msg.trim() || t('unknown error') }))
     }
   }
   const p = queue.then(run, run)

@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from .. import details
 from ..analytics import build_ai_context
 from ..auth import get_current_user
 from ..models import MAX_QUESTION_CHARS, Query
@@ -25,7 +26,7 @@ SYSTEM_GUARD = (
 
 def _system_prompt(question: str, max_chars: Optional[int] = None) -> Tuple[str, str]:
     budget = None if max_chars is None else max(400, max_chars - len(SYSTEM_GUARD) - 40)
-    evidence_csv = build_ai_context(question, load_reports(), max_chars=budget)
+    evidence_csv = build_ai_context(question, load_reports(), max_chars=budget, depth_data=details.all_details())
     return f"{SYSTEM_GUARD}\n\nDATA SNAPSHOT (CSV):\n{evidence_csv}", evidence_csv
 
 

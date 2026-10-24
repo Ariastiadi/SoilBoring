@@ -1,3 +1,5 @@
+import { t } from './i18n'
+
 // Shared by the new-log form and the edit form so both offer the same choices.
 export const METHOD_OPTIONS = [
   'Wash Boring + SPT',
@@ -7,6 +9,18 @@ export const METHOD_OPTIONS = [
   'CPT / CPTu (Sondir)',
   'Hand Auger',
 ]
+
+// The stored value stays in English; only the text shown in lists is translated.
+const METHOD_LABELS: Record<string, string> = {
+  'Wash Boring + SPT': t('Wash Boring + SPT'),
+  'Rotary Wash + SPT': t('Rotary Wash + SPT'),
+  'Hollow Stem Auger': t('Hollow Stem Auger'),
+  'Coring + SPT': t('Coring + SPT'),
+  'CPT / CPTu (Sondir)': t('CPT / CPTu (Sondir)'),
+  'Hand Auger': t('Hand Auger'),
+}
+
+export const methodLabel = (method: string) => METHOD_LABELS[method] ?? method
 
 // All USCS group symbols (ASTM D2487); the first entry is the form default.
 export const USCS_OPTIONS = [
@@ -30,5 +44,5 @@ export const CORE_SIZES: Array<{ code: string; hole: number; core: number }> = [
 
 export const coreSizeLabel = (code: string) => {
   const size = CORE_SIZES.find(s => s.code === code)
-  return size ? `${size.code} (hole ${size.hole} mm, core ${size.core} mm)` : code
+  return size ? t('{code} (hole {hole} mm, core {core} mm)', { code: size.code, hole: size.hole, core: size.core }) : code
 }

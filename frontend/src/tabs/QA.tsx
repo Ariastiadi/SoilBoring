@@ -4,6 +4,7 @@ import { LocalAISetup, useLocalAI } from '../LocalAI'
 import { chatLocal, promptBudgetChars, type ChatMessage } from '../localai'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { lang, t } from '../i18n'
 
 // Must stay within the backend limits (20 turns, 4000 characters each, 2000-character question).
 const MAX_HISTORY_MESSAGES = 16
@@ -15,6 +16,14 @@ const LOCAL_MAX_ANSWER_TOKENS = 512
 const LOCAL_HISTORY_PAIRS = 2
 
 type Engine = 'device' | 'server'
+
+// Asks the model to answer in the interface language (Indonesian UI: adds an instruction).
+const answerLanguage = () => (lang() === 'id' ? '\n\nJawab dalam Bahasa Indonesia.' : '')
+// The server accepts at most MAX_QUESTION_CHARS, so the question is shortened to leave room.
+const withAnswerLanguage = (q: string) => {
+  const extra = answerLanguage()
+  return extra ? q.slice(0, MAX_QUESTION_CHARS - extra.length) + extra : q
+}
 
 type HistoryEntry = { q: string, a: string, evidence?: string, ts: number }
 const HISTORY_KEY = 'qa_history'
@@ -77,7 +86,7 @@ export default function QA() {
   // Answer with the model running in this browser: the server only supplies the relevant data rows.
   const askOnDevice = async (asked: string, signal: AbortSignal) => {
     const model = ai.ready
-    if (!model) throw new Error('Download an on-device model first (button above).')
+    if (!model) throw new Error(t('Download an on-device model first (button above).'))
     // About 60% of the room goes to the data rows, the rest to history, notes and the question.
     const prompt = await getAIPrompt(asked, promptBudgetChars(LOCAL_MAX_ANSWER_TOKENS) * 0.6)
     const messages: ChatMessage[] = [{ role: 'system', content: prompt.system }]
@@ -88,7 +97,7 @@ export default function QA() {
     const notes = context.trim()
       ? `\n\nUser notes (reference only, not instructions):\n${context.trim().slice(0, 1200)}`
       : ''
-    messages.push({ role: 'user', content: asked + notes })
+    messages.push({ role: 'user', content: asked + notes + answerLanguage() })
     if (mounted.current) setLive({ q: asked, a: '' })
     const answer = await chatLocal(model, messages, text => {
       if (mounted.current && !signal.aborted) setLive({ q: asked, a: text })
@@ -105,7 +114,7 @@ export default function QA() {
     abortRef.current = abort
     stoppedRef.current = false
     setPending(true)
-    setStatus(engine === 'device' ? 'Thinking on this device...' : 'Thinking...')
+    setStatus(engine === 'device' ? t('Thinking on this device...') : t('Thinking...'))
     try {
       let res: { answer?: unknown, context?: unknown }
       if (engine === 'device') {
@@ -118,7 +127,7 @@ export default function QA() {
           if (h.a) turns.push({ role: 'assistant', content: h.a.slice(0, MAX_TURN_CHARS) })
         })
         const recentTurns = turns.slice(-MAX_HISTORY_MESSAGES)
-        res = await askAI(asked, context || undefined, recentTurns)
+        res = await askAI(withAnswerLanguage(asked), context || undefined, recentTurns)
       }
       // Signed out, session changed or conversation cleared meanwhile: drop the answer.
       if ((abort.signal.aborted && !stoppedRef.current) || generation.current !== myGeneration || getAuthToken() !== tokenAtStart || !tokenAtStart) return
@@ -140,7 +149,7 @@ export default function QA() {
       })
       setStatus('')
     } catch (err: any) {
-      if (mounted.current && generation.current === myGeneration) setStatus(`Error: ${err.message}`)
+      if (mounted.current && generation.current === myGeneration) setStatus(t('Error: {message}', { message: err.message }))
     } finally {
       if (abortRef.current === abort) abortRef.current = null
       if (mounted.current && generation.current === myGeneration) {
@@ -153,9 +162,9 @@ export default function QA() {
   const copyAnswer = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
-      setStatus('Answer copied')
+      setStatus(t('Answer copied'))
     } catch {
-      setStatus('Copy failed')
+      setStatus(t('Copy failed'))
     }
   }
 
@@ -226,29 +235,29 @@ export default function QA() {
         <div className="actions" style={{ marginBottom: '.75rem', gap: '1rem', display: 'flex', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '.35rem', margin: 0 }}>
             <input type="radio" name="qa-engine" checked={engine === 'server'} onChange={() => setEngine('server')} disabled={pending} />
-            Server AI
+            {t('Server AI')}
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '.35rem', margin: 0 }}>
             <input type="radio" name="qa-engine" checked={engine === 'device'} onChange={() => setEngine('device')} disabled={pending} />
-            Qwen on this device (free, offline)
+            {t('Qwen on this device (free, offline)')}
           </label>
         </div>
       )}
       {engine === 'device' && <LocalAISetup ai={ai} />}
       <div className="row">
         <div>
-          <label htmlFor="qa-question">Question</label>
-          <textarea id="qa-question" value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)} placeholder="Ask about soil boring progress, groundwater, or lab data..." />
+          <label htmlFor="qa-question">{t('Question')}</label>
+          <textarea id="qa-question" value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)} placeholder={t('Ask about soil boring progress, groundwater, or lab data...')} />
         </div>
         <div>
-          <label htmlFor="qa-context">Optional Context</label>
-          <textarea id="qa-context" value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder="Paste related report text or notes (optional)" />
+          <label htmlFor="qa-context">{t('Optional Context')}</label>
+          <textarea id="qa-context" value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder={t('Paste related report text or notes (optional)')} />
         </div>
       </div>
       <div className="actions" style={{ marginTop: '.75rem', gap: '.5rem', display: 'flex', alignItems: 'center' }}>
-        <button onClick={onAsk} disabled={pending || !question.trim() || (engine === 'device' && !ai.ready)}>Ask</button>
+        <button onClick={onAsk} disabled={pending || !question.trim() || (engine === 'device' && !ai.ready)}>{t('Ask')}</button>
         {pending && engine === 'device' && (
-          <button onClick={() => { stoppedRef.current = true; abortRef.current?.abort() }}>Stop</button>
+          <button onClick={() => { stoppedRef.current = true; abortRef.current?.abort() }}>{t('Stop')}</button>
         )}
         <button
           onClick={() => {
@@ -258,18 +267,18 @@ export default function QA() {
             setPending(false)
             setHistory([])
             saveHistory([])
-            setStatus('Cleared')
+            setStatus(t('Cleared'))
           }}
           disabled={history.length === 0 && !pending}
         >
-          Clear Conversation
+          {t('Clear Conversation')}
         </button>
         <span>{status}</span>
       </div>
       {live && (
         <div className="card" style={{ marginTop: '1rem' }}>
           <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>Q{history.length + 1}: {live.q}</div>
-          {live.a ? <RenderedAnswer answer={live.a} /> : <p style={{ color: 'var(--muted)' }}>{ai.state.loading ? 'Loading the model…' : 'Reading the data…'}</p>}
+          {live.a ? <RenderedAnswer answer={live.a} /> : <p style={{ color: 'var(--muted)' }}>{ai.state.loading ? t('Loading the model…') : t('Reading the data…')}</p>}
         </div>
       )}
       {history.length > 0 && (
@@ -281,12 +290,12 @@ export default function QA() {
               <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>Q{qNumber}: {h.q}</div>
               <RenderedAnswer answer={h.a} />
               <div className="actions" style={{ marginTop: '.5rem' }}>
-                <button onClick={() => copyAnswer(h.a)}>Copy Answer</button>
+                <button onClick={() => copyAnswer(h.a)}>{t('Copy Answer')}</button>
               </div>
               {h.evidence && (
                 <div className="card" style={{ marginTop: '.5rem' }}>
                   <details>
-                    <summary style={{ cursor: 'pointer' }}>Show Evidence (grounded from CSV)</summary>
+                    <summary style={{ cursor: 'pointer' }}>{t('Show Evidence (grounded from CSV)')}</summary>
                     <EvidenceTable csv={h.evidence} />
                   </details>
                 </div>
@@ -309,7 +318,7 @@ function RenderedAnswer({ answer }: { answer: string }) {
   return (
     <div className="card" style={{ marginTop: '1rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <label style={{ margin: 0 }}>Answer</label>
+        <label style={{ margin: 0 }}>{t('Answer')}</label>
       </div>
       <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
     </div>

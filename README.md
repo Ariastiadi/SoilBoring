@@ -59,6 +59,8 @@ Environment variables:
 | `AUTH_TOKEN_SECRET` | auto-generated | Signing secret for login tokens (min. 16 chars). If unset, a random secret is generated once and stored in `DATA_DIR/.token_secret`. **Set it explicitly in production.** Known weak values such as `change-me-please` are refused. |
 | `AUTH_TOKEN_TTL` | `28800` | Token lifetime in seconds (8 h). |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | – | If both are set and no users exist yet, the first admin is created at startup. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_SSL` | – | Optional mail server for password-reset emails (see *Account security*). |
+| `APP_BASE_URL` | Vercel production URL | Site address used in emailed links; never taken from the request. |
 | `ALLOW_FIRST_RUN_SETUP` | `true` | While no account exists, the sign-in page offers to create the first admin (limited to `ADMIN_EMAIL` when that is set). Set `false` to turn this off. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API cross-origin (`*` is not accepted). Not needed when UI and API share one origin (Docker). |
 | `OLLAMA_URL` | *(empty = server AI off)* | e.g. `http://localhost:11434/api/chat`, or `https://ollama.com/api/chat` with `OLLAMA_API_KEY` and a cloud model such as `gpt-oss:120b`. Without it, Geo AI runs Qwen in the browser. |
@@ -136,6 +138,35 @@ Rules enforced by the API:
 - **Dashboard:** KPIs, method and USCS breakdowns, and recent activity with an executive AI brief (cached for 10 minutes; failures are never cached).
 - **Summaries:** Weekly (date range) and monthly (month/year) rollups with stats, highlights, and markdown AI narratives.
 - **Geo AI:** Q&A backed by the borehole CSV with evidence display. The model only sees the most relevant rows and is told to answer from them.
+- **About:** Primer derived from `archive/template/soilboring.md`, with the Indonesian standards (SNI) used in practice.
+- **Language:** Bahasa Indonesia (default) or English, switched with the ID/EN button.
+
+### Depth data, bore log sheet, photos and map
+
+Open a borehole in **Borehole Data** (button *Open*) to record what changes with depth:
+
+- **Strata:** from/to depth, USCS group, soil or rock description. Layers may not overlap; a new row starts where the previous one ended.
+- **SPT:** blows for the 150 mm seating drive and the two 150 mm test increments; N is calculated. For refusal (e.g. 50 blows) enter the test penetration reached in mm (reported as `50/80mm`).
+- **Samples:** depth range, AGS4 sample type (U, UT, TW, P, D, B, SPTLS, C, W) and reference.
+- **Core runs:** TCR, SCR and RQD in % (SCR ≤ TCR, RQD ≤ SCR are checked).
+- **Photos:** core boxes and site photos straight from the phone camera; they are reduced to at most 1600 px (JPEG) in the browser before upload and stored with the data (max. 30 per borehole, 2 MB each).
+- **History:** every change to the log, its depth data and photos, with user and time.
+- **Bore log (print / PDF):** an A4 sheet per 15 m (one sheet up to 20 m) with header data, depth scale, graphic log (patterns by USCS group), descriptions, samples, SPT N graph, core TCR/RQD bars, groundwater and end of hole. Use the browser's *Save as PDF*.
+- **Map:** *Show Map* in Borehole Data places every borehole with coordinates on OpenStreetMap; click a point to open it.
+
+The depth data also goes into the AGS4 export (GEOL, ISPT, SAMP, CORE). API: `GET/PUT /api/details/{BoreholeID}`, `POST /api/photos`, `GET/DELETE /api/photos/{id}`.
+
+### Working offline in the field
+
+The app is installable ("Add to home screen") and keeps its own files in the browser, so it opens without a connection. A log submitted while offline is kept on the device and sent automatically when the connection is back; a banner shows how many are waiting, and a log the server refuses (e.g. the Borehole ID already exists) stays there with the reason, to retry or discard. Viewing data, depth data and photos needs a connection.
+
+### Account security
+
+- **Two-step verification (TOTP):** *Account & security* → scan the QR code with any authenticator app (Google/Microsoft Authenticator, Aegis, ...). Sign-in then asks for the 6-digit code. Admins can turn it off for a user who lost their phone.
+- **Recovery codes:** 10 one-time codes, created when two-step verification is turned on or at any time on the same page. Each one can replace an authenticator code, or set a new password via *Forgot password?* on the sign-in page.
+- **Password reset by email:** optional. Set `SMTP_HOST`, `SMTP_PORT` (587, or 465 for SSL), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `APP_BASE_URL` (on Vercel the production domain is used automatically). The link is valid for 30 minutes and works once.
+- **Sign-in lockout:** 5 failed attempts per email in 15 minutes. The counter is stored with the data (file or database), so it holds across several app instances.
+- **Activity log:** admins see every change (logs, depth data, photos, accounts) in the *Activity* tab; other users see the history of a borehole. The newest 5000 events are kept; passwords and codes are never logged.
 
 ### AI without an API key: Qwen on this device
 
@@ -146,7 +177,6 @@ Geo AI works on every deployment, also without any AI server or key: the browser
 - Summaries and Dashboard then offer **Write summary with Qwen (this device)** instead of the server narrative.
 - The engine (`wllama.wasm`) is fetched from jsDelivr and checked against the SHA-256 of the exact version in `package-lock.json`. The page is cross-origin isolated (COOP/COEP) so the model can use several CPU threads; WebGPU is used on desktops when available.
 - Needs a recent Chrome, Edge or Firefox (Safari uses a slower compatibility build); not in private windows. Small models give simpler answers than large server models; when `OLLAMA_URL` is set, Geo AI offers both.
-- **About:** Primer derived from `archive/template/soilboring.md`.
 
 ---
 
@@ -172,7 +202,10 @@ The daily log keeps one soil description and one average N60 per hole, so no lay
 ```
 backend/
   app/
-    auth.py            # users, password hashing, tokens, login throttle
+    auth.py            # users, password hashing, tokens, login throttle, 2FA, recovery codes
+    details.py         # depth data (strata, SPT, samples, core runs) and photos
+    audit.py           # activity log
+    mailer.py          # optional password-reset email (SMTP)
     analytics.py       # dashboard/summary stats, AI context, narrative cache
     models.py          # request validation
     ollama_client.py
@@ -181,10 +214,12 @@ backend/
     ags.py             # AGS4 export
     config.py          # ORG_NAME, APP_TIMEZONE
     docstore.py        # file or Postgres (DATABASE_URL) storage
-    routers/           # auth, users, reports, ai, summaries, dashboard, export
+    routers/           # auth, users, reports, boreholes, ai, summaries, dashboard, export
   tests/               # pytest suite
 frontend/
-  src/                 # React app (api.ts, App.tsx, Login.tsx, tabs/)
+  src/                 # React app (api.ts, App.tsx, Login.tsx, BoreholeDetail.tsx, BoreLog.tsx,
+                       #   BoreholeMap.tsx, Security.tsx, localai.ts, outbox.ts, i18n*.ts, tabs/)
+  public/              # sw.js (offline), manifest.webmanifest, icon.svg
 scripts/
   seed_demo_data.py    # synthetic demo logs
 archive/               # original templates and spec (not used at runtime)

@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 // Origin of the backend. Empty = same origin (Docker/nginx and the Vite dev proxy).
 // Every request path below already starts with "/api", so a trailing "/api" or "/"
 // in VITE_API_URL (older docs told people to use "/api") is stripped to avoid "/api/api".
@@ -140,7 +142,7 @@ export async function login(email: string, password: string, otp?: string) {
     body: JSON.stringify(otp ? { email, password, otp } : { email, password }),
   });
   // A wrong password is a 401 too, but it must not look like an expired session.
-  return parseJson<Session>(r, "Login failed", { skipUnauthorizedHandler: true });
+  return parseJson<Session>(r, t("Login failed"), { skipUnauthorizedHandler: true });
 }
 
 // True on a fresh deployment with no accounts: the sign-in page then offers to create the first admin.
@@ -161,7 +163,7 @@ export async function setupFirstAdmin(email: string, password: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  return parseJson<Session>(r, "Setup failed", { skipUnauthorizedHandler: true });
+  return parseJson<Session>(r, t("Setup failed"), { skipUnauthorizedHandler: true });
 }
 
 export async function postReport(data: any) {
@@ -170,14 +172,14 @@ export async function postReport(data: any) {
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(data),
   });
-  return parseJson<{ status: string }>(r, "Failed to post report");
+  return parseJson<{ status: string }>(r, t("Failed to post report"));
 }
 
 export async function listReports() {
   const r = await fetch(`${BASE}/api/reports`, {
     headers: buildHeaders(),
   });
-  return parseJson<any[]>(r, "Failed to list reports");
+  return parseJson<any[]>(r, t("Failed to list reports"));
 }
 
 export async function updateReport(boreholeId: string, data: any) {
@@ -186,7 +188,7 @@ export async function updateReport(boreholeId: string, data: any) {
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(data),
   });
-  return parseJson<{ status: string }>(r, "Failed to update report");
+  return parseJson<{ status: string }>(r, t("Failed to update report"));
 }
 
 export async function deleteReport(boreholeId: string) {
@@ -194,7 +196,7 @@ export async function deleteReport(boreholeId: string) {
     method: "DELETE",
     headers: buildHeaders(),
   });
-  return parseJson<{ status: string }>(r, "Failed to delete report");
+  return parseJson<{ status: string }>(r, t("Failed to delete report"));
 }
 
 export async function askAI(question: string, context?: string, history?: Array<{ role: string; content: string }>) {
@@ -203,7 +205,7 @@ export async function askAI(question: string, context?: string, history?: Array<
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ question, context, history }),
   });
-  return parseJson<any>(r, "AI error");
+  return parseJson<any>(r, t("AI error"));
 }
 
 // System prompt plus the relevant data rows, sized for the on-device AI's short context.
@@ -213,7 +215,7 @@ export async function getAIPrompt(question: string, maxChars: number) {
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ question, max_chars: Math.max(1000, Math.min(60000, Math.floor(maxChars))) }),
   });
-  return parseJson<{ system: string; context: string }>(r, "AI error");
+  return parseJson<{ system: string; context: string }>(r, t("AI error"));
 }
 
 export async function getSummary(period: "weekly" | "monthly", filters?: Record<string, string | number>) {
@@ -226,19 +228,19 @@ export async function getSummary(period: "weekly" | "monthly", filters?: Record<
     })
   }
   const r = await fetch(`${BASE}/api/summaries?${params.toString()}`, { headers: buildHeaders() });
-  return parseJson<SummaryResponse>(r, "Failed to get summary");
+  return parseJson<SummaryResponse>(r, t("Failed to get summary"));
 }
 
 export async function getDashboard() {
   const r = await fetch(`${BASE}/api/dashboard`, { headers: buildHeaders() });
-  return parseJson<DashboardResponse>(r, "Failed to get dashboard");
+  return parseJson<DashboardResponse>(r, t("Failed to get dashboard"));
 }
 
 export async function listUsers() {
   const r = await fetch(`${BASE}/api/users`, {
     headers: buildHeaders(),
   })
-  return parseJson<User[]>(r, "Failed to load users")
+  return parseJson<User[]>(r, t("Failed to load users"))
 }
 
 export async function createUser(payload: { email: string; password: string; role: User['role'] }) {
@@ -247,7 +249,7 @@ export async function createUser(payload: { email: string; password: string; rol
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   })
-  return parseJson<User>(r, "Failed to create user")
+  return parseJson<User>(r, t("Failed to create user"))
 }
 
 export async function deleteUser(email: string) {
@@ -255,7 +257,7 @@ export async function deleteUser(email: string) {
     method: "DELETE",
     headers: buildHeaders(),
   })
-  return parseJson<{ status: string }>(r, "Failed to delete user")
+  return parseJson<{ status: string }>(r, t("Failed to delete user"))
 }
 
 export async function changePassword(currentPassword: string, newPassword: string) {
@@ -264,7 +266,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
-  return parseJson<{ token: string; email: string; role: User['role']; expires_in: number }>(r, "Could not change the password");
+  return parseJson<{ token: string; email: string; role: User['role']; expires_in: number }>(r, t("Could not change the password"));
 }
 
 export async function resetUserPassword(email: string, password: string) {
@@ -273,14 +275,14 @@ export async function resetUserPassword(email: string, password: string) {
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ password }),
   });
-  return parseJson<{ status: string }>(r, "Could not reset the password");
+  return parseJson<{ status: string }>(r, t("Could not reset the password"));
 }
 
 // Downloads all logs of one project as an AGS4 file (the browser saves it).
 export async function downloadAgs(project: string) {
   const r = await fetch(`${BASE}/api/export/ags?${new URLSearchParams({ project })}`, { headers: buildHeaders() });
   if (!r.ok) {
-    await parseJson<unknown>(r, "AGS4 export failed");
+    await parseJson<unknown>(r, t("AGS4 export failed"));
   }
   const match = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "");
   const filename = match ? match[1] : "export.ags";
@@ -354,7 +356,7 @@ const enc = (id: string) => encodeURIComponent(id)
 
 export async function getDetails(boreholeId: string) {
   const r = await fetch(`${BASE}/api/details/${enc(boreholeId)}`, { headers: buildHeaders() });
-  return parseJson<Details>(r, "Failed to load depth data");
+  return parseJson<Details>(r, t("Failed to load depth data"));
 }
 
 export async function saveDetails(boreholeId: string, data: Pick<Details, 'layers' | 'spt' | 'samples' | 'core'>) {
@@ -363,7 +365,7 @@ export async function saveDetails(boreholeId: string, data: Pick<Details, 'layer
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(data),
   });
-  return parseJson<Details>(r, "Failed to save depth data");
+  return parseJson<Details>(r, t("Failed to save depth data"));
 }
 
 export async function uploadPhoto(payload: { borehole_id: string; content_type: string; data_base64: string; caption: string; depth: number | null }) {
@@ -372,26 +374,26 @@ export async function uploadPhoto(payload: { borehole_id: string; content_type: 
     headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
-  return parseJson<PhotoMeta>(r, "Failed to upload photo");
+  return parseJson<PhotoMeta>(r, t("Failed to upload photo"));
 }
 
 /** Photos need the sign-in header, so they are fetched and shown through blob: URLs. */
 export async function photoBlob(photoId: string): Promise<Blob> {
   const r = await fetch(`${BASE}/api/photos/${enc(photoId)}`, { headers: buildHeaders() });
-  if (!r.ok) throw new Error(`Photo: ${r.status}`);
+  if (!r.ok) throw new Error(t("Photo: {status}", { status: r.status }));
   return r.blob();
 }
 
 export async function deletePhoto(photoId: string) {
   const r = await fetch(`${BASE}/api/photos/${enc(photoId)}`, { method: "DELETE", headers: buildHeaders() });
-  return parseJson<{ status: string }>(r, "Failed to delete photo");
+  return parseJson<{ status: string }>(r, t("Failed to delete photo"));
 }
 
 export async function getActivity(target?: string, limit = 200) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (target) params.set("target", target)
   const r = await fetch(`${BASE}/api/audit?${params}`, { headers: buildHeaders() });
-  return parseJson<AuditEvent[]>(r, "Failed to load activity");
+  return parseJson<AuditEvent[]>(r, t("Failed to load activity"));
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +404,7 @@ export type Me = { email: string; role: User['role']; totp_enabled: boolean; rec
 
 export async function getMe() {
   const r = await fetch(`${BASE}/api/auth/me`, { headers: buildHeaders() });
-  return parseJson<Me>(r, "Failed to load account");
+  return parseJson<Me>(r, t("Failed to load account"));
 }
 
 async function postJson<T>(path: string, body: unknown, message: string, auth = true) {
@@ -414,17 +416,17 @@ async function postJson<T>(path: string, body: unknown, message: string, auth = 
   return parseJson<T>(r, message, { skipUnauthorizedHandler: !auth });
 }
 
-export const startTwoFactor = () => postJson<{ secret: string; otpauth_uri: string }>("/api/auth/2fa/setup", {}, "Setup failed")
-export const enableTwoFactor = (code: string) => postJson<{ recovery_codes: string[] }>("/api/auth/2fa/enable", { code }, "Could not turn on two-step verification")
-export const disableTwoFactor = (password: string) => postJson<{ status: string }>("/api/auth/2fa/disable", { password }, "Could not turn off two-step verification")
-export const newRecoveryCodes = (password: string) => postJson<{ recovery_codes: string[] }>("/api/auth/recovery-codes", { password }, "Could not create recovery codes")
+export const startTwoFactor = () => postJson<{ secret: string; otpauth_uri: string }>("/api/auth/2fa/setup", {}, t("Setup failed"))
+export const enableTwoFactor = (code: string) => postJson<{ recovery_codes: string[] }>("/api/auth/2fa/enable", { code }, t("Could not turn on two-step verification"))
+export const disableTwoFactor = (password: string) => postJson<{ status: string }>("/api/auth/2fa/disable", { password }, t("Could not turn off two-step verification"))
+export const newRecoveryCodes = (password: string) => postJson<{ recovery_codes: string[] }>("/api/auth/recovery-codes", { password }, t("Could not create recovery codes"))
 export const resetWithCode = (email: string, recovery_code: string, new_password: string) =>
-  postJson<{ status: string }>("/api/auth/reset-with-code", { email, recovery_code, new_password }, "Reset failed", false)
-export const requestResetEmail = (email: string) => postJson<{ status: string; email_enabled: boolean }>("/api/auth/forgot", { email }, "Request failed", false)
+  postJson<{ status: string }>("/api/auth/reset-with-code", { email, recovery_code, new_password }, t("Reset failed"), false)
+export const requestResetEmail = (email: string) => postJson<{ status: string; email_enabled: boolean }>("/api/auth/forgot", { email }, t("Request failed"), false)
 export const resetWithToken = (token: string, new_password: string) =>
-  postJson<{ status: string }>("/api/auth/reset", { token, new_password }, "Reset failed", false)
+  postJson<{ status: string }>("/api/auth/reset", { token, new_password }, t("Reset failed"), false)
 
 export async function resetUserTwoFactor(email: string) {
   const r = await fetch(`${BASE}/api/users/${encodeURIComponent(email)}/2fa`, { method: "DELETE", headers: buildHeaders() })
-  return parseJson<{ status: string }>(r, "Failed to turn off two-step verification")
+  return parseJson<{ status: string }>(r, t("Failed to turn off two-step verification"))
 }

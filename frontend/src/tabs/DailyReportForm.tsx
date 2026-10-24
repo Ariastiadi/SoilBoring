@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { submitReport } from '../outbox'
-import { CORE_SIZES, METHOD_OPTIONS as methodOptions, USCS_OPTIONS as uscsOptions, coreSizeLabel } from '../options'
+import { CORE_SIZES, METHOD_OPTIONS as methodOptions, USCS_OPTIONS as uscsOptions, coreSizeLabel, methodLabel } from '../options'
+import { t } from '../i18n'
 
 const DRAFT_KEY = 'borehole-form-draft'
 
@@ -43,29 +44,29 @@ export default function DailyReportForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const tooltips = {
-    BoreholeID: 'Unique borehole code from the drilling program. Example: BH-2024-012.',
-    ProjectName: 'Project or corridor for this soil boring work.',
-    SiteName: 'Specific site/zone in the field, e.g., Zone B-2.',
-    Latitude: 'Latitude in decimal degrees.',
-    Longitude: 'Longitude in decimal degrees.',
-    GroundElevation_mRL: 'Ground elevation relative to mRL or local datum.',
-    StartDate: 'Drilling start date (YYYY-MM-DD).',
-    EndDate: 'Drilling end date (YYYY-MM-DD).',
-    DrillingMethod: 'Drilling method used, e.g., Wash Boring + SPT.',
-    DrillRig: 'Drill rig / plant used, e.g. the rig model or fleet number.',
-    CoreSize: 'Wireline core barrel size for cored holes; fills in the nominal hole diameter.',
-    BoreholeDiameter_mm: 'Diameter of the drilled hole (mm).',
-    TargetDepth_m: 'Programmed target depth (m).',
-    FinalDepth_m: 'Actual final depth achieved (m).',
-    CasingInstalled_mm: 'Casing size installed (mm), if any.',
-    GroundwaterDepth_m: 'Groundwater depth from surface (m).',
-    GroundwaterEncountered: 'Check if groundwater was observed during drilling.',
-    SoilDescription: 'Dominant soil description for the latest interval.',
-    USCS_Class: 'USCS soil classification.',
-    Avg_SPT_N60: 'Average SPT N60 value recorded for this hole.',
-    Contractor: 'Drilling contractor.',
-    LoggingGeologist: 'Field logger/geologist name.',
-    Remarks: 'Additional notes, risks, or recommendations.',
+    BoreholeID: t('Unique borehole code from the drilling program. Example: BH-2024-012.'),
+    ProjectName: t('Project or corridor for this soil boring work.'),
+    SiteName: t('Specific site/zone in the field, e.g., Zone B-2.'),
+    Latitude: t('Latitude in decimal degrees.'),
+    Longitude: t('Longitude in decimal degrees.'),
+    GroundElevation_mRL: t('Ground elevation relative to mRL or local datum.'),
+    StartDate: t('Drilling start date (YYYY-MM-DD).'),
+    EndDate: t('Drilling end date (YYYY-MM-DD).'),
+    DrillingMethod: t('Drilling method used, e.g., Wash Boring + SPT.'),
+    DrillRig: t('Drill rig / plant used, e.g. the rig model or fleet number.'),
+    CoreSize: t('Wireline core barrel size for cored holes; fills in the nominal hole diameter.'),
+    BoreholeDiameter_mm: t('Diameter of the drilled hole (mm).'),
+    TargetDepth_m: t('Programmed target depth (m).'),
+    FinalDepth_m: t('Actual final depth achieved (m).'),
+    CasingInstalled_mm: t('Casing size installed (mm), if any.'),
+    GroundwaterDepth_m: t('Groundwater depth from surface (m).'),
+    GroundwaterEncountered: t('Check if groundwater was observed during drilling.'),
+    SoilDescription: t('Dominant soil description for the latest interval.'),
+    USCS_Class: t('USCS soil classification.'),
+    Avg_SPT_N60: t('Average SPT N60 value recorded for this hole.'),
+    Contractor: t('Drilling contractor.'),
+    LoggingGeologist: t('Field logger/geologist name.'),
+    Remarks: t('Additional notes, risks, or recommendations.'),
   }
 
   const persistDraft = () => {
@@ -163,32 +164,32 @@ export default function DailyReportForm() {
       return Number.isFinite(n) ? n : NaN
     }
     if (/[\/\\?#%\u0000-\u001f]/.test(BoreholeID) || ['.', '..'].includes(BoreholeID.trim())) {
-      errors.push('Borehole ID cannot contain / \\ ? # % characters or be "." / "..".')
+      errors.push(t('Borehole ID cannot contain / \\ ? # % characters or be "." / "..".'))
     }
     const latNum = toNumber(Latitude)
     if (latNum !== null && (Number.isNaN(latNum) || latNum < -90 || latNum > 90)) {
-      errors.push('Latitude must be between -90 and 90.')
+      errors.push(t('Latitude must be between -90 and 90.'))
     }
     const lonNum = toNumber(Longitude)
     if (lonNum !== null && (Number.isNaN(lonNum) || lonNum < -180 || lonNum > 180)) {
-      errors.push('Longitude must be between -180 and 180.')
+      errors.push(t('Longitude must be between -180 and 180.'))
     }
     const diameter = toNumber(BoreholeDiameter_mm)
     if (Number.isNaN(diameter) || (diameter !== null && diameter <= 0)) {
-      errors.push('Borehole diameter must be a positive number.')
+      errors.push(t('Borehole diameter must be a positive number.'))
     }
     const finalDepth = toNumber(FinalDepth_m)
     if (Number.isNaN(finalDepth) || finalDepth === null || finalDepth < 0) {
-      errors.push('Final depth is required and must be a number of 0 or more.')
+      errors.push(t('Final depth is required and must be a number of 0 or more.'))
     }
-    for (const [label, value] of [['Casing', CasingInstalled_mm], ['Target depth', TargetDepth_m], ['Groundwater depth', GroundwaterDepth_m], ['Average SPT N60', Avg_SPT_N60]] as const) {
+    for (const [label, value] of [[t('Casing'), CasingInstalled_mm], [t('Target depth'), TargetDepth_m], [t('Groundwater depth'), GroundwaterDepth_m], [t('Average SPT N60'), Avg_SPT_N60]] as const) {
       const n = toNumber(value)
-      if (Number.isNaN(n) || (n !== null && n < 0)) errors.push(`${label} cannot be negative.`)
+      if (Number.isNaN(n) || (n !== null && n < 0)) errors.push(t('{label} cannot be negative.', { label }))
     }
     const start = StartDate ? new Date(StartDate) : null
     const end = EndDate ? new Date(EndDate) : null
     if (start && end && start > end) {
-      errors.push('Start date must be earlier than end date.')
+      errors.push(t('Start date must be earlier than end date.'))
     }
     return errors
   }
@@ -196,7 +197,7 @@ export default function DailyReportForm() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!StartDate || !EndDate) {
-      setStatus('Start and end dates are required.')
+      setStatus(t('Start and end dates are required.'))
       return
     }
     const validationErrors = validate()
@@ -208,12 +209,12 @@ export default function DailyReportForm() {
     const target = Number(TargetDepth_m)
     const final = Number(FinalDepth_m)
     if (TargetDepth_m !== '' && target > 0 && final > target * 1.5 &&
-        !window.confirm(`Final depth ${final} m is more than 1.5x the target depth ${target} m. Save anyway?`)) {
-      setStatus('Not saved. Check the final and target depths.')
+        !window.confirm(t('Final depth {final} m is more than 1.5x the target depth {target} m. Save anyway?', { final, target }))) {
+      setStatus(t('Not saved. Check the final and target depths.'))
       return
     }
     persistDraft()
-    setStatus('Submitting...')
+    setStatus(t('Submitting...'))
     setIsSubmitting(true)
     try {
       const payload = {
@@ -243,11 +244,11 @@ export default function DailyReportForm() {
       }
       const result = await submitReport(payload)
       setStatus(result === 'sent'
-        ? 'Saved! Draft cleared.'
-        : 'No connection: the log is kept on this device and will be sent automatically when you are back online.')
+        ? t('Saved! Draft cleared.')
+        : t('No connection: the log is kept on this device and will be sent automatically when you are back online.'))
       resetForm()
     } catch (err: any) {
-      setStatus(`Error: ${err.message}`)
+      setStatus(t('Error: {message}', { message: err.message }))
     } finally {
       setIsSubmitting(false)
     }
@@ -257,48 +258,48 @@ export default function DailyReportForm() {
     <form onSubmit={onSubmit}>
       <div className="row">
         <div>
-          <h3>Project & Borehole Info</h3>
-          <label title={tooltips.BoreholeID}>Borehole ID</label>
+          <h3>{t('Project & Borehole Info')}</h3>
+          <label title={tooltips.BoreholeID}>{t('Borehole ID')}</label>
           <input value={BoreholeID} onChange={e => setBoreholeID(e.target.value)} required title={tooltips.BoreholeID} placeholder="BH-2024-001" />
-          <label title={tooltips.ProjectName}>Project</label>
-          <input value={ProjectName} onChange={e => setProjectName(e.target.value)} required title={tooltips.ProjectName} placeholder="North Ring Toll" />
-          <label title={tooltips.SiteName}>Site / Zone</label>
-          <input value={SiteName} onChange={e => setSiteName(e.target.value)} required title={tooltips.SiteName} placeholder="Zone B-2" />
-          <label title={tooltips.Latitude}>Latitude</label>
+          <label title={tooltips.ProjectName}>{t('Project')}</label>
+          <input value={ProjectName} onChange={e => setProjectName(e.target.value)} required title={tooltips.ProjectName} placeholder={t('North Ring Toll')} />
+          <label title={tooltips.SiteName}>{t('Site / Zone')}</label>
+          <input value={SiteName} onChange={e => setSiteName(e.target.value)} required title={tooltips.SiteName} placeholder={t('Zone B-2')} />
+          <label title={tooltips.Latitude}>{t('Latitude')}</label>
           <input type="number" step="any" min={-90} max={90} value={Latitude} onChange={e => setLatitude(e.target.value)} title={tooltips.Latitude} placeholder="-6.17510" />
-          <label title={tooltips.Longitude}>Longitude</label>
+          <label title={tooltips.Longitude}>{t('Longitude')}</label>
           <input type="number" step="any" min={-180} max={180} value={Longitude} onChange={e => setLongitude(e.target.value)} title={tooltips.Longitude} placeholder="106.86520" />
-          <label title={tooltips.GroundElevation_mRL}>Ground Elevation (mRL)</label>
+          <label title={tooltips.GroundElevation_mRL}>{t('Ground Elevation (mRL)')}</label>
           <input type="number" step="any" value={GroundElevation_mRL} onChange={e => setGroundElevation(e.target.value)} title={tooltips.GroundElevation_mRL} placeholder="8.5" />
         </div>
         <div>
-          <h3>Schedule & Team</h3>
-          <label title={tooltips.StartDate}>Start Date</label>
+          <h3>{t('Schedule & Team')}</h3>
+          <label title={tooltips.StartDate}>{t('Start Date')}</label>
           <input type="date" value={StartDate} onChange={e => setStartDate(e.target.value)} required title={tooltips.StartDate} />
-          <label title={tooltips.EndDate}>End Date</label>
+          <label title={tooltips.EndDate}>{t('End Date')}</label>
           <input type="date" value={EndDate} onChange={e => setEndDate(e.target.value)} required title={tooltips.EndDate} />
-          <label title={tooltips.Contractor}>Contractor</label>
+          <label title={tooltips.Contractor}>{t('Contractor')}</label>
           <input value={Contractor} onChange={e => setContractor(e.target.value)} required title={tooltips.Contractor} placeholder="GeoBore Ltd." />
-          <label title={tooltips.LoggingGeologist}>Logging Geologist</label>
+          <label title={tooltips.LoggingGeologist}>{t('Logging Geologist')}</label>
           <input value={LoggingGeologist} onChange={e => setLoggingGeologist(e.target.value)} title={tooltips.LoggingGeologist} placeholder="A. Carter" />
-          <label title={tooltips.Remarks}>Remarks</label>
-          <textarea value={Remarks} onChange={e => setRemarks(e.target.value)} title={tooltips.Remarks} placeholder="Access, utilities, safety notes, etc." />
+          <label title={tooltips.Remarks}>{t('Remarks')}</label>
+          <textarea value={Remarks} onChange={e => setRemarks(e.target.value)} title={tooltips.Remarks} placeholder={t('Access, utilities, safety notes, etc.')} />
         </div>
       </div>
 
       <div style={{ marginTop: '1rem' }}>
-        <h3>Drilling Parameters</h3>
+        <h3>{t('Drilling Parameters')}</h3>
         <div className="row">
           <div>
-            <label title={tooltips.DrillingMethod}>Drilling Method</label>
+            <label title={tooltips.DrillingMethod}>{t('Drilling Method')}</label>
             <select value={DrillingMethod} onChange={e => setDrillingMethod(e.target.value)} title={tooltips.DrillingMethod}>
               {methodOptions.map(method => (
-                <option key={method} value={method}>{method}</option>
+                <option key={method} value={method}>{methodLabel(method)}</option>
               ))}
             </select>
-            <label title={tooltips.DrillRig}>Drill Rig / Plant</label>
-            <input value={DrillRig} maxLength={100} onChange={e => setDrillRig(e.target.value)} title={tooltips.DrillRig} placeholder="Rig model or fleet no." />
-            <label title={tooltips.CoreSize}>Core Size (wireline)</label>
+            <label title={tooltips.DrillRig}>{t('Drill Rig / Plant')}</label>
+            <input value={DrillRig} maxLength={100} onChange={e => setDrillRig(e.target.value)} title={tooltips.DrillRig} placeholder={t('Rig model or fleet no.')} />
+            <label title={tooltips.CoreSize}>{t('Core Size (wireline)')}</label>
             <select
               value={CoreSize}
               title={tooltips.CoreSize}
@@ -312,36 +313,36 @@ export default function DailyReportForm() {
                 setCoreSize(next)
               }}
             >
-              <option value="">Not cored</option>
+              <option value="">{t('Not cored')}</option>
               {CORE_SIZES.map(s => <option key={s.code} value={s.code}>{coreSizeLabel(s.code)}</option>)}
             </select>
-            <label title={tooltips.BoreholeDiameter_mm}>Borehole Diameter (mm)</label>
+            <label title={tooltips.BoreholeDiameter_mm}>{t('Borehole Diameter (mm)')}</label>
             <input type="number" min={0} step="any" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />
-            <label title={tooltips.CasingInstalled_mm}>Casing Installed (mm)</label>
+            <label title={tooltips.CasingInstalled_mm}>{t('Casing Installed (mm)')}</label>
             <input type="number" min={0} step="any" value={CasingInstalled_mm} onChange={e => setCasingInstalled(e.target.value)} title={tooltips.CasingInstalled_mm} />
           </div>
           <div>
-            <label title={tooltips.TargetDepth_m}>Target Depth (m)</label>
+            <label title={tooltips.TargetDepth_m}>{t('Target Depth (m)')}</label>
             <input type="number" min={0} step="any" value={TargetDepth_m} onChange={e => setTargetDepth(e.target.value)} title={tooltips.TargetDepth_m} />
-            <label title={tooltips.FinalDepth_m}>Final Depth (m)</label>
+            <label title={tooltips.FinalDepth_m}>{t('Final Depth (m)')}</label>
             <input type="number" min={0} step="any" value={FinalDepth_m} onChange={e => setFinalDepth(e.target.value)} required title={tooltips.FinalDepth_m} />
-            <label title={tooltips.Avg_SPT_N60}>Average SPT N60</label>
+            <label title={tooltips.Avg_SPT_N60}>{t('Average SPT N60')}</label>
             <input type="number" min={0} step="any" value={Avg_SPT_N60} onChange={e => setAvgSpt(e.target.value)} title={tooltips.Avg_SPT_N60} placeholder="28" />
           </div>
         </div>
       </div>
 
       <div style={{ marginTop: '1rem' }}>
-        <h3>Geotechnical Observations</h3>
+        <h3>{t('Geotechnical Observations')}</h3>
         <div className="row">
           <div>
-            <label title={tooltips.GroundwaterDepth_m}>Groundwater Depth (m)</label>
+            <label title={tooltips.GroundwaterDepth_m}>{t('Groundwater Depth (m)')}</label>
             <input type="number" min={0} step="any" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(e.target.value)} title={tooltips.GroundwaterDepth_m} />
             <label className="checkbox" title={tooltips.GroundwaterEncountered}>
               <input type="checkbox" checked={GroundwaterEncountered} onChange={e => setGroundwaterEncountered(e.target.checked)} />
-              Groundwater encountered
+              {t('Groundwater encountered')}
             </label>
-            <label title={tooltips.USCS_Class}>USCS Class</label>
+            <label title={tooltips.USCS_Class}>{t('USCS Class')}</label>
             <select value={USCS_Class} onChange={e => setUSCS(e.target.value)} title={tooltips.USCS_Class}>
               {uscsOptions.map(code => (
                 <option key={code} value={code}>{code}</option>
@@ -349,15 +350,15 @@ export default function DailyReportForm() {
             </select>
           </div>
           <div>
-            <label title={tooltips.SoilDescription}>Soil Description</label>
-            <textarea value={SoilDescription} onChange={e => setSoilDescription(e.target.value)} title={tooltips.SoilDescription} placeholder="Silty clay, medium plasticity, with fine sand lenses" />
+            <label title={tooltips.SoilDescription}>{t('Soil Description')}</label>
+            <textarea value={SoilDescription} onChange={e => setSoilDescription(e.target.value)} title={tooltips.SoilDescription} placeholder={t('Silty clay, medium plasticity, with fine sand lenses')} />
           </div>
         </div>
       </div>
 
       <div className="actions" style={{ marginTop: '.75rem' }}>
-        <button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Submitting...' : 'Submit Borehole Log'}</button>
-        <button type="button" onClick={resetForm} disabled={isSubmitting}>Reset Form</button>
+        <button type="submit" disabled={isSubmitting}>{isSubmitting ? t('Submitting...') : t('Submit Borehole Log')}</button>
+        <button type="button" onClick={resetForm} disabled={isSubmitting}>{t('Reset Form')}</button>
         <span>{status}</span>
       </div>
     </form>

@@ -1,11 +1,128 @@
-const STANDARDS: Array<{ topic: string; sni: string; astm: string }> = [
-  { topic: 'Standard Penetration Test (SPT)', sni: 'SNI 4153:2008', astm: 'ASTM D1586' },
-  { topic: 'Cone penetration test (sondir / CPTu)', sni: 'SNI 2827:2008', astm: 'ASTM D3441 (mechanical), ASTM D5778 (electronic)' },
-  { topic: 'Soil classification (USCS)', sni: 'SNI 6371:2015', astm: 'ASTM D2487' },
-  { topic: 'Logging of core drilling', sni: 'SNI 2436:2008', astm: '-' },
+import { lang } from '../i18n'
+
+// This page is long prose, so it is written out in both languages instead of many t() calls.
+type Standard = { topic: string; topicId: string; sni: string; astm: string; astmId?: string }
+
+const STANDARDS: Standard[] = [
+  { topic: 'Standard Penetration Test (SPT)', topicId: 'Uji penetrasi standar (SPT)', sni: 'SNI 4153:2008', astm: 'ASTM D1586' },
+  {
+    topic: 'Cone penetration test (sondir / CPTu)',
+    topicId: 'Uji penetrasi konus (sondir / CPTu)',
+    sni: 'SNI 2827:2008',
+    astm: 'ASTM D3441 (mechanical), ASTM D5778 (electronic)',
+    astmId: 'ASTM D3441 (mekanis), ASTM D5778 (elektrik)',
+  },
+  { topic: 'Soil classification (USCS)', topicId: 'Klasifikasi tanah (USCS)', sni: 'SNI 6371:2015', astm: 'ASTM D2487' },
+  { topic: 'Logging of core drilling', topicId: 'Pencatatan (logging) hasil bor inti', sni: 'SNI 2436:2008', astm: '-' },
 ]
 
-export default function AboutSoilBoring() {
+const th = { textAlign: 'left' as const, padding: '.35rem', borderBottom: '1px solid var(--border)' }
+const td = { padding: '.35rem', borderBottom: '1px dashed var(--border)' }
+
+function StandardsTable({ id }: { id: boolean }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '480px' }}>
+        <thead>
+          <tr>
+            <th style={th}>{id ? 'Topik' : 'Topic'}</th>
+            <th style={th}>SNI</th>
+            <th style={th}>ASTM</th>
+          </tr>
+        </thead>
+        <tbody>
+          {STANDARDS.map(s => (
+            <tr key={s.topic}>
+              <td style={td}>{id ? s.topicId : s.topic}</td>
+              <td style={td}>{s.sni}</td>
+              <td style={td}>{id ? s.astmId ?? s.astm : s.astm}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function Indonesian() {
+  return (
+    <div className="card" style={{ lineHeight: 1.6 }}>
+      <h2 style={{ marginTop: 0 }}>Mengapa Pengeboran Tanah Penting</h2>
+      <p>
+        Pengeboran tanah (soil boring) dan pengujian in-situ adalah gambaran pertama tentang kondisi di bawah
+        permukaan sebuah lokasi. Hasilnya menentukan apakah tanah mampu memikul struktur yang direncanakan, jenis
+        fondasi yang dipakai, dan risiko apa saja yang harus diperhitungkan dalam biaya sebelum konstruksi dimulai.
+      </p>
+
+      <h3>Tujuan Utama</h3>
+      <ol>
+        <li>
+          <strong>Menentukan karakteristik tanah:</strong> jenis tanah (lempung, lanau, pasir, kerikil), konsistensi
+          atau kepadatan, serta parameter kekuatan untuk daya dukung.
+        </li>
+        <li>
+          <strong>Menilai stabilitas dan daya dukung:</strong> memastikan tanah dapat memikul struktur dengan aman
+          tanpa penurunan berlebih, pergerakan lateral, atau keruntuhan.
+        </li>
+        <li>
+          <strong>Memilih jenis fondasi:</strong> fondasi dangkal, tiang bor atau tiang pancang, termasuk kedalaman
+          dan ukurannya.
+        </li>
+        <li>
+          <strong>Mengidentifikasi risiko geoteknik:</strong> lapisan lunak atau ekspansif, muka air tanah tinggi,
+          kontaminasi, atau lapisan batuan yang sulit ditembus.
+        </li>
+        <li>
+          <strong>Mendukung perencanaan dan perhitungan biaya:</strong> metode, jadwal, dan anggaran yang realistis
+          sebelum mobilisasi.
+        </li>
+      </ol>
+
+      <h3>Metode Lapangan dalam Aplikasi Ini</h3>
+      <ul>
+        <li>
+          <strong>Bor cuci (wash boring) / bor putar cuci (rotary wash) + SPT:</strong> pengeboran lubang terbuka
+          dengan uji SPT pada interval tertentu; log menyimpan nilai rata-rata N60.
+        </li>
+        <li>
+          <strong>Bor inti (coring) + SPT:</strong> pengeboran inti putar untuk tanah keras dan batuan, dengan uji SPT
+          pada bagian tanah.
+        </li>
+        <li>
+          <strong>Hollow stem auger</strong> dan <strong>bor tangan (hand auger):</strong> lubang dangkal dan
+          pengambilan sampel tanpa cairan bor.
+        </li>
+        <li>
+          <strong>CPT / CPTu (sondir):</strong> uji penetrasi konus; catat kedalaman penetrasi akhir sebagai
+          kedalaman akhir.
+        </li>
+      </ul>
+
+      <h3>Standar Acuan</h3>
+      <p style={{ marginTop: 0 }}>
+        Pekerjaan lapangan dan klasifikasi umumnya dilakukan mengacu pada Standar Nasional Indonesia (SNI) atau
+        padanannya dalam ASTM:
+      </p>
+      <StandardsTable id />
+
+      <h3>Manfaat Aplikasi Ini</h3>
+      <ul>
+        <li>
+          Satu tempat untuk semua log bor: lokasi, metode pengeboran, kedalaman, muka air tanah, kelas USCS, dan
+          SPT N60.
+        </li>
+        <li>Dasbor serta ringkasan mingguan/bulanan, dengan ringkasan opsional yang ditulis AI untuk para pemangku kepentingan proyek.</li>
+        <li>Geo AI menjawab pertanyaan berdasarkan data yang tercatat dan menampilkan baris data yang dipakai sebagai bukti.</li>
+        <li>
+          Ekspor: CSV untuk spreadsheet, dan <strong>AGS4</strong> (satu proyek per berkas) untuk perangkat lunak
+          geoteknik seperti gINT, HoleBASE, atau OpenGround.
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+function English() {
   return (
     <div className="card" style={{ lineHeight: 1.6 }}>
       <h2 style={{ marginTop: 0 }}>Why Soil Boring Matters</h2>
@@ -49,26 +166,7 @@ export default function AboutSoilBoring() {
 
       <h3>Reference Standards</h3>
       <p style={{ marginTop: 0 }}>Field work and classification are normally carried out to the Indonesian national standard (SNI) or its ASTM counterpart:</p>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '480px' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left', padding: '.35rem', borderBottom: '1px solid var(--border)' }}>Topic</th>
-              <th style={{ textAlign: 'left', padding: '.35rem', borderBottom: '1px solid var(--border)' }}>SNI</th>
-              <th style={{ textAlign: 'left', padding: '.35rem', borderBottom: '1px solid var(--border)' }}>ASTM</th>
-            </tr>
-          </thead>
-          <tbody>
-            {STANDARDS.map(s => (
-              <tr key={s.topic}>
-                <td style={{ padding: '.35rem', borderBottom: '1px dashed var(--border)' }}>{s.topic}</td>
-                <td style={{ padding: '.35rem', borderBottom: '1px dashed var(--border)' }}>{s.sni}</td>
-                <td style={{ padding: '.35rem', borderBottom: '1px dashed var(--border)' }}>{s.astm}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <StandardsTable id={false} />
 
       <h3>How This App Helps</h3>
       <ul>
@@ -82,4 +180,8 @@ export default function AboutSoilBoring() {
       </ul>
     </div>
   )
+}
+
+export default function AboutSoilBoring() {
+  return lang() === 'id' ? <Indonesian /> : <English />
 }
