@@ -27,6 +27,49 @@ jobs:
       - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - run: python -m pytest backend/tests -q
 
+  backend-postgres:
+    # Same tests with DATABASE_URL set (storage in Postgres, as on Render + Neon).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - run: python -m pytest backend/tests -q
+
+  docker:
+    # Builds every image and starts the single-service one (root Dockerfile, used on Render).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t soilboring-single .
+      - run: docker build -f backend/Dockerfile -t soilboring-backend .
+      - run: docker build -f frontend/Dockerfile -t soilboring-frontend .
+      - name: Smoke test the single-service image
+        run: |
+          docker run -d --name app -p 8000:8000 -e PORT=8000 -e ORG_NAME=CI soilboring-single
+          for i in $(seq 1 30); do curl -fsS localhost:8000/api/health && break; sleep 1; done
+          curl -fsS localhost:8000/api/health
+          curl -fsS localhost:8000/api/config | grep -q '"org_name":"CI"'
+          curl -fsS localhost:8000/ | grep -qi '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/reports)" = 401
+          docker logs app
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
