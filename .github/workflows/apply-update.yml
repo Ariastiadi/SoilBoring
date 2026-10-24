@@ -1,0 +1,18 @@
+name: apply-update
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          unzip -o update.zip
+          if [ -f DELETE-FILES.txt ]; then xargs -r -a DELETE-FILES.txt git rm -q -f --ignore-unmatch --; rm -f DELETE-FILES.txt; fi
+          rm -f update.zip
+          git config user.name "Ariastiadi Saleh Herutjakra"
+          git config user.email "235292680+Ariastiadi@users.noreply.github.com"
+          git add -A
+          git commit -m "Improve security, dev tooling, Docker setup and add password management"
+          git push
