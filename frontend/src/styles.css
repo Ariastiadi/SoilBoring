@@ -2,10 +2,11 @@
   --bg: #f8f5f0; /* warm white */
   --fg: #1f2937; /* slate-800 */
   --muted: #6b7280; /* gray-500 */
-  --accent: #0ea5e9; /* sky-500 */
+  --accent: #0369a1; /* sky-700: white text on it meets WCAG AA contrast */
   --surface: #ffffff; /* cards/inputs */
   --border: #e5e7eb; /* gray-200 */
   --code-bg: #f3f4f6; /* gray-100 */
+  --danger: #b91c1c; /* red-700 */
 }
 
 * { box-sizing: border-box; }
@@ -19,6 +20,8 @@ nav button.active { border-color: var(--accent); color: var(--accent); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .row > div { display: flex; flex-direction: column; gap: .5rem; }
 label { font-size: .9rem; color: var(--muted); }
+/* One look for every button (nav and .actions refine it below). */
+button { font: inherit; font-size: .9rem; background: var(--accent); color: #ffffff; border: none; padding: .45rem .75rem; border-radius: .5rem; cursor: pointer; }
 input, textarea, select { background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: .5rem; padding: .5rem .6rem; }
 textarea { min-height: 120px; }
 .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
@@ -27,20 +30,23 @@ textarea { min-height: 120px; }
 .kpi p { margin: 0; font-size: 1.25rem; }
 .actions { display: flex; gap: .5rem; }
 .actions button { background: var(--accent); color: #ffffff; border: none; padding: .5rem .75rem; border-radius: .5rem; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.topbar { padding: .5rem .75rem; justify-content: space-between; align-items: center; flex-wrap: wrap; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
 
 @media (max-width: 960px) {
   .row { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
-  nav { flex-wrap: wrap; }
-  nav button { flex: 1 1 45%; }
+  /* One scrollable row instead of a wall of stacked buttons under the sticky header. */
+  nav { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  nav button { flex: 0 0 auto; white-space: nowrap; }
 }
 
 @media (max-width: 640px) {
   .container { padding: .75rem; }
   .kpis { grid-template-columns: 1fr; }
-  nav button { flex: 1 1 100%; }
   table { font-size: .9rem; }
 }
 

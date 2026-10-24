@@ -377,7 +377,7 @@ export default function DailyReportData() {
       </div>
 
       {loading && <p style={{ marginTop: '1rem' }}>Loading reports...</p>}
-      {error && <p style={{ marginTop: '1rem', color: 'var(--danger, #c62828)' }}>{error}</p>}
+      {error && <p style={{ marginTop: '1rem', color: 'var(--danger)' }}>{error}</p>}
 
       {!loading && !error && reports.length === 0 && (
         <div className="card" style={{ marginTop: '1rem' }}>
@@ -434,7 +434,7 @@ export default function DailyReportData() {
                   })}
                   <td style={{ padding: '.35rem', borderBottom: '1px dashed #1b263f', whiteSpace: 'nowrap' }}>
                     <button onClick={() => startEdit(row)} style={{ marginRight: '.5rem' }}>Edit</button>
-                    <button onClick={() => handleDelete(row.BoreholeID)} disabled={busy} style={{ background: 'var(--danger, #c62828)' }}>Delete</button>
+                    <button onClick={() => handleDelete(row.BoreholeID)} disabled={busy} style={{ background: 'var(--danger)' }}>Delete</button>
                   </td>
                 </tr>
               ))}

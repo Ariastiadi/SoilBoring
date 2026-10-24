@@ -5,8 +5,8 @@
 **/.DS_Store
 **/npm-debug.log*
 **/*.tsbuildinfo
-.env
-frontend/.env
+**/.env
+**/.env.*
 .git/
 .github/
 .gitignore

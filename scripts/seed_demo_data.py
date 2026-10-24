@@ -83,7 +83,7 @@ def build_rows(count: int, seed: int):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-n", "--count", type=int, default=123)
+    parser.add_argument("-n", "--count", type=int, default=123, help="number of logs (1-100000)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true", help="overwrite an existing reports.csv")
     args = parser.parse_args()
@@ -91,6 +91,8 @@ def main() -> int:
     if storage.FILE.exists() and not args.force:
         print(f"{storage.FILE} already exists; use --force to overwrite.", file=sys.stderr)
         return 1
+    if not 1 <= args.count <= 100_000:
+        parser.error("--count must be between 1 and 100000")
     storage._write_reports(build_rows(args.count, args.seed))
     print(f"Wrote {args.count} synthetic logs to {storage.FILE}")
     return 0

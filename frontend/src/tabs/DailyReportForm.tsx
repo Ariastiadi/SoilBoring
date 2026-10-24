@@ -168,12 +168,12 @@ export default function DailyReportForm() {
       errors.push('Borehole diameter must be a positive number.')
     }
     const finalDepth = toNumber(FinalDepth_m)
-    if (Number.isNaN(finalDepth) || finalDepth === null) {
-      errors.push('Final depth is required and must be numeric.')
+    if (Number.isNaN(finalDepth) || finalDepth === null || finalDepth < 0) {
+      errors.push('Final depth is required and must be a number of 0 or more.')
     }
-    const targetDepth = toNumber(TargetDepth_m)
-    if (targetDepth !== null && targetDepth > 0 && finalDepth !== null && !Number.isNaN(finalDepth) && finalDepth > targetDepth * 1.5) {
-      errors.push('Final depth looks too large versus the target depth.')
+    for (const [label, value] of [['Casing', CasingInstalled_mm], ['Target depth', TargetDepth_m], ['Groundwater depth', GroundwaterDepth_m], ['Average SPT N60', Avg_SPT_N60]] as const) {
+      const n = toNumber(value)
+      if (Number.isNaN(n) || (n !== null && n < 0)) errors.push(`${label} cannot be negative.`)
     }
     const start = StartDate ? new Date(StartDate) : null
     const end = EndDate ? new Date(EndDate) : null
@@ -192,6 +192,14 @@ export default function DailyReportForm() {
     const validationErrors = validate()
     if (validationErrors.length) {
       setStatus(validationErrors.join(' '))
+      return
+    }
+    // Drilling past the target (e.g. to reach bearing strata) is normal, so this only asks.
+    const target = Number(TargetDepth_m)
+    const final = Number(FinalDepth_m)
+    if (TargetDepth_m !== '' && target > 0 && final > target * 1.5 &&
+        !window.confirm(`Final depth ${final} m is more than 1.5x the target depth ${target} m. Save anyway?`)) {
+      setStatus('Not saved. Check the final and target depths.')
       return
     }
     persistDraft()
@@ -275,17 +283,17 @@ export default function DailyReportForm() {
               ))}
             </select>
             <label title={tooltips.BoreholeDiameter_mm}>Borehole Diameter (mm)</label>
-            <input type="number" min={50} max={500} step="any" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />
+            <input type="number" min={0} step="any" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />
             <label title={tooltips.CasingInstalled_mm}>Casing Installed (mm)</label>
-            <input type="number" min={0} max={500} step="any" value={CasingInstalled_mm} onChange={e => setCasingInstalled(e.target.value)} title={tooltips.CasingInstalled_mm} />
+            <input type="number" min={0} step="any" value={CasingInstalled_mm} onChange={e => setCasingInstalled(e.target.value)} title={tooltips.CasingInstalled_mm} />
           </div>
           <div>
             <label title={tooltips.TargetDepth_m}>Target Depth (m)</label>
-            <input type="number" min={0} max={250} step="any" value={TargetDepth_m} onChange={e => setTargetDepth(e.target.value)} title={tooltips.TargetDepth_m} />
+            <input type="number" min={0} step="any" value={TargetDepth_m} onChange={e => setTargetDepth(e.target.value)} title={tooltips.TargetDepth_m} />
             <label title={tooltips.FinalDepth_m}>Final Depth (m)</label>
-            <input type="number" min={0} max={300} step="any" value={FinalDepth_m} onChange={e => setFinalDepth(e.target.value)} required title={tooltips.FinalDepth_m} />
+            <input type="number" min={0} step="any" value={FinalDepth_m} onChange={e => setFinalDepth(e.target.value)} required title={tooltips.FinalDepth_m} />
             <label title={tooltips.Avg_SPT_N60}>Average SPT N60</label>
-            <input type="number" min={0} max={200} step="any" value={Avg_SPT_N60} onChange={e => setAvgSpt(e.target.value)} title={tooltips.Avg_SPT_N60} placeholder="28" />
+            <input type="number" min={0} step="any" value={Avg_SPT_N60} onChange={e => setAvgSpt(e.target.value)} title={tooltips.Avg_SPT_N60} placeholder="28" />
           </div>
         </div>
       </div>
@@ -295,7 +303,7 @@ export default function DailyReportForm() {
         <div className="row">
           <div>
             <label title={tooltips.GroundwaterDepth_m}>Groundwater Depth (m)</label>
-            <input type="number" min={0} max={300} step="any" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(e.target.value)} title={tooltips.GroundwaterDepth_m} />
+            <input type="number" min={0} step="any" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(e.target.value)} title={tooltips.GroundwaterDepth_m} />
             <label className="checkbox" title={tooltips.GroundwaterEncountered}>
               <input type="checkbox" checked={GroundwaterEncountered} onChange={e => setGroundwaterEncountered(e.target.checked)} />
               Groundwater encountered

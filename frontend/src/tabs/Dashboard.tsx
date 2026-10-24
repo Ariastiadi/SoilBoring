@@ -3,6 +3,9 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { DashboardResponse, getDashboard } from '../api'
 
+// "12.5 m", or "-" when the value was not recorded (never "- m").
+const metres = (value?: number | null) => (value === null || value === undefined ? '-' : `${value} m`)
+
 export default function Dashboard() {
   const [data, setData] = useState<DashboardResponse | null>(null)
   const [status, setStatus] = useState('Loading...')
@@ -115,7 +118,7 @@ export default function Dashboard() {
               <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                 {recent.map((item, idx) => (
                   <li key={`${item?.borehole_id ?? 'row'}-${idx}`} style={{ marginBottom: '.35rem' }}>
-                    <strong>{item?.start_date ?? '-'}</strong> - {item?.borehole_id ?? 'BH ?'} {item?.project ? `@ ${item?.project}` : ''} ({item?.site ?? 'Site ?'}) | Depth {item?.final_depth_m ?? '-'} m, GW {item?.groundwater_depth_m ?? '-'} m
+                    <strong>{item?.start_date ?? '-'}</strong> - {item?.borehole_id ?? 'BH ?'} {item?.project ? `@ ${item?.project}` : ''} ({item?.site ?? 'Site ?'}) | Depth {metres(item?.final_depth_m)}, GW {metres(item?.groundwater_depth_m)}
                   </li>
                 ))}
               </ul>

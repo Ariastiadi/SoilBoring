@@ -218,3 +218,21 @@ export async function deleteUser(email: string) {
   })
   return parseJson<{ status: string }>(r, "Failed to delete user")
 }
+
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const r = await fetch(`${BASE}/api/auth/change-password`, {
+    method: "POST",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  return parseJson<{ token: string; email: string; role: User['role']; expires_in: number }>(r, "Could not change the password");
+}
+
+export async function resetUserPassword(email: string, password: string) {
+  const r = await fetch(`${BASE}/api/users/${encodeURIComponent(email)}/password`, {
+    method: "PUT",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ password }),
+  });
+  return parseJson<{ status: string }>(r, "Could not reset the password");
+}

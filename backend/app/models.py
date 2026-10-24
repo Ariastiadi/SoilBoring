@@ -56,6 +56,10 @@ def normalize_email(value: Any) -> str:
 Email = Annotated[str, AfterValidator(normalize_email)]
 
 
+# Control characters (except tab and newlines) break CSV readers and spreadsheets.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def _clean(value: Any) -> Any:
     if value is None:
         return None
@@ -63,7 +67,10 @@ def _clean(value: Any) -> Any:
         return value
     if isinstance(value, (int, float)):
         return str(value)
-    return str(value).strip()
+    if not isinstance(value, str):
+        # Lists/objects are left alone so field validation rejects them (no "[]" text).
+        return value
+    return _CONTROL_CHARS.sub("", value.replace("\r\n", "\n").replace("\r", "\n")).strip()
 
 
 class ReportBase(BaseModel):
@@ -101,7 +108,7 @@ class ReportBase(BaseModel):
             raise ValueError("Longitude must be between -180 and 180")
         if name in {"BoreholeDiameter_mm", "CasingInstalled_mm"} and number < 0:
             raise ValueError(f"{name} cannot be negative")
-        if name in {"TargetDepth_m", "FinalDepth_m", "GroundwaterDepth_m"} and number < 0:
+        if name in {"TargetDepth_m", "FinalDepth_m", "GroundwaterDepth_m", "Avg_SPT_N60"} and number < 0:
             raise ValueError(f"{name} cannot be negative")
         return value
 

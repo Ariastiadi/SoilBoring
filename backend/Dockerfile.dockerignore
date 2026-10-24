@@ -20,4 +20,5 @@ scripts/
 # Data lives in a bind-mounted volume, never inside the image
 data/
 backend/tests/
-.env
+**/.env
+**/.env.*

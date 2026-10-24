@@ -381,6 +381,44 @@ def create_user(email: str, password: str, role: str) -> Dict[str, str]:
     return {"email": email, "role": role}
 
 
+def _check_new_password(password: str) -> None:
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+        )
+
+
+def set_password(email: str, new_password: str) -> None:
+    """Replace a user's password. Existing sessions of that user stop working."""
+    _check_new_password(new_password)
+    email_key = (email or "").strip().lower()
+    with _USERS_LOCK:
+        users = _load_users()
+        user = users.get(email_key)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        user["password"] = _hash_password(new_password)
+        _save_users(users)
+    # A reset usually follows a lockout; the new password must work right away.
+    _clear_failures(email_key)
+
+
+def change_own_password(email: str, current_password: str, new_password: str) -> None:
+    """Self-service change; the current password is checked like a sign-in (same lockout)."""
+    _check_new_password(new_password)
+    if current_password == new_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a password you have not used just now")
+    try:
+        authenticate_user(email, current_password)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            # 400, not 401: the session is fine, only the typed password is wrong.
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect") from exc
+        raise
+    set_password(email, new_password)
+
+
 def delete_user(email: str, *, acting_email: Optional[str] = None) -> None:
     email_key = (email or "").strip().lower()
     with _USERS_LOCK:

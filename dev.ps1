@@ -1,6 +1,11 @@
+# Start backend (Uvicorn, auto-reload) and frontend (Vite) together for development on Windows.
+#   pwsh ./dev.ps1
+#   pwsh ./dev.ps1 -BackendPort 9000 -FrontendPort 5180
+# The same environment variables as dev.sh also work: BACKEND_PORT, FRONTEND_PORT,
+# BACKEND_HOST, FRONTEND_HOST, VITE_BACKEND_URL.
 param(
-  [int]$BackendPort = 8000,
-  [int]$FrontendPort = 5173,
+  [int]$BackendPort = $(if ($env:BACKEND_PORT) { [int]$env:BACKEND_PORT } else { 8000 }),
+  [int]$FrontendPort = $(if ($env:FRONTEND_PORT) { [int]$env:FRONTEND_PORT } else { 5173 }),
   [switch]$SkipInstall
 )
 
@@ -11,89 +16,69 @@ $root = $PSScriptRoot
 if (-not $root) { $root = (Get-Location).Path }
 $frontendDir = Join-Path $root 'frontend'
 $BackendHost = if ($env:BACKEND_HOST) { $env:BACKEND_HOST } else { '0.0.0.0' }
-$FrontendHost = if ($env:VITE_HOST) { $env:VITE_HOST } else { '0.0.0.0' }
+$FrontendHost = if ($env:FRONTEND_HOST) { $env:FRONTEND_HOST } else { '0.0.0.0' }
+# The Vite dev server forwards /api to the backend; keep it in sync with the backend port.
+if (-not $env:VITE_BACKEND_URL) { $env:VITE_BACKEND_URL = "http://127.0.0.1:$BackendPort" }
 
-function Get-NpmPath {
-  $npmCmd = Get-Command 'npm.cmd' -ErrorAction SilentlyContinue
-  if ($npmCmd) { return $npmCmd.Source }
-  $npm = Get-Command 'npm' -ErrorAction SilentlyContinue
-  if ($npm) { return $npm.Source }
-  throw 'npm not found on PATH. Please install Node.js or add npm to PATH.'
-}
+# Prefer the project's virtual environment when there is one.
+$venvPython = Join-Path $root '.venv\Scripts\python.exe'
+$python = if (Test-Path $venvPython) { $venvPython } else { 'python' }
 
 function Install-BackendDeps {
+  # Windows PowerShell 5.1 turns a native command's stderr into a terminating error when
+  # $ErrorActionPreference is 'Stop', so check the exit code with errors relaxed.
+  $ErrorActionPreference = 'Continue'
+  & $python -c "import fastapi, uvicorn" 2>$null | Out-Null
+  $ok = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = 'Stop'
+  if ($ok) { return }
   Write-Host 'Installing backend dependencies...'
-  python -m pip install --upgrade pip | Write-Host
-  python -m pip install -r (Join-Path $root 'backend/requirements.txt')
+  & $python -m pip install -r (Join-Path $root 'backend/requirements.txt')
+  if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
 }
 
 function Install-FrontendDeps {
-  if (-not (Test-Path (Join-Path $frontendDir 'package.json'))) { return }
-  if ($SkipInstall) { return }
-  $nm = Join-Path $frontendDir 'node_modules'
-  $needInstall = $true
-  if (Test-Path $nm) {
-    $markedDir = Join-Path $nm 'marked'
-    $dompurifyDir = Join-Path $nm 'dompurify'
-    if ((Test-Path $markedDir) -and (Test-Path $dompurifyDir)) {
-      $needInstall = $false
-    }
-  }
-  if (-not $needInstall) { return }
-  Write-Host 'Installing/updating frontend dependencies (npm install)...'
+  if (Test-Path (Join-Path $frontendDir 'node_modules\.bin\vite.cmd')) { return }
+  Write-Host 'Installing frontend dependencies (npm ci)...'
   Push-Location $frontendDir
   try {
-    npm install
+    npm ci
+    if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
   } finally {
     Pop-Location
   }
 }
 
-function Start-Frontend {
-  if (-not (Test-Path (Join-Path $frontendDir 'package.json'))) {
-    Write-Warning 'frontend/ not found; skipping frontend start.'
-    return $null
+function Stop-Tree($proc) {
+  # npm/vite and uvicorn --reload start child processes; /T stops the whole tree.
+  if ($proc -and -not $proc.HasExited) {
+    $ErrorActionPreference = 'Continue'
+    & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null
   }
-  Write-Host ("Starting frontend (Vite) on http://{0}:{1} ..." -f $FrontendHost, $FrontendPort)
-  $npmExe = Get-NpmPath
-  $npmArgs = @('run','dev','--','--port',"$FrontendPort",'--host',"$FrontendHost")
-  $p = Start-Process -FilePath $npmExe -ArgumentList $npmArgs -WorkingDirectory $frontendDir -PassThru -NoNewWindow
-  return $p
 }
 
-function Start-Backend {
-  Write-Host ("Starting backend (Uvicorn) on http://{0}:{1} ..." -f $BackendHost, $BackendPort)
-  $args = @('-m','uvicorn','backend.app.main:app','--reload','--host',"$BackendHost",'--port',"$BackendPort")
-  $p = Start-Process -FilePath 'python' -ArgumentList $args -WorkingDirectory $root -PassThru -NoNewWindow
-  return $p
+if (-not $SkipInstall) {
+  Install-BackendDeps
+  Install-FrontendDeps
 }
 
-# Main
-if (-not $SkipInstall) { Install-BackendDeps }
-Install-FrontendDeps
+Write-Host ("Starting backend (Uvicorn) on http://{0}:{1} ..." -f $BackendHost, $BackendPort)
+$backendArgs = @('-m', 'uvicorn', 'backend.app.main:app', '--reload', '--host', "$BackendHost", '--port', "$BackendPort")
+$backendProc = Start-Process -FilePath $python -ArgumentList $backendArgs -WorkingDirectory $root -PassThru -NoNewWindow
 
-$frontendProc = Start-Frontend
-$backendProc = Start-Backend
+Write-Host ("Starting frontend (Vite) on http://{0}:{1} (API proxied to {2}) ..." -f $FrontendHost, $FrontendPort, $env:VITE_BACKEND_URL)
+$viteCmd = Join-Path $frontendDir 'node_modules\.bin\vite.cmd'
+$frontendArgs = @('--host', "$FrontendHost", '--port', "$FrontendPort", '--strictPort')
+$frontendProc = Start-Process -FilePath $viteCmd -ArgumentList $frontendArgs -WorkingDirectory $frontendDir -PassThru -NoNewWindow
 
-Write-Host '---'
-Write-Host ("Frontend: http://{0}:{1}" -f $FrontendHost, $FrontendPort)
-Write-Host ("Backend : http://{0}:{1}" -f $BackendHost, $BackendPort)
 Write-Host 'Press Ctrl+C to stop both.'
-Write-Host '---'
-
-# Handle Ctrl+C to stop both processes
-$handler = Register-EngineEvent -SourceIdentifier ConsoleCancelEvent -Action {
-  try {
-    if ($backendProc -and !$backendProc.HasExited) { Stop-Process -Id $backendProc.Id -Force }
-    if ($frontendProc -and !$frontendProc.HasExited) { Stop-Process -Id $frontendProc.Id -Force }
-  } catch {}
-}
 
 try {
-  # Wait for either to exit, then stop the other
-  Wait-Process -Id @($backendProc.Id, $frontendProc.Id) -ErrorAction SilentlyContinue
+  # Windows PowerShell 5.1 has no "wait for any", so poll: when one stops, stop the other.
+  while (-not $backendProc.HasExited -and -not $frontendProc.HasExited) {
+    Start-Sleep -Milliseconds 500
+  }
 } finally {
-  if ($backendProc -and !$backendProc.HasExited) { Stop-Process -Id $backendProc.Id -Force }
-  if ($frontendProc -and !$frontendProc.HasExited) { Stop-Process -Id $frontendProc.Id -Force }
-  if ($handler) { Unregister-Event -SourceIdentifier ConsoleCancelEvent -ErrorAction SilentlyContinue }
+  Stop-Tree $backendProc
+  Stop-Tree $frontendProc
 }

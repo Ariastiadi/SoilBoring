@@ -229,3 +229,18 @@ def test_root_written_file_keeps_data_folder_owner(tmp_path):
     target = tmp_path / "users.json"
     storage.atomic_write_text(target, "[]", mode=0o600)
     assert (target.stat().st_uid, target.stat().st_gid) == (65534, 65534)
+
+
+def test_control_characters_are_stripped_and_lists_rejected(client, admin_headers):
+    client.post("/api/reports", json=sample_report(), headers=admin_headers)
+    res = client.put("/api/reports/BH-001", json={"Remarks": "a\x00b\x1bc\r\nd"}, headers=admin_headers)
+    assert res.status_code == 200
+    assert storage.get_report("BH-001")["Remarks"] == "abc\nd"
+    assert b"\x00" not in storage.FILE.read_bytes()
+    res = client.put("/api/reports/BH-001", json={"Remarks": ["x"]}, headers=admin_headers)
+    assert res.status_code == 422
+
+
+def test_negative_spt_is_rejected(client, admin_headers):
+    res = client.post("/api/reports", json=sample_report(Avg_SPT_N60="-3"), headers=admin_headers)
+    assert res.status_code == 422

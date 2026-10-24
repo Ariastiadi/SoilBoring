@@ -19,3 +19,8 @@ data/*
 frontend/.env
 frontend/.env.local
 backend/.env
+
+# Local test tool caches
+.schemathesis/
+.ruff_cache/
+.mypy_cache/

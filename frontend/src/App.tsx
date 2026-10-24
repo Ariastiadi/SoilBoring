@@ -7,6 +7,7 @@ import DailyReportData from './tabs/DailyReportData'
 import AboutSoilBoring from './tabs/AboutSoilBoring'
 import UserAdmin from './tabs/UserAdmin'
 import Login from './Login'
+import ChangePassword from './ChangePassword'
 import { login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
 
 type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users'
@@ -43,6 +44,8 @@ export default function App() {
     return null
   })
   const [authNotice, setAuthNotice] = useState('')
+  const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     setAuthToken(auth?.token ?? null)
@@ -56,6 +59,8 @@ export default function App() {
 
   useEffect(() => {
     const handler = () => {
+      setShowPasswordForm(false)
+      setNotice('')
       setAuth(null)
       clearUserData()
       setAuthNotice('Your session has expired. Please sign in again.')
@@ -73,10 +78,14 @@ export default function App() {
       expiresAt: Date.now() + session.expires_in * 1000,
     })
     setAuthNotice('')
+    setShowPasswordForm(false)
+    setNotice('')
     setTab('report')
   }
 
   const handleLogout = () => {
+    setShowPasswordForm(false)
+    setNotice('')
     clearUserData()
     setAuth(null)
     setAuthNotice('')
@@ -104,7 +113,7 @@ export default function App() {
     return (
       <div>
         {authNotice && (
-          <div className="card" style={{ maxWidth: '480px', margin: '2rem auto', padding: '1rem', color: 'var(--danger, #c62828)' }}>
+          <div className="card" style={{ maxWidth: '480px', margin: '2rem auto', padding: '1rem', color: 'var(--danger)' }}>
             {authNotice}
           </div>
         )}
@@ -115,10 +124,29 @@ export default function App() {
 
   return (
     <div>
-      <div className="actions" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem' }}>
+      <div className="actions topbar">
         <span>Signed in as <strong>{auth.email}</strong> ({auth.role})</span>
-        <button onClick={handleLogout}>Sign Out</button>
+        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+          <button onClick={() => { setShowPasswordForm(v => !v); setNotice('') }}>Change Password</button>
+          <button onClick={handleLogout}>Sign Out</button>
+        </div>
       </div>
+      {showPasswordForm && (
+        <ChangePassword
+          onClose={() => setShowPasswordForm(false)}
+          onChanged={session => {
+            setAuth({
+              token: session.token,
+              email: session.email,
+              role: session.role,
+              expiresAt: Date.now() + session.expires_in * 1000,
+            })
+            setShowPasswordForm(false)
+            setNotice('Password changed.')
+          }}
+        />
+      )}
+      {notice && <p role="status" style={{ textAlign: 'center', margin: '.5rem' }}>{notice}</p>}
       <nav>
         {tabs.map(t => (
           <button

@@ -58,7 +58,7 @@ export default function Login({ onLogin }: Props) {
         </label>
         <button type="submit">Sign In</button>
         {status && <span style={{ color: 'var(--muted)' }}>{status}</span>}
-        {error && <span style={{ color: 'var(--danger, #c62828)' }}>{error}</span>}
+        {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
       </form>
     </div>
   )

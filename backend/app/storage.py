@@ -133,9 +133,11 @@ def _read_raw() -> tuple[Sequence[str], List[Dict[str, Any]]]:
         return [], []
     # utf-8-sig also accepts files saved by Excel as "CSV UTF-8" (with a BOM).
     with FILE.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        header = list(reader.fieldnames or [])
-        items = [dict(row) for row in reader]
+        text = handle.read()
+    # NUL bytes (from older versions or hand edits) make csv raise on Python 3.10.
+    reader = csv.DictReader(io.StringIO(text.replace("\x00", "")))
+    header = list(reader.fieldnames or [])
+    items = [dict(row) for row in reader]
     return header, items
 
 

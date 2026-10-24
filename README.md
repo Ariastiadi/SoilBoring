@@ -21,7 +21,7 @@ python -m backend.app.manage create-user you@example.com --role admin
 # 2) optional: demo data
 python scripts/seed_demo_data.py
 
-# 3) run backend + frontend together
+# 3) run backend + frontend together (installs the frontend packages on the first run)
 ./dev.sh          # macOS/Linux
 # or
 pwsh ./dev.ps1    # Windows PowerShell
@@ -34,7 +34,7 @@ Open `http://localhost:5173` and sign in with the account you just created.
 ### Prerequisites
 
 - Python 3.10+
-- Node.js 18+
+- Node.js 20.19+ (22 LTS recommended)
 - (Optional) An Ollama server for AI narratives. AI is **off until `OLLAMA_URL` is set**; without it the AI endpoints answer with a friendly "AI service unavailable" message and everything else keeps working.
 
 ---
@@ -74,7 +74,7 @@ npm install
 npm run dev    # http://localhost:5173
 ```
 
-In development Vite proxies `/api/*` to `http://localhost:8000` (change with `VITE_BACKEND_URL`), so no `.env` is needed. Set `VITE_API_URL` only when the API lives on a different host, e.g. `VITE_API_URL=http://192.168.1.20:8000` (and add the UI origin to `CORS_ORIGINS`).
+In development Vite proxies `/api/*` to `http://localhost:8000` (change with `VITE_BACKEND_URL`; `dev.sh`/`dev.ps1` set it from `BACKEND_PORT`), so no `.env` is needed. Set `VITE_API_URL` only when the API lives on a different host, e.g. `VITE_API_URL=http://192.168.1.20:8000` (and add the UI origin to `CORS_ORIGINS`).
 
 Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN. Override with `BACKEND_HOST/BACKEND_PORT` or `FRONTEND_HOST/FRONTEND_PORT` if needed.
 
@@ -92,9 +92,10 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 
 - Passwords are stored as salted PBKDF2-HMAC-SHA256 (600k iterations). Entries from older versions (`sha256$...` or plain text in a hand-edited file) still work and are upgraded automatically on the next successful login.
 - Minimum password length is 8. After 5 failed sign-ins for an email, further attempts are blocked for 15 minutes.
+- Everyone can change their own password with **Change Password** (top right). Admins can set a new password for another user with **Reset Password** in the Users tab.
 - **admin**: manages users and can edit/delete any log. **general**: can create logs and can edit/delete only the logs they submitted.
 - An admin cannot remove their own account, and the last admin can never be removed.
-- Tokens are signed with `AUTH_TOKEN_SECRET` and expire per `AUTH_TOKEN_TTL`. Removing an account (or recreating it with a new password) also ends every session it had.
+- Tokens are signed with `AUTH_TOKEN_SECRET` and expire per `AUTH_TOKEN_TTL`. Changing or resetting a password, or removing the account, ends every other session of that user.
 - In a hand-edited `users.json`, each entry needs `"role": "admin"` or `"role": "general"`. A missing or unknown role is treated as `general` (a warning is logged), never as admin.
 - Emails only need the form `name@domain`, so intranet addresses such as `ops@site.local` work.
 
@@ -181,20 +182,22 @@ docker compose up -d
 
 `docker compose` refuses to start without `AUTH_TOKEN_SECRET`. Generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. Remove `ADMIN_PASSWORD` from `.env` after the first start.
 
-Other settings: `AUTH_TOKEN_TTL`, `HTTP_PORT` (default 80), `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY`, and the `VITE_API_URL` build-arg (leave empty for same-origin).
+Other settings: `AUTH_TOKEN_TTL`, `HTTP_PORT` (default 80), `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY`. The Docker UI always talks to its own origin (`/api` is proxied by nginx).
+
+Manage users inside the stack as the app user, e.g. `docker compose exec -u app backend python -m backend.app.manage create-user you@example.com --role admin`.
 
 Notes:
 
 - Data persistence: `./data` on the host is bind-mounted at `/app/data`. The backend runs as an unprivileged user; on start the container fixes the ownership of `./data` for it.
 - Ollama on the host: the default `OLLAMA_URL` is `http://host.docker.internal:11434/api/chat` (works on Linux too thanks to `extra_hosts`). For a containerized Ollama, add an `ollama` service and point `OLLAMA_URL` at `http://ollama:11434/api/chat`, with a volume for the models.
-- The nginx proxy allows AI requests up to 180 s. Both services have health checks (`/api/health`).
+- The nginx proxy allows AI requests up to 180 s. Both services have health checks (backend: `/api/health`, frontend: the start page).
 - Terminate TLS in front of this stack (reverse proxy or load balancer); the app itself speaks plain HTTP.
 
 ---
 
 ### Upgrading from an earlier version
 
-1. **Back up `data/users.json` before pulling.** It is no longer tracked by git, so `git pull` removes the old tracked copy from your working tree. The previous file also lived in the public history of this repository: consider every password in it exposed and change them (Users tab, or delete the account and recreate it).
+1. **Back up `data/users.json` before pulling.** It is no longer tracked by git, so `git pull` removes the old tracked copy from your working tree. The previous file also lived in the public history of this repository: consider every password in it exposed and change them (Change Password, or Reset Password in the Users tab).
 2. Set `AUTH_TOKEN_SECRET` (Docker requires it). Everyone has to sign in again once.
 3. The AI, dashboard and summary endpoints now require sign-in; any script calling them needs a bearer token from `/api/auth/login`.
 4. `OLLAMA_URL` no longer has a localhost default; set it to turn AI on.
@@ -211,7 +214,7 @@ Notes:
 
 ### Tips for Power Users
 
-- Point `VITE_API_URL` at a remote backend to use the UI against a shared server (and set `CORS_ORIGINS` there).
+- In development, point `VITE_API_URL` at a remote backend to use the UI against a shared server (and set `CORS_ORIGINS` there). The Docker image always uses its own origin.
 - Set `DATA_DIR` to an external volume to keep field logs on shared storage.
 - Put the app behind HTTPS and keep `AUTH_TOKEN_SECRET` out of version control.
 - Override `OLLAMA_MODEL`/`OLLAMA_URL` to plug in your own model or hosted AI endpoint.
