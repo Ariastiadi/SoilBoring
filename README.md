@@ -109,7 +109,7 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 
 ```
 BoreholeID, ProjectName, SiteName, Latitude, Longitude, GroundElevation_mRL,
-StartDate, EndDate, DrillingMethod, BoreholeDiameter_mm, TargetDepth_m, FinalDepth_m,
+StartDate, EndDate, DrillingMethod, DrillRig, CoreSize, BoreholeDiameter_mm, TargetDepth_m, FinalDepth_m,
 CasingInstalled_mm, GroundwaterDepth_m, GroundwaterEncountered, SoilDescription,
 USCS_Class, Avg_SPT_N60, Contractor, LoggingGeologist, Remarks, SubmittedBy
 ```
@@ -117,6 +117,7 @@ USCS_Class, Avg_SPT_N60, Contractor, LoggingGeologist, Remarks, SubmittedBy
 Rules enforced by the API:
 
 - `BoreholeID`, `ProjectName`, `SiteName`, `StartDate`, `EndDate`, `DrillingMethod`, `FinalDepth_m` and `Contractor` are required.
+- `CoreSize` is empty or a wireline size `AQ`, `BQ`, `NQ`, `HQ`, `PQ`. Choosing one in the form fills the nominal hole diameter (48, 60, 75.7, 96, 122.6 mm). Logs saved by older versions simply have these two columns empty.
 - `BoreholeID` must be unique (case-insensitive); a duplicate returns `409`. It may not contain `/ \ ? # %` or control characters.
 - Dates use `YYYY-MM-DD` and `StartDate` may not be after `EndDate`; numeric fields must be finite numbers; latitude/longitude must be in range.
 - `SubmittedBy` is set from the signed-in user and `BoreholeID` cannot be changed after creation; clients cannot overwrite them.
@@ -144,8 +145,8 @@ Choose a project in the **Project** filter of the Borehole Data tab and press **
 | --- | --- |
 | BoreholeID, ground level, final depth, start/end date, lat/long (as D:M:S, WGS84), site | `LOCA` |
 | Drilling method | `LOCA_TYPE` / `HDPH_TYPE` (standard codes: W, RO, RC, AUGH, SCP, HA; other methods get M1, M2 … listed in `ABBR`) |
-| Hole 0 m to final depth, logging geologist, contractor | `HDPH` |
-| Borehole / casing diameter | `HDIA` / `CDIA` |
+| Hole 0 m to final depth, drill rig (`HDPH_EXC`), wireline core size (`HDPH_BTYP`), logging geologist, contractor | `HDPH` |
+| Borehole / casing diameter (nominal Q-series hole size when only the core size was logged) | `HDIA` / `CDIA` |
 | Groundwater depth (when encountered) | `WSTG` |
 | USCS class, average SPT N60, target depth, soil description, remarks | `LOCA_REM` |
 

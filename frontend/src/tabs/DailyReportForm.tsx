@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { postReport } from '../api'
-import { METHOD_OPTIONS as methodOptions, USCS_OPTIONS as uscsOptions } from '../options'
+import { CORE_SIZES, METHOD_OPTIONS as methodOptions, USCS_OPTIONS as uscsOptions, coreSizeLabel } from '../options'
 
 const DRAFT_KEY = 'borehole-form-draft'
 
@@ -25,6 +25,8 @@ export default function DailyReportForm() {
   const [StartDate, setStartDate] = useState(draft?.StartDate ?? '')
   const [EndDate, setEndDate] = useState(draft?.EndDate ?? '')
   const [DrillingMethod, setDrillingMethod] = useState(draft?.DrillingMethod ?? methodOptions[0])
+  const [DrillRig, setDrillRig] = useState(draft?.DrillRig ?? '')
+  const [CoreSize, setCoreSize] = useState(draft?.CoreSize ?? '')
   const [BoreholeDiameter_mm, setBoreholeDiameter] = useState(draft?.BoreholeDiameter_mm ?? '150')
   const [TargetDepth_m, setTargetDepth] = useState(draft?.TargetDepth_m ?? '')
   const [FinalDepth_m, setFinalDepth] = useState(draft?.FinalDepth_m ?? '')
@@ -50,6 +52,8 @@ export default function DailyReportForm() {
     StartDate: 'Drilling start date (YYYY-MM-DD).',
     EndDate: 'Drilling end date (YYYY-MM-DD).',
     DrillingMethod: 'Drilling method used, e.g., Wash Boring + SPT.',
+    DrillRig: 'Drill rig / plant used, e.g. the rig model or fleet number.',
+    CoreSize: 'Wireline core barrel size for cored holes; fills in the nominal hole diameter.',
     BoreholeDiameter_mm: 'Diameter of the drilled hole (mm).',
     TargetDepth_m: 'Programmed target depth (m).',
     FinalDepth_m: 'Actual final depth achieved (m).',
@@ -76,6 +80,8 @@ export default function DailyReportForm() {
       StartDate,
       EndDate,
       DrillingMethod,
+      DrillRig,
+      CoreSize,
       BoreholeDiameter_mm,
       TargetDepth_m,
       FinalDepth_m,
@@ -104,6 +110,8 @@ export default function DailyReportForm() {
     StartDate,
     EndDate,
     DrillingMethod,
+    DrillRig,
+    CoreSize,
     BoreholeDiameter_mm,
     TargetDepth_m,
     FinalDepth_m,
@@ -128,6 +136,8 @@ export default function DailyReportForm() {
     setStartDate('')
     setEndDate('')
     setDrillingMethod(methodOptions[0])
+    setDrillRig('')
+    setCoreSize('')
     setBoreholeDiameter('150')
     setTargetDepth('')
     setFinalDepth('')
@@ -216,6 +226,8 @@ export default function DailyReportForm() {
         StartDate,
         EndDate,
         DrillingMethod,
+        DrillRig,
+        CoreSize,
         BoreholeDiameter_mm,
         TargetDepth_m,
         FinalDepth_m,
@@ -281,6 +293,25 @@ export default function DailyReportForm() {
               {methodOptions.map(method => (
                 <option key={method} value={method}>{method}</option>
               ))}
+            </select>
+            <label title={tooltips.DrillRig}>Drill Rig / Plant</label>
+            <input value={DrillRig} maxLength={100} onChange={e => setDrillRig(e.target.value)} title={tooltips.DrillRig} placeholder="Rig model or fleet no." />
+            <label title={tooltips.CoreSize}>Core Size (wireline)</label>
+            <select
+              value={CoreSize}
+              title={tooltips.CoreSize}
+              onChange={e => {
+                const next = e.target.value
+                const size = CORE_SIZES.find(s => s.code === next)
+                // Fill the hole diameter only while it still holds the default or a previous core size.
+                const auto = BoreholeDiameter_mm === '' || BoreholeDiameter_mm === '150' ||
+                  CORE_SIZES.some(s => String(s.hole) === BoreholeDiameter_mm)
+                if (size && auto) setBoreholeDiameter(String(size.hole))
+                setCoreSize(next)
+              }}
+            >
+              <option value="">Not cored</option>
+              {CORE_SIZES.map(s => <option key={s.code} value={s.code}>{coreSizeLabel(s.code)}</option>)}
             </select>
             <label title={tooltips.BoreholeDiameter_mm}>Borehole Diameter (mm)</label>
             <input type="number" min={0} step="any" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />

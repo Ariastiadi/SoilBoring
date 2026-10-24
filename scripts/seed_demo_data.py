@@ -26,6 +26,9 @@ PROJECTS = {
 }
 METHODS = ["Wash Boring + SPT", "Rotary Wash + SPT", "Hollow Stem Auger", "Coring + SPT"]
 CONTRACTORS = ["PT GeoBore", "PT Tanah Mandiri", "CV Bor Nusantara"]
+RIGS = ["Rig 01 (rotary, hydraulic feed)", "Rig 02 (rotary, hydraulic feed)", "Rig 03 (wireline coring)"]
+# Wireline core size -> nominal hole diameter (mm)
+CORE_HOLES = {"NQ": 76, "HQ": 96, "PQ": 123}
 GEOLOGISTS = ["R. Santoso", "A. Wijaya", "D. Pratama", "S. Lestari"]
 SOILS = {
     "CL": ("Lempung berlanau, lunak sampai teguh", (4, 14)),
@@ -42,6 +45,8 @@ REMARKS = ["", "", "Muka air tanah naik setelah hujan", "Casing tersangkut pada 
 
 def build_rows(count: int, seed: int):
     rng = random.Random(seed)
+    # Separate generator for the rig/core fields, so older --seed values give the same logs as before.
+    extra = random.Random(seed + 1)
     rows = []
     for index in range(1, count + 1):
         project = rng.choice(list(PROJECTS))
@@ -53,6 +58,9 @@ def build_rows(count: int, seed: int):
         uscs = rng.choice(list(SOILS))
         description, (spt_low, spt_high) = SOILS[uscs]
         has_water = rng.random() < 0.75
+        method = rng.choice(METHODS)
+        diameter = rng.choice([100, 150])
+        core = extra.choice(list(CORE_HOLES)) if method == "Coring + SPT" else ""
         rows.append({
             "BoreholeID": f"BH-2024-{index:03d}",
             "ProjectName": project,
@@ -62,8 +70,10 @@ def build_rows(count: int, seed: int):
             "GroundElevation_mRL": f"{rng.uniform(1, 25):.1f}",
             "StartDate": start.isoformat(),
             "EndDate": end.isoformat(),
-            "DrillingMethod": rng.choice(METHODS),
-            "BoreholeDiameter_mm": rng.choice([100, 150]),
+            "DrillingMethod": method,
+            "DrillRig": RIGS[2] if core else extra.choice(RIGS[:2]),
+            "CoreSize": core,
+            "BoreholeDiameter_mm": CORE_HOLES[core] if core else diameter,
             "TargetDepth_m": target,
             "FinalDepth_m": final,
             "CasingInstalled_mm": rng.choice([76, 100]),

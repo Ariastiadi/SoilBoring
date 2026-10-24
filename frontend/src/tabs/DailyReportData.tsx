@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { deleteReport, downloadAgs, listReports, updateReport } from '../api'
-import { METHOD_OPTIONS, USCS_OPTIONS, withCurrent } from '../options'
+import { CORE_SIZES, METHOD_OPTIONS, USCS_OPTIONS, coreSizeLabel, withCurrent } from '../options'
 
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 25]
 const BOREHOLE_COLUMNS = [
@@ -10,6 +10,8 @@ const BOREHOLE_COLUMNS = [
   'StartDate',
   'EndDate',
   'DrillingMethod',
+  'DrillRig',
+  'CoreSize',
   'BoreholeDiameter_mm',
   'TargetDepth_m',
   'FinalDepth_m',
@@ -43,6 +45,8 @@ const EDITABLE_FIELDS: Array<{ key: string; label: string; type?: string }> = [
   { key: 'StartDate', label: 'Start Date', type: 'date' },
   { key: 'EndDate', label: 'End Date', type: 'date' },
   { key: 'DrillingMethod', label: 'Method' },
+  { key: 'DrillRig', label: 'Drill Rig / Plant' },
+  { key: 'CoreSize', label: 'Core Size (wireline)' },
   { key: 'FinalDepth_m', label: 'Final Depth (m)', type: 'number' },
   { key: 'GroundwaterDepth_m', label: 'Groundwater Depth (m)', type: 'number' },
   { key: 'USCS_Class', label: 'USCS' },
@@ -353,6 +357,11 @@ export default function DailyReportData() {
                     {withCurrent(METHOD_OPTIONS, editOriginal[field.key]).map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
+                  </select>
+                ) : field.key === 'CoreSize' ? (
+                  <select id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
+                    <option value="">Not cored</option>
+                    {CORE_SIZES.map(s => <option key={s.code} value={s.code}>{coreSizeLabel(s.code)}</option>)}
                   </select>
                 ) : field.key === 'Remarks' ? (
                   <textarea id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))} />

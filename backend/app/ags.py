@@ -8,7 +8,8 @@ What this app records maps to AGS4 like this:
 
 * PROJ  - one project per file
 * LOCA  - one row per borehole (ID, type, ground level, final depth, dates, lat/lon)
-* HDPH  - the hole from 0 m to the final depth, with method, contractor and logger
+* HDPH  - the hole from 0 m to the final depth, with method, rig (HDPH_EXC), wireline core
+          barrel size (HDPH_BTYP), contractor and logger
 * HDIA  - borehole diameter, CDIA - casing diameter (when recorded)
 * WSTG  - the groundwater depth (when groundwater was encountered)
 
@@ -25,6 +26,7 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .config import local_today, producer_name
+from .models import CORE_SIZES
 
 AGS_EDITION = "4.1.1"
 
@@ -156,6 +158,9 @@ def _summary_remark(row: Dict[str, Any]) -> str:
         parts.append(f"USCS: {_ascii(row['USCS_Class'])}")
     if _number(row.get("Avg_SPT_N60")) is not None:
         parts.append(f"Average SPT N60: {_number(row['Avg_SPT_N60']):g}")
+    core = str(row.get("CoreSize") or "").upper()
+    if core in CORE_SIZES:
+        parts.append(f"Core size: {core} wireline (core {CORE_SIZES[core][1]:g} mm)")
     if _number(row.get("TargetDepth_m")) is not None:
         parts.append(f"Target depth: {_number(row['TargetDepth_m']):g} m")
     if row.get("SoilDescription"):
@@ -231,6 +236,7 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
     for row in rows:
         loca_id = _ascii(row.get("BoreholeID"))
         loca_type, hdph_type = codes_for(row)
+        core = str(row.get("CoreSize") or "").upper()
         final_depth = _dp(row.get("FinalDepth_m"), 2)
         loca_rows.append({
             "LOCA_ID": loca_id,
@@ -251,13 +257,21 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
                 "HDPH_TOP": "0.00",
                 "HDPH_BASE": final_depth,
                 "HDPH_TYPE": hdph_type,
+                "HDPH_EXC": _ascii(row.get("DrillRig")),
+                "HDPH_BTYP": f"{core} wireline" if core in CORE_SIZES else "",
                 "HDPH_LOG": _ascii(row.get("LoggingGeologist")),
                 "HDPH_METH": _ascii(row.get("DrillingMethod")),
                 "HDPH_CONT": _ascii(row.get("Contractor")),
             })
         diameter = _number(row.get("BoreholeDiameter_mm"))
+        diameter_note = ""
+        if not (diameter and diameter > 0) and core in CORE_SIZES:
+            diameter = CORE_SIZES[core][0]
+            diameter_note = f"Nominal {core} wireline hole size"
         if final_depth and diameter and diameter > 0:
-            hdia_rows.append({"LOCA_ID": loca_id, "HDIA_DPTH": final_depth, "HDIA_DIAM": _dp(diameter, 0)})
+            hdia_rows.append({
+                "LOCA_ID": loca_id, "HDIA_DPTH": final_depth, "HDIA_DIAM": _dp(diameter, 0), "HDIA_REM": diameter_note,
+            })
         casing = _number(row.get("CasingInstalled_mm"))
         if final_depth and casing and casing > 0:
             cdia_rows.append({
@@ -283,11 +297,16 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
         data_groups.append((
             "HDPH",
             [("LOCA_ID", "", "ID"), ("HDPH_TOP", "m", "2DP"), ("HDPH_BASE", "m", "2DP"), ("HDPH_TYPE", "", "PA"),
-             ("HDPH_LOG", "", "X"), ("HDPH_METH", "", "X"), ("HDPH_CONT", "", "X")],
+             ("HDPH_EXC", "", "X"), ("HDPH_BTYP", "", "X"), ("HDPH_LOG", "", "X"), ("HDPH_METH", "", "X"),
+             ("HDPH_CONT", "", "X")],
             hdph_rows,
         ))
     if hdia_rows:
-        data_groups.append(("HDIA", [("LOCA_ID", "", "ID"), ("HDIA_DPTH", "m", "2DP"), ("HDIA_DIAM", "mm", "0DP")], hdia_rows))
+        data_groups.append((
+            "HDIA",
+            [("LOCA_ID", "", "ID"), ("HDIA_DPTH", "m", "2DP"), ("HDIA_DIAM", "mm", "0DP"), ("HDIA_REM", "", "X")],
+            hdia_rows,
+        ))
     if cdia_rows:
         data_groups.append((
             "CDIA",

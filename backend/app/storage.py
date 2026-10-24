@@ -31,6 +31,8 @@ HEADERS: Sequence[str] = (
     "StartDate",
     "EndDate",
     "DrillingMethod",
+    "DrillRig",
+    "CoreSize",
     "BoreholeDiameter_mm",
     "TargetDepth_m",
     "FinalDepth_m",

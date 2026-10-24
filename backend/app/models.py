@@ -24,6 +24,7 @@ _TEXT_LIMITS = {
     "ProjectName": 200,
     "SiteName": 200,
     "DrillingMethod": 100,
+    "DrillRig": 100,
     "USCS_Class": 20,
     "Contractor": 200,
     "LoggingGeologist": 200,
@@ -31,6 +32,15 @@ _TEXT_LIMITS = {
     "Remarks": 4000,
 }
 
+
+# Wireline (Q-series) core sizes: (hole diameter mm, core diameter mm).
+CORE_SIZES = {
+    "AQ": (48.0, 27.0),
+    "BQ": (60.0, 36.5),
+    "NQ": (75.7, 47.6),
+    "HQ": (96.0, 63.5),
+    "PQ": (122.6, 85.0),
+}
 
 # Characters that cannot travel safely in a URL path segment or a CSV-driven UI.
 _BAD_ID_CHARS = re.compile(r"[/\\?#%\x00-\x1f\x7f]")
@@ -137,6 +147,16 @@ class ReportBase(BaseModel):
             return "False"
         raise ValueError("GroundwaterEncountered must be true or false")
 
+    @field_validator("CoreSize", mode="after", check_fields=False)
+    @classmethod
+    def _core_size(cls, value: Optional[str]) -> Optional[str]:
+        if value in (None, ""):
+            return value
+        size = value.upper()
+        if size not in CORE_SIZES:
+            raise ValueError(f"CoreSize must be one of {', '.join(CORE_SIZES)}")
+        return size
+
     @field_validator(*_TEXT_LIMITS.keys(), mode="after", check_fields=False)
     @classmethod
     def _length(cls, value: Optional[str], info) -> Optional[str]:
@@ -172,6 +192,8 @@ class Report(ReportBase):
     StartDate: str = Field(min_length=1)
     EndDate: str = Field(min_length=1)
     DrillingMethod: str = Field(min_length=1)
+    DrillRig: Optional[str] = None
+    CoreSize: Optional[str] = None
     BoreholeDiameter_mm: Optional[str] = None
     TargetDepth_m: Optional[str] = None
     FinalDepth_m: str = Field(min_length=1)
@@ -202,6 +224,8 @@ class ReportUpdate(ReportBase):
     StartDate: Optional[str] = Field(default=None, min_length=1)
     EndDate: Optional[str] = Field(default=None, min_length=1)
     DrillingMethod: Optional[str] = Field(default=None, min_length=1)
+    DrillRig: Optional[str] = None
+    CoreSize: Optional[str] = None
     BoreholeDiameter_mm: Optional[str] = None
     TargetDepth_m: Optional[str] = None
     FinalDepth_m: Optional[str] = Field(default=None, min_length=1)

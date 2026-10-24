@@ -86,3 +86,36 @@ def test_cpt_and_hand_auger_use_standard_codes(tmp_path):
     assert _check(tmp_path, text, name) == {}
     assert '"DATA","S-01","SCP"' in text and '"DATA","HA-01","HA"' in text
     assert '"LOCA_TYPE","SCP","Static cone penetrometer","AGS4"' in text
+
+
+def test_rig_and_core_size(tmp_path, client, admin_headers):
+    rows = [
+        dict(sample_report(BoreholeID="C-01", DrillingMethod="Coring + SPT", DrillRig="LF90D rig 2",
+                           CoreSize="HQ", BoreholeDiameter_mm="")),
+        dict(sample_report(BoreholeID="C-02", DrillingMethod="Coring + SPT", CoreSize="NQ", BoreholeDiameter_mm="80")),
+    ]
+    name, text = build_ags(rows[0]["ProjectName"], rows)
+    assert _check(tmp_path, text, name) == {}
+    tables, _ = AGS4.AGS4_to_dataframe(str(tmp_path / name))
+    hdph = tables["HDPH"][tables["HDPH"].HEADING == "DATA"].set_index("LOCA_ID")
+    assert hdph.loc["C-01", "HDPH_EXC"] == "LF90D rig 2"
+    assert hdph.loc["C-01", "HDPH_BTYP"] == "HQ wireline"
+    hdia = tables["HDIA"][tables["HDIA"].HEADING == "DATA"].set_index("LOCA_ID")
+    assert hdia.loc["C-01", "HDIA_DIAM"] == "96"  # nominal HQ hole when no diameter was logged
+    assert hdia.loc["C-02", "HDIA_DIAM"] == "80"  # a logged diameter wins
+    # The API accepts the new fields and rejects unknown core sizes.
+    ok = client.post("/api/reports", json=sample_report(BoreholeID="C-03", CoreSize="pq", DrillRig="Rig 1"), headers=admin_headers)
+    assert ok.status_code == 201 and storage.get_report("C-03")["CoreSize"] == "PQ"
+    bad = client.post("/api/reports", json=sample_report(BoreholeID="C-04", CoreSize="ZQ"), headers=admin_headers)
+    assert bad.status_code == 422
+
+
+def test_old_csv_without_new_columns_still_loads(client, admin_headers):
+    old_headers = [h for h in storage.HEADERS if h not in {"DrillRig", "CoreSize"}]
+    row = sample_report()
+    storage.FILE.write_text(
+        ",".join(old_headers) + "\n" + ",".join(str(row.get(h, "")) for h in old_headers) + "\n", encoding="utf-8"
+    )
+    assert client.get("/api/reports", headers=admin_headers).json()[0]["DrillRig"] == ""
+    assert client.put("/api/reports/BH-001", json={"DrillRig": "Rig 7"}, headers=admin_headers).status_code == 200
+    assert storage.FILE.read_text(encoding="utf-8").splitlines()[0] == ",".join(storage.HEADERS)
