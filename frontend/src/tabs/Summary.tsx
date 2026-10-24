@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { getSummary, SummaryResponse } from '../api'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -11,6 +11,10 @@ export default function Summary() {
   const [weeklyTo, setWeeklyTo] = useState('')
   const [monthlyMonth, setMonthlyMonth] = useState(() => (new Date().getMonth() + 1).toString())
   const [monthlyYear, setMonthlyYear] = useState(() => new Date().getFullYear().toString())
+  const [loading, setLoading] = useState(false)
+  // Only the newest request may update the screen (a slow weekly answer must not
+  // replace a monthly one requested later).
+  const requestId = useRef(0)
 
   const fetchSummary = async (period: 'weekly' | 'monthly') => {
     const filters: Record<string, string> = {}
@@ -19,24 +23,36 @@ export default function Summary() {
         setStatus('Select both start and end dates for the weekly summary.')
         return
       }
+      if (weeklyFrom > weeklyTo) {
+        setStatus('The start date must not be after the end date.')
+        return
+      }
       filters.start_date = weeklyFrom
       filters.end_date = weeklyTo
     } else {
-      if (!monthlyMonth || !monthlyYear) {
-        setStatus('Select month and year for the monthly summary.')
+      const year = Number(monthlyYear)
+      if (!monthlyMonth || !Number.isInteger(year) || year < 2000 || year > 2100) {
+        setStatus('Select a month and a year between 2000 and 2100.')
         return
       }
       filters.month = monthlyMonth
       filters.year = monthlyYear
     }
+    const id = ++requestId.current
     setStatus('Loading...')
+    setLoading(true)
     setActivePeriod(period)
     try {
       const payload = await getSummary(period, filters)
+      if (id !== requestId.current) return
       setData(payload)
       setStatus('')
     } catch (err: any) {
+      if (id !== requestId.current) return
+      setData(null)
       setStatus(`Error: ${err.message}`)
+    } finally {
+      if (id === requestId.current) setLoading(false)
     }
   }
 
@@ -85,25 +101,25 @@ export default function Summary() {
         <div className="row">
           <div>
             <h4>Weekly (Date Range)</h4>
-            <label>From</label>
-            <input type="date" value={weeklyFrom} onChange={e => setWeeklyFrom(e.target.value)} />
-            <label>To</label>
-            <input type="date" value={weeklyTo} onChange={e => setWeeklyTo(e.target.value)} />
-            <button style={{ marginTop: '.5rem' }} onClick={() => fetchSummary('weekly')} className={activePeriod === 'weekly' ? 'active' : ''}>Generate Weekly Summary</button>
+            <label htmlFor="summary-from">From</label>
+            <input id="summary-from" type="date" value={weeklyFrom} onChange={e => setWeeklyFrom(e.target.value)} />
+            <label htmlFor="summary-to">To</label>
+            <input id="summary-to" type="date" value={weeklyTo} onChange={e => setWeeklyTo(e.target.value)} />
+            <button style={{ marginTop: '.5rem' }} onClick={() => fetchSummary('weekly')} disabled={loading} className={activePeriod === 'weekly' ? 'active' : ''}>Generate Weekly Summary</button>
           </div>
           <div>
             <h4>Monthly (Month & Year)</h4>
-            <label>Month</label>
-            <select value={monthlyMonth} onChange={e => setMonthlyMonth(e.target.value)}>
+            <label htmlFor="summary-month">Month</label>
+            <select id="summary-month" value={monthlyMonth} onChange={e => setMonthlyMonth(e.target.value)}>
               {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                 <option key={m} value={String(m)}>
                   {new Date(0, m - 1).toLocaleString('en-US', { month: 'long' })}
                 </option>
               ))}
             </select>
-            <label>Year</label>
-            <input type="number" value={monthlyYear} onChange={e => setMonthlyYear(e.target.value)} min={2000} max={2100} />
-            <button style={{ marginTop: '.5rem' }} onClick={() => fetchSummary('monthly')} className={activePeriod === 'monthly' ? 'active' : ''}>Generate Monthly Summary</button>
+            <label htmlFor="summary-year">Year</label>
+            <input id="summary-year" type="number" value={monthlyYear} onChange={e => setMonthlyYear(e.target.value)} min={2000} max={2100} />
+            <button style={{ marginTop: '.5rem' }} onClick={() => fetchSummary('monthly')} disabled={loading} className={activePeriod === 'monthly' ? 'active' : ''}>Generate Monthly Summary</button>
           </div>
         </div>
         <div className="actions" style={{ marginTop: '.5rem', gap: '.5rem', flexWrap: 'wrap' }}>

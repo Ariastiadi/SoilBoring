@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { askAI } from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { askAI, getAuthToken } from '../api'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -9,18 +9,57 @@ const MAX_TURN_CHARS = 4000
 const MAX_QUESTION_CHARS = 2000
 const MAX_CONTEXT_CHARS = 8000
 
+type HistoryEntry = { q: string, a: string, evidence?: string, ts: number }
+const HISTORY_KEY = 'qa_history'
+
+function loadHistory(): HistoryEntry[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+    if (!Array.isArray(parsed)) return []
+    // Anything malformed (hand-edited storage, older versions) is dropped instead of crashing the app.
+    return parsed
+      .filter((h: any) => h && typeof h.q === 'string' && typeof h.a === 'string')
+      .map((h: any, i: number) => ({
+        q: h.q,
+        a: h.a,
+        evidence: typeof h.evidence === 'string' ? h.evidence : undefined,
+        ts: typeof h.ts === 'number' ? h.ts : i,
+      }))
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(entries: HistoryEntry[]) {
+  try {
+    if (entries.length) localStorage.setItem(HISTORY_KEY, JSON.stringify(entries))
+    else localStorage.removeItem(HISTORY_KEY)
+  } catch {
+    // storage full or blocked: the conversation still works for this visit
+  }
+}
+
 export default function QA() {
   const [question, setQuestion] = useState('')
   const [context, setContext] = useState('')
-  const [history, setHistory] = useState<Array<{ q: string, a: string, evidence?: string, ts: number }>>(() => {
-    const raw = localStorage.getItem('qa_history')
-    if (!raw) return []
-    try { return JSON.parse(raw) } catch { return [] }
-  })
+  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory)
   const [status, setStatus] = useState('')
+  const [pending, setPending] = useState(false)
+  // Bumped by "Clear Conversation", so an answer still in flight is not added back.
+  const generation = useRef(0)
+  const mounted = useRef(false)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
 
   const onAsk = async () => {
-    if (!question.trim()) return
+    if (!question.trim() || pending) return
+    const asked = question
+    const myGeneration = generation.current
+    const tokenAtStart = getAuthToken()
+    setPending(true)
     setStatus('Thinking...')
     try {
       // Build chat history for backend: alternating user/assistant turns
@@ -30,13 +69,30 @@ export default function QA() {
         if (h.a) turns.push({ role: 'assistant', content: h.a.slice(0, MAX_TURN_CHARS) })
       })
       const recentTurns = turns.slice(-MAX_HISTORY_MESSAGES)
-      const res = await askAI(question, context || undefined, recentTurns)
-      const next = [...history, { q: question, a: res.answer, evidence: res.context, ts: Date.now() }]
-      setHistory(next)
-      localStorage.setItem('qa_history', JSON.stringify(next))
+      const res = await askAI(asked, context || undefined, recentTurns)
+      // Signed out, session changed or conversation cleared meanwhile: drop the answer.
+      if (generation.current !== myGeneration || getAuthToken() !== tokenAtStart || !tokenAtStart) return
+      const entry: HistoryEntry = {
+        q: asked,
+        a: typeof res?.answer === 'string' ? res.answer : '',
+        evidence: typeof res?.context === 'string' ? res.context : undefined,
+        ts: Date.now(),
+      }
+      if (!mounted.current) {
+        // The user switched tabs while waiting: keep the answer for when they come back.
+        saveHistory([...loadHistory(), entry])
+        return
+      }
+      setHistory(prev => {
+        const next = [...prev, entry]
+        saveHistory(next)
+        return next
+      })
       setStatus('')
     } catch (err: any) {
-      setStatus(`Error: ${err.message}`)
+      if (mounted.current && generation.current === myGeneration) setStatus(`Error: ${err.message}`)
+    } finally {
+      if (mounted.current && generation.current === myGeneration) setPending(false)
     }
   }
 
@@ -114,23 +170,25 @@ export default function QA() {
     <div>
       <div className="row">
         <div>
-          <label>Question</label>
-          <textarea value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)} placeholder="Ask about soil boring progress, groundwater, or lab data..." />
+          <label htmlFor="qa-question">Question</label>
+          <textarea id="qa-question" value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)} placeholder="Ask about soil boring progress, groundwater, or lab data..." />
         </div>
         <div>
-          <label>Optional Context</label>
-          <textarea value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder="Paste related report text or notes (optional)" />
+          <label htmlFor="qa-context">Optional Context</label>
+          <textarea id="qa-context" value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder="Paste related report text or notes (optional)" />
         </div>
       </div>
       <div className="actions" style={{ marginTop: '.75rem', gap: '.5rem', display: 'flex', alignItems: 'center' }}>
-        <button onClick={onAsk} disabled={status === 'Thinking...'}>Ask</button>
+        <button onClick={onAsk} disabled={pending || !question.trim()}>Ask</button>
         <button
           onClick={() => {
+            generation.current += 1
+            setPending(false)
             setHistory([])
-            localStorage.removeItem('qa_history')
+            saveHistory([])
             setStatus('Cleared')
           }}
-          disabled={history.length === 0}
+          disabled={history.length === 0 && !pending}
         >
           Clear Conversation
         </button>

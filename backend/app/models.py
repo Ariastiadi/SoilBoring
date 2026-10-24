@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+import re
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 _NUMERIC_FIELDS = (
@@ -29,6 +30,30 @@ _TEXT_LIMITS = {
     "SoilDescription": 2000,
     "Remarks": 4000,
 }
+
+
+# Characters that cannot travel safely in a URL path segment or a CSV-driven UI.
+_BAD_ID_CHARS = re.compile(r"[/\\?#%\x00-\x1f\x7f]")
+_REQUIRED_FIELDS = (
+    "ProjectName", "SiteName", "StartDate", "EndDate", "DrillingMethod", "FinalDepth_m", "Contractor",
+)
+
+EMAIL_MAX_LENGTH = 254
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+
+
+def normalize_email(value: Any) -> str:
+    """One rule for every place an email enters the app (login, Users tab, CLI, env).
+
+    Deliberately simple: intranet domains such as ``ops@site.local`` must work.
+    """
+    text = str(value or "").strip()
+    if not text or len(text) > EMAIL_MAX_LENGTH or not _EMAIL_RE.match(text):
+        raise ValueError("Enter a valid email address (name@domain)")
+    return text
+
+
+Email = Annotated[str, AfterValidator(normalize_email)]
 
 
 def _clean(value: Any) -> Any:
@@ -122,6 +147,16 @@ class Report(ReportBase):
     """Payload for creating a report."""
 
     BoreholeID: str = Field(min_length=1)
+
+    @field_validator("BoreholeID", mode="after")
+    @classmethod
+    def _id_chars(cls, value: str) -> str:
+        if _BAD_ID_CHARS.search(value):
+            raise ValueError("BoreholeID cannot contain / \\ ? # % or control characters")
+        if value in {".", ".."}:
+            # Browsers rewrite these as path segments, so the log could never be edited.
+            raise ValueError('BoreholeID cannot be "." or ".."')
+        return value
     ProjectName: str = Field(min_length=1)
     SiteName: str = Field(min_length=1)
     Latitude: Optional[str] = None
@@ -172,6 +207,14 @@ class ReportUpdate(ReportBase):
     Contractor: Optional[str] = Field(default=None, min_length=1)
     LoggingGeologist: Optional[str] = None
     Remarks: Optional[str] = None
+
+    @field_validator(*_REQUIRED_FIELDS, mode="before")
+    @classmethod
+    def _not_null(cls, value: Any, info) -> Any:
+        # Leaving a required field out is fine (partial update); sending null would blank it.
+        if value is None:
+            raise ValueError(f"{info.field_name} cannot be empty")
+        return value
 
     @model_validator(mode="after")
     def _dates_in_order(self) -> "ReportUpdate":

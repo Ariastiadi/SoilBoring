@@ -1,14 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { postReport } from '../api'
-
-const methodOptions = [
-  'Wash Boring + SPT',
-  'Rotary Wash + SPT',
-  'Hollow Stem Auger',
-  'Coring + SPT',
-]
-
-const uscsOptions = ['CL', 'ML', 'SM', 'SC', 'GC', 'SP', 'SW']
+import { METHOD_OPTIONS as methodOptions, USCS_OPTIONS as uscsOptions } from '../options'
 
 const DRAFT_KEY = 'borehole-form-draft'
 
@@ -160,6 +152,9 @@ export default function DailyReportForm() {
       const n = Number(val)
       return Number.isFinite(n) ? n : NaN
     }
+    if (/[\/\\?#%\u0000-\u001f]/.test(BoreholeID) || ['.', '..'].includes(BoreholeID.trim())) {
+      errors.push('Borehole ID cannot contain / \\ ? # % characters or be "." / "..".')
+    }
     const latNum = toNumber(Latitude)
     if (latNum !== null && (Number.isNaN(latNum) || latNum < -90 || latNum > 90)) {
       errors.push('Latitude must be between -90 and 90.')
@@ -177,7 +172,7 @@ export default function DailyReportForm() {
       errors.push('Final depth is required and must be numeric.')
     }
     const targetDepth = toNumber(TargetDepth_m)
-    if (targetDepth !== null && finalDepth !== null && !Number.isNaN(finalDepth) && finalDepth > targetDepth * 1.5) {
+    if (targetDepth !== null && targetDepth > 0 && finalDepth !== null && !Number.isNaN(finalDepth) && finalDepth > targetDepth * 1.5) {
       errors.push('Final depth looks too large versus the target depth.')
     }
     const start = StartDate ? new Date(StartDate) : null
@@ -248,11 +243,11 @@ export default function DailyReportForm() {
           <label title={tooltips.SiteName}>Site / Zone</label>
           <input value={SiteName} onChange={e => setSiteName(e.target.value)} required title={tooltips.SiteName} placeholder="Zone B-2" />
           <label title={tooltips.Latitude}>Latitude</label>
-          <input type="number" step="0.00001" min={-90} max={90} value={Latitude} onChange={e => setLatitude(e.target.value)} title={tooltips.Latitude} placeholder="-6.17510" />
+          <input type="number" step="any" min={-90} max={90} value={Latitude} onChange={e => setLatitude(e.target.value)} title={tooltips.Latitude} placeholder="-6.17510" />
           <label title={tooltips.Longitude}>Longitude</label>
-          <input type="number" step="0.00001" min={-180} max={180} value={Longitude} onChange={e => setLongitude(e.target.value)} title={tooltips.Longitude} placeholder="106.86520" />
+          <input type="number" step="any" min={-180} max={180} value={Longitude} onChange={e => setLongitude(e.target.value)} title={tooltips.Longitude} placeholder="106.86520" />
           <label title={tooltips.GroundElevation_mRL}>Ground Elevation (mRL)</label>
-          <input type="number" step="0.1" value={GroundElevation_mRL} onChange={e => setGroundElevation(e.target.value)} title={tooltips.GroundElevation_mRL} placeholder="8.5" />
+          <input type="number" step="any" value={GroundElevation_mRL} onChange={e => setGroundElevation(e.target.value)} title={tooltips.GroundElevation_mRL} placeholder="8.5" />
         </div>
         <div>
           <h3>Schedule & Team</h3>
@@ -280,17 +275,17 @@ export default function DailyReportForm() {
               ))}
             </select>
             <label title={tooltips.BoreholeDiameter_mm}>Borehole Diameter (mm)</label>
-            <input type="number" min={50} max={500} step="1" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />
+            <input type="number" min={50} max={500} step="any" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />
             <label title={tooltips.CasingInstalled_mm}>Casing Installed (mm)</label>
-            <input type="number" min={0} max={500} step="1" value={CasingInstalled_mm} onChange={e => setCasingInstalled(e.target.value)} title={tooltips.CasingInstalled_mm} />
+            <input type="number" min={0} max={500} step="any" value={CasingInstalled_mm} onChange={e => setCasingInstalled(e.target.value)} title={tooltips.CasingInstalled_mm} />
           </div>
           <div>
             <label title={tooltips.TargetDepth_m}>Target Depth (m)</label>
-            <input type="number" min={0} max={250} step="0.1" value={TargetDepth_m} onChange={e => setTargetDepth(e.target.value)} title={tooltips.TargetDepth_m} />
+            <input type="number" min={0} max={250} step="any" value={TargetDepth_m} onChange={e => setTargetDepth(e.target.value)} title={tooltips.TargetDepth_m} />
             <label title={tooltips.FinalDepth_m}>Final Depth (m)</label>
-            <input type="number" min={0} max={300} step="0.1" value={FinalDepth_m} onChange={e => setFinalDepth(e.target.value)} required title={tooltips.FinalDepth_m} />
+            <input type="number" min={0} max={300} step="any" value={FinalDepth_m} onChange={e => setFinalDepth(e.target.value)} required title={tooltips.FinalDepth_m} />
             <label title={tooltips.Avg_SPT_N60}>Average SPT N60</label>
-            <input type="number" min={0} max={200} step="1" value={Avg_SPT_N60} onChange={e => setAvgSpt(e.target.value)} title={tooltips.Avg_SPT_N60} placeholder="28" />
+            <input type="number" min={0} max={200} step="any" value={Avg_SPT_N60} onChange={e => setAvgSpt(e.target.value)} title={tooltips.Avg_SPT_N60} placeholder="28" />
           </div>
         </div>
       </div>
@@ -300,7 +295,7 @@ export default function DailyReportForm() {
         <div className="row">
           <div>
             <label title={tooltips.GroundwaterDepth_m}>Groundwater Depth (m)</label>
-            <input type="number" min={0} max={300} step="0.1" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(e.target.value)} title={tooltips.GroundwaterDepth_m} />
+            <input type="number" min={0} max={300} step="any" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(e.target.value)} title={tooltips.GroundwaterDepth_m} />
             <label className="checkbox" title={tooltips.GroundwaterEncountered}>
               <input type="checkbox" checked={GroundwaterEncountered} onChange={e => setGroundwaterEncountered(e.target.checked)} />
               Groundwater encountered

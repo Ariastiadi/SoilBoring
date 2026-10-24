@@ -6,13 +6,14 @@ never leave a half-written ``reports.csv`` behind.
 """
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import os
 import pathlib
 import tempfile
 import threading
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 
 DATA_PATH = pathlib.Path(os.environ.get("DATA_DIR", "data"))
@@ -60,6 +61,10 @@ class SchemaMismatchError(RuntimeError):
     """The existing reports.csv has columns this app does not know about."""
 
 
+class AmbiguousReportError(Exception):
+    """Several rows match the BoreholeID only case-insensitively (legacy/hand-edited CSV)."""
+
+
 def _default_mode(path: pathlib.Path) -> int:
     """Keep an existing file's permissions; new data files are readable (0644) like before."""
     try:
@@ -86,13 +91,24 @@ def atomic_write_text(path: pathlib.Path, content: str, *, mode: Optional[int] =
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp_name, mode)
+        _match_owner(tmp_name, path)
         os.replace(tmp_name, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
+
+
+def _match_owner(tmp_name: str, path: pathlib.Path) -> None:
+    """When running as root (e.g. ``docker compose exec`` of the CLI), give the new file
+    to the owner of the data folder, so the unprivileged app can still read it."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        owner = os.stat(path) if path.exists() else os.stat(path.parent)
+        os.chown(tmp_name, owner.st_uid, owner.st_gid)
+    except OSError:
+        pass
 
 
 def _to_row(report: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,7 +131,8 @@ def _render_csv(items: List[Dict[str, Any]]) -> str:
 def _read_raw() -> tuple[Sequence[str], List[Dict[str, Any]]]:
     if not FILE.exists():
         return [], []
-    with FILE.open("r", encoding="utf-8", newline="") as handle:
+    # utf-8-sig also accepts files saved by Excel as "CSV UTF-8" (with a BOM).
+    with FILE.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         header = list(reader.fieldnames or [])
         items = [dict(row) for row in reader]
@@ -139,12 +156,38 @@ def load_reports() -> List[Dict[str, Any]]:
     return [_to_row(row) for row in items]
 
 
+def _key(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _find_index(items: List[Dict[str, Any]], borehole_id: str) -> Optional[int]:
+    """Exact match first; otherwise a single case-insensitive match.
+
+    New IDs are unique case-insensitively, but a hand-edited CSV may hold e.g. ``bh-9``
+    and ``BH-9``: then only the exact spelling is accepted, never "all of them".
+    """
+    wanted = _key(borehole_id)
+    for index, row in enumerate(items):
+        if _key(row.get("BoreholeID")) == wanted:
+            return index
+    folded = [i for i, row in enumerate(items) if _key(row.get("BoreholeID")).lower() == wanted.lower()]
+    if len(folded) > 1:
+        raise AmbiguousReportError(wanted)
+    return folded[0] if folded else None
+
+
+def _read_checked() -> List[Dict[str, Any]]:
+    header, items = _read_raw()
+    if header:
+        _check_schema(header)
+    return items
+
+
 def get_report(borehole_id: str) -> Optional[Dict[str, Any]]:
-    wanted = str(borehole_id).strip().lower()
-    for row in load_reports():
-        if str(row.get("BoreholeID", "")).strip().lower() == wanted:
-            return row
-    return None
+    with _LOCK:
+        items = _read_checked()
+        index = _find_index(items, borehole_id)
+        return None if index is None else _to_row(items[index])
 
 
 def save_report(report: Dict[str, Any], submitted_by: str | None = None) -> None:
@@ -152,12 +195,10 @@ def save_report(report: Dict[str, Any], submitted_by: str | None = None) -> None
     payload = dict(report)
     if submitted_by:
         payload["SubmittedBy"] = submitted_by
-    new_id = str(payload.get("BoreholeID", "")).strip().lower()
+    new_id = _key(payload.get("BoreholeID")).lower()
     with _LOCK:
-        header, items = _read_raw()
-        if header:
-            _check_schema(header)
-        if any(str(r.get("BoreholeID", "")).strip().lower() == new_id for r in items):
+        items = _read_checked()
+        if any(_key(r.get("BoreholeID")).lower() == new_id for r in items):
             raise DuplicateReportError(new_id)
         items.append(payload)
         atomic_write_text(FILE, _render_csv(items))
@@ -167,34 +208,49 @@ def _write_reports(items: List[Dict[str, Any]]) -> None:
     atomic_write_text(FILE, _render_csv(items))
 
 
-def delete_report(borehole_id: str) -> bool:
-    """Remove the report matching the BoreholeID. Returns True if deleted."""
-    wanted = str(borehole_id).strip().lower()
+Authorizer = Callable[[Dict[str, Any]], None]
+
+
+def delete_report(borehole_id: str, authorize: Optional[Authorizer] = None) -> bool:
+    """Remove the one report matching BoreholeID. Returns True if deleted.
+
+    ``authorize`` is called with the row while the lock is held (it may raise), so the
+    row that was checked is exactly the row that is removed.
+    """
     with _LOCK:
-        header, items = _read_raw()
-        if header:
-            _check_schema(header)
-        remaining = [r for r in items if str(r.get("BoreholeID", "")).strip().lower() != wanted]
-        if len(remaining) == len(items):
+        items = _read_checked()
+        index = _find_index(items, borehole_id)
+        if index is None:
             return False
-        _write_reports(remaining)
+        if authorize:
+            authorize(_to_row(items[index]))
+        del items[index]
+        _write_reports(items)
         return True
 
 
-def update_report(borehole_id: str, updates: Dict[str, Any]) -> bool:
-    """Update editable fields of the report matching BoreholeID."""
-    wanted = str(borehole_id).strip().lower()
+def update_report(
+    borehole_id: str,
+    updates: Dict[str, Any],
+    authorize: Optional[Authorizer] = None,
+    validate: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> bool:
+    """Update editable fields of the report matching BoreholeID.
+
+    ``validate`` receives the merged row before it is written (it may raise).
+    """
     safe_updates = {k: v for k, v in (updates or {}).items() if k in EDITABLE_FIELDS}
     with _LOCK:
-        header, items = _read_raw()
-        if header:
-            _check_schema(header)
-        updated = False
-        for row in items:
-            if str(row.get("BoreholeID", "")).strip().lower() == wanted:
-                row.update(safe_updates)
-                updated = True
-                break
-        if updated:
-            _write_reports(items)
-        return updated
+        items = _read_checked()
+        index = _find_index(items, borehole_id)
+        if index is None:
+            return False
+        if authorize:
+            authorize(_to_row(items[index]))
+        merged = dict(items[index])
+        merged.update(safe_updates)
+        if validate:
+            validate(_to_row(merged))
+        items[index] = merged
+        _write_reports(items)
+        return True

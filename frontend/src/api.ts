@@ -72,6 +72,10 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+export function getAuthToken() {
+  return authToken;
+}
+
 export function setUnauthorizedHandler(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
@@ -93,7 +97,9 @@ async function readErrorDetail(response: Response): Promise<string> {
     if (Array.isArray(detail)) {
       return detail
         .map((item: any) => {
-          const field = Array.isArray(item?.loc) ? item.loc[item.loc.length - 1] : "";
+          const last = Array.isArray(item?.loc) ? item.loc[item.loc.length - 1] : "";
+          // Model-level errors point at "body"/"query" itself, which is not a field name.
+          const field = last === "body" || last === "query" || last === "path" ? "" : last;
           const text = String(item?.msg ?? "").replace(/^Value error, /, "");
           return field && !text.includes(String(field)) ? `${field}: ${text}` : text;
         })

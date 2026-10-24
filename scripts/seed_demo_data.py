@@ -8,7 +8,6 @@ The data is random and only meant for trying the dashboards; it is deterministic
 given --seed so screenshots and tests are reproducible.
 """
 import argparse
-import os
 import random
 import sys
 from datetime import date, timedelta

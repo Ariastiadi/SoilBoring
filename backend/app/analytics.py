@@ -204,11 +204,14 @@ def build_summary_report(
     avg_spt = _avg(r["avg_spt"] for r in rows)
     total_meterage = round(sum((r["final_depth"] or 0) for r in rows), 1)
 
-    if rows:
+    actual_range: Dict[str, Optional[str]]
+    if period == "weekly" and start_date and end_date:
+        # Label the range the user asked for, not just the days that happen to have logs.
+        actual_range = {"from": start_date.strftime("%Y-%m-%d"), "to": end_date.strftime("%Y-%m-%d")}
+    elif rows:
         actual_range = {"from": rows[0]["start_dt"].strftime("%Y-%m-%d"), "to": rows[-1]["start_dt"].strftime("%Y-%m-%d")}
     else:
-        actual_range = {"from": start_date.strftime("%Y-%m-%d") if start_date else None,
-                        "to": end_date.strftime("%Y-%m-%d") if end_date else None}
+        actual_range = {"from": None, "to": None}
 
     period_label = None
     if period == "weekly" and actual_range["from"] and actual_range["to"]:
@@ -253,7 +256,8 @@ def build_summary_report(
     highlights: List[str] = []
     for r in rows[-3:]:
         desc = r["soil_description"][:120] if r["soil_description"] else ""
-        line = f"{r['start_date']} | {r['borehole_id']} at {r['project']} ({r['site']}): depth {r['final_depth']} m"
+        depth = f"{r['final_depth']} m" if r["final_depth"] is not None else "-"
+        line = f"{r['start_date']} | {r['borehole_id']} at {r['project']} ({r['site']}): depth {depth}"
         if desc:
             line += f" – {desc}"
         lines.append(f"- {line}")
@@ -268,7 +272,12 @@ def build_summary_report(
                 "Using the provided statistics, craft a concise executive summary (<=120 words) "
                 "covering drilling volume, groundwater conditions, soil behavior, and any risk signals."
             ),
-            payload={"period": period, "stats": stats, "highlights": highlights},
+            # "as_of" changes every minute; leaving it out lets the narrative cache work.
+            payload={
+                "period": period,
+                "stats": {k: v for k, v in stats.items() if k != "as_of"},
+                "highlights": highlights,
+            },
         )
 
     return {

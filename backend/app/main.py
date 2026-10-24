@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from .auth import bootstrap_admin_from_env
 from .routers import ai, auth, dashboard, reports, summaries, users
+from .storage import AmbiguousReportError, SchemaMismatchError
 
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -29,6 +30,23 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Soil Boring Ops API", lifespan=lifespan)
+
+
+@app.exception_handler(SchemaMismatchError)
+async def _schema_mismatch(_request: Request, exc: SchemaMismatchError):
+    # Same answer on every endpoint that reads reports.csv (not a bare 500).
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(AmbiguousReportError)
+async def _ambiguous_report(_request: Request, exc: AmbiguousReportError):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": f"Several logs match '{exc}' when ignoring upper/lower case; "
+            "use the exact BoreholeID or fix reports.csv."
+        },
+    )
 
 # Authentication uses bearer tokens (no cookies), so credentials are not needed.
 app.add_middleware(

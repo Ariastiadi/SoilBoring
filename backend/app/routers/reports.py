@@ -1,19 +1,11 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..auth import get_current_user
 from ..models import Report, ReportUpdate
-from ..storage import (
-    DuplicateReportError,
-    SchemaMismatchError,
-    delete_report,
-    get_report,
-    load_reports,
-    save_report,
-    update_report,
-)
+from ..storage import DuplicateReportError, delete_report, load_reports, save_report, update_report
 
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -34,60 +26,55 @@ def _parse_day(value) -> Optional[datetime]:
         return None
 
 
-def _load_or_409():
-    try:
-        return load_reports()
-    except SchemaMismatchError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+def _owner_check(user: dict, action: str):
+    def authorize(row: Dict[str, Any]) -> None:
+        if not _can_modify(user, row):
+            raise HTTPException(status_code=403, detail=f"You can only {action} logs you submitted")
+
+    return authorize
+
+
+def _check_dates(row: Dict[str, Any]) -> None:
+    start = _parse_day(row.get("StartDate"))
+    end = _parse_day(row.get("EndDate"))
+    if start and end and start > end:
+        raise HTTPException(status_code=422, detail="StartDate must not be after EndDate")
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_report(report: Report, user=Depends(get_current_user)):
     try:
         save_report(report.model_dump(), submitted_by=user["email"])
-    except DuplicateReportError:
+    except DuplicateReportError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A borehole with ID '{report.BoreholeID}' already exists",
-        )
-    except SchemaMismatchError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        ) from exc
     return {"status": "ok"}
 
 
 @router.get("")
 def list_reports(user=Depends(get_current_user)):
-    return _load_or_409()
+    return load_reports()
 
 
-@router.delete("/{borehole_id}")
+# ":path" so that legacy IDs containing "/" can still be edited and deleted.
+@router.delete("/{borehole_id:path}")
 def remove_report(borehole_id: str, user=Depends(get_current_user)):
-    existing = get_report(borehole_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    if not _can_modify(user, existing):
-        raise HTTPException(status_code=403, detail="You can only delete logs you submitted")
-    if not delete_report(borehole_id):
+    if not delete_report(borehole_id, authorize=_owner_check(user, "delete")):
         raise HTTPException(status_code=404, detail="Report not found")
     return {"status": "deleted"}
 
 
-@router.put("/{borehole_id}")
+@router.put("/{borehole_id:path}")
 def edit_report(
     borehole_id: str,
     changes: ReportUpdate,
     user=Depends(get_current_user),
 ):
-    existing = get_report(borehole_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Report not found")
-    if not _can_modify(user, existing):
-        raise HTTPException(status_code=403, detail="You can only edit logs you submitted")
     updates = changes.model_dump(exclude_unset=True)
-    start = _parse_day(updates.get("StartDate") or existing.get("StartDate"))
-    end = _parse_day(updates.get("EndDate") or existing.get("EndDate"))
-    if start and end and start > end:
-        raise HTTPException(status_code=422, detail="StartDate must not be after EndDate")
-    if not update_report(borehole_id, updates):
+    if not update_report(
+        borehole_id, updates, authorize=_owner_check(user, "edit"), validate=_check_dates
+    ):
         raise HTTPException(status_code=404, detail="Report not found")
     return {"status": "updated"}

@@ -11,6 +11,7 @@ export default function UserAdmin({ currentUserEmail }: Props) {
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<User['role']>('general')
   const [status, setStatus] = useState('Loading users...')
+  const [busy, setBusy] = useState(false)
 
   const loadUsers = async (silent = false) => {
     if (!silent) {
@@ -33,10 +34,12 @@ export default function UserAdmin({ currentUserEmail }: Props) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    if (busy) return
     if (!email.trim() || !password.trim()) {
       setStatus('Email and password are required')
       return
     }
+    setBusy(true)
     setStatus('Creating user...')
     try {
       await createUser({ email: email.trim(), password, role })
@@ -47,11 +50,15 @@ export default function UserAdmin({ currentUserEmail }: Props) {
       await loadUsers(true)
     } catch (err: any) {
       setStatus(`Error: ${err.message}`)
+    } finally {
+      setBusy(false)
     }
   }
 
   const onDelete = async (targetEmail: string) => {
+    if (busy) return
     if (!window.confirm(`Remove ${targetEmail}? This cannot be undone.`)) return
+    setBusy(true)
     setStatus('Removing user...')
     try {
       await deleteUser(targetEmail)
@@ -59,6 +66,8 @@ export default function UserAdmin({ currentUserEmail }: Props) {
       await loadUsers(true)
     } catch (err: any) {
       setStatus(`Error: ${err.message}`)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -68,20 +77,20 @@ export default function UserAdmin({ currentUserEmail }: Props) {
         <h3 style={{ marginTop: 0 }}>Add User</h3>
         <form onSubmit={onSubmit} className="row">
           <div>
-            <label>Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" required />
+            <label htmlFor="new-user-email">Email</label>
+            <input id="new-user-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" required />
           </div>
           <div>
-            <label>Password</label>
-            <input type="password" autoComplete="new-password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" required />
-            <label>Role</label>
-            <select value={role} onChange={e => setRole(e.target.value as User['role'])}>
+            <label htmlFor="new-user-password">Password</label>
+            <input id="new-user-password" type="password" autoComplete="new-password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" required />
+            <label htmlFor="new-user-role">Role</label>
+            <select id="new-user-role" value={role} onChange={e => setRole(e.target.value as User['role'])}>
               <option value="general">General (no user admin)</option>
               <option value="admin">Admin</option>
             </select>
           </div>
           <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
-            <button type="submit">Create</button>
+            <button type="submit" disabled={busy}>Create</button>
             <span>{status}</span>
           </div>
         </form>
@@ -101,9 +110,9 @@ export default function UserAdmin({ currentUserEmail }: Props) {
                 </div>
                 <button
                   onClick={() => onDelete(u.email)}
-                  disabled={u.email === currentUserEmail}
+                  disabled={busy || u.email.toLowerCase() === currentUserEmail.toLowerCase()}
                   style={{ background: 'var(--danger, #c62828)' }}
-                  title={u.email === currentUserEmail ? 'You cannot remove the account currently in use' : 'Delete user'}
+                  title={u.email.toLowerCase() === currentUserEmail.toLowerCase() ? 'You cannot remove the account currently in use' : 'Delete user'}
                 >
                   Remove
                 </button>

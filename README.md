@@ -94,7 +94,9 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 - Minimum password length is 8. After 5 failed sign-ins for an email, further attempts are blocked for 15 minutes.
 - **admin**: manages users and can edit/delete any log. **general**: can create logs and can edit/delete only the logs they submitted.
 - An admin cannot remove their own account, and the last admin can never be removed.
-- Tokens are signed with `AUTH_TOKEN_SECRET` and expire per `AUTH_TOKEN_TTL`.
+- Tokens are signed with `AUTH_TOKEN_SECRET` and expire per `AUTH_TOKEN_TTL`. Removing an account (or recreating it with a new password) also ends every session it had.
+- In a hand-edited `users.json`, each entry needs `"role": "admin"` or `"role": "general"`. A missing or unknown role is treated as `general` (a warning is logged), never as admin.
+- Emails only need the form `name@domain`, so intranet addresses such as `ops@site.local` work.
 
 ---
 
@@ -112,9 +114,10 @@ USCS_Class, Avg_SPT_N60, Contractor, LoggingGeologist, Remarks, SubmittedBy
 Rules enforced by the API:
 
 - `BoreholeID`, `ProjectName`, `SiteName`, `StartDate`, `EndDate`, `DrillingMethod`, `FinalDepth_m` and `Contractor` are required.
-- `BoreholeID` must be unique (case-insensitive); a duplicate returns `409`.
+- `BoreholeID` must be unique (case-insensitive); a duplicate returns `409`. It may not contain `/ \ ? # %` or control characters.
 - Dates use `YYYY-MM-DD` and `StartDate` may not be after `EndDate`; numeric fields must be finite numbers; latitude/longitude must be in range.
 - `SubmittedBy` is set from the signed-in user and `BoreholeID` cannot be changed after creation; clients cannot overwrite them.
+- A `reports.csv` saved by Excel as "CSV UTF-8" (with a byte-order mark) is read normally.
 - Writes are atomic (temp file + rename), so a crash can never leave a half-written CSV. A CSV with *fewer* known columns is migrated on the next write; one with *unknown* columns is rejected with `409` instead of being overwritten.
 
 ---
@@ -196,6 +199,7 @@ Notes:
 3. The AI, dashboard and summary endpoints now require sign-in; any script calling them needs a bearer token from `/api/auth/login`.
 4. `OLLAMA_URL` no longer has a localhost default; set it to turn AI on.
 5. Docker: the `./data` folder is re-owned by the container's app user on first start.
+6. Check that every entry in `data/users.json` has `"role": "admin"` or `"role": "general"`; an entry without a role is now a general user.
 
 ---
 

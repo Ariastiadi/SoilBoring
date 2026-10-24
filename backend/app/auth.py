@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .models import normalize_email
 from .storage import DATA_PATH, atomic_write_text
 
 
@@ -122,14 +123,16 @@ def _load_users() -> Dict[str, Dict[str, Any]]:
     if not USER_FILE.exists():
         return {}
     try:
-        with USER_FILE.open("r", encoding="utf-8") as f:
+        with USER_FILE.open("r", encoding="utf-8-sig") as f:
             payload = json.load(f)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid users.json: {exc}") from exc
     users: Dict[str, Dict[str, Any]] = {}
     if isinstance(payload, dict):
+        # Oldest format ({"email": "password"}): every account was an administrator.
         for email, password in payload.items():
-            if not isinstance(password, str):
+            email = str(email).strip()
+            if not email or not isinstance(password, str) or not password:
                 continue
             users[email.lower()] = {"email": email, "password": password, "role": "admin"}
     elif isinstance(payload, list):
@@ -138,19 +141,33 @@ def _load_users() -> Dict[str, Dict[str, Any]]:
                 continue
             email = entry.get("email")
             password = entry.get("password_hash") or entry.get("password")
-            role = entry.get("role") or entry.get("type") or "admin"
-            if not email or not password:
+            if not isinstance(email, str) or not email.strip() or not isinstance(password, str) or not password:
                 continue
-            if role not in VALID_ROLES:
-                role = "admin"
-            users[email.lower()] = {"email": email, "password": password, "role": role}
+            email = email.strip()
+            users[email.lower()] = {"email": email, "password": password, "role": _normalize_role(entry, email)}
     return users
+
+
+def _normalize_role(entry: Dict[str, Any], email: str) -> str:
+    """Read the role of a users.json entry; anything unrecognised gets the least privilege."""
+    raw = entry.get("role") or entry.get("type")
+    role = str(raw).strip().lower() if raw is not None else ""
+    if role in VALID_ROLES:
+        return role
+    logger.warning(
+        "users.json: account %s has %s role %r; treating it as 'general'. "
+        "Set \"role\": \"admin\" explicitly for administrators.",
+        email,
+        "an unknown" if role else "no",
+        raw,
+    )
+    return "general"
 
 
 def _save_users(users: Dict[str, Dict[str, Any]]) -> None:
     sorted_items = sorted(users.items(), key=lambda item: item[0])
     payload = [
-        {"email": item[1]["email"], "password": item[1]["password"], "role": item[1].get("role", "admin")}
+        {"email": item[1]["email"], "password": item[1]["password"], "role": item[1].get("role", "general")}
         for item in sorted_items
     ]
     atomic_write_text(USER_FILE, json.dumps(payload, indent=2) + "\n", mode=0o600)
@@ -162,6 +179,8 @@ def _save_users(users: Dict[str, Dict[str, Any]]) -> None:
 
 MAX_FAILED_LOGINS = 5
 LOCKOUT_WINDOW_SECONDS = 15 * 60
+# Bound memory use even if an attacker cycles through many different emails.
+_MAX_TRACKED_KEYS = 10_000
 _failed_logins: Dict[str, List[float]] = {}
 _throttle_lock = threading.Lock()
 
@@ -174,6 +193,19 @@ def _recent_failures(key: str, now: float) -> List[float]:
     else:
         _failed_logins.pop(key, None)
     return attempts
+
+
+def _prune_tracked(now: float) -> None:
+    if len(_failed_logins) < _MAX_TRACKED_KEYS:
+        return
+    for key in list(_failed_logins):
+        _recent_failures(key, now)
+    # Still full of live entries: drop the oldest ones.
+    overflow = len(_failed_logins) - _MAX_TRACKED_KEYS // 2
+    if overflow > 0:
+        oldest = sorted(_failed_logins, key=lambda k: _failed_logins[k][-1])[:overflow]
+        for key in oldest:
+            _failed_logins.pop(key, None)
 
 
 def _check_throttle(key: str) -> None:
@@ -190,8 +222,10 @@ def _check_throttle(key: str) -> None:
 
 
 def _record_failure(key: str) -> None:
+    now = time.time()
     with _throttle_lock:
-        _failed_logins.setdefault(key, []).append(time.time())
+        _prune_tracked(now)
+        _failed_logins.setdefault(key, []).append(now)
 
 
 def _clear_failures(key: str) -> None:
@@ -206,9 +240,12 @@ def reset_login_throttle() -> None:
 
 def authenticate_user(email: str, password: str) -> Dict[str, Any]:
     email_key = (email or "").strip().lower()
-    _check_throttle(email_key)
     password = password or ""
+    # Password checks run one at a time under this lock, so "check the lockout" and
+    # "record the failure" happen together: parallel guesses cannot slip past the
+    # limit, and only real failures count (correct logins arriving at once are fine).
     with _USERS_LOCK:
+        _check_throttle(email_key)
         users = _load_users()
         user = users.get(email_key)
         # Always run one hash so unknown emails cost the same as wrong passwords.
@@ -249,8 +286,17 @@ def _decode_payload(token: str) -> Dict[str, Any]:
     return payload
 
 
+def _credential_fingerprint(user: Dict[str, Any]) -> str:
+    """Changes whenever the account is recreated or its password (hash) changes,
+    so tokens issued before that stop working."""
+    return _sign("fp:" + user["password"])[:16]
+
+
 def generate_token(email: str) -> str:
-    payload = {"email": email, "exp": int(time.time()) + TOKEN_TTL}
+    user = _load_users().get(email.strip().lower())
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
+    payload = {"email": user["email"], "exp": int(time.time()) + TOKEN_TTL, "fp": _credential_fingerprint(user)}
     encoded = _encode_payload(payload)
     signature = _sign(encoded)
     return f"{encoded}.{signature}"
@@ -262,7 +308,8 @@ def _validate_token(token: str) -> Dict[str, Any]:
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format")
     expected = _sign(encoded)
-    if not hmac.compare_digest(signature, expected):
+    # Compare bytes: compare_digest() raises TypeError for non-ASCII str (a 500 instead of 401).
+    if not hmac.compare_digest(signature.encode("utf-8", "surrogateescape"), expected.encode("ascii")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token signature")
     payload = _decode_payload(encoded)
     exp = payload.get("exp")
@@ -282,7 +329,12 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     user = users.get(email.lower())
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
-    return {"email": user["email"], "role": user.get("role", "admin")}
+    fingerprint = payload.get("fp")
+    if not isinstance(fingerprint, str) or not hmac.compare_digest(
+        fingerprint.encode("utf-8", "surrogateescape"), _credential_fingerprint(user).encode("ascii")
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer valid; sign in again")
+    return {"email": user["email"], "role": user.get("role", "general")}
 
 
 def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
@@ -300,13 +352,17 @@ def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str,
 
 def list_users() -> List[Dict[str, str]]:
     users = _load_users()
-    return [{"email": u["email"], "role": u.get("role", "admin")} for u in users.values()]
+    return [{"email": u["email"], "role": u.get("role", "general")} for u in users.values()]
 
 
 def create_user(email: str, password: str, role: str) -> Dict[str, str]:
-    email_key = (email or "").strip().lower()
-    if not email_key or not password:
+    if not (email or "").strip() or not password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email and password are required")
+    try:
+        email = normalize_email(email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    email_key = email.lower()
     if len(password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -320,9 +376,9 @@ def create_user(email: str, password: str, role: str) -> Dict[str, str]:
         users = _load_users()
         if email_key in users:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists")
-        users[email_key] = {"email": email.strip(), "password": _hash_password(password), "role": role}
+        users[email_key] = {"email": email, "password": _hash_password(password), "role": role}
         _save_users(users)
-    return {"email": email.strip(), "role": role}
+    return {"email": email, "role": role}
 
 
 def delete_user(email: str, *, acting_email: Optional[str] = None) -> None:
@@ -334,8 +390,8 @@ def delete_user(email: str, *, acting_email: Optional[str] = None) -> None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         if acting_email and acting_email.strip().lower() == email_key:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot remove your own account")
-        if target.get("role", "admin") == "admin":
-            admins = [u for u in users.values() if u.get("role", "admin") == "admin"]
+        if target.get("role") == "admin":
+            admins = [u for u in users.values() if u.get("role") == "admin"]
             if len(admins) <= 1:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove the last admin account"
@@ -353,6 +409,11 @@ def bootstrap_admin_from_env() -> Optional[str]:
     with _USERS_LOCK:
         if _load_users():
             return None
-        create_user(email, password, "admin")
+        try:
+            create_user(email, password, "admin")
+        except HTTPException as exc:
+            # Do not crash-loop the container: log clearly and keep serving (the CLI still works).
+            logger.error("ADMIN_EMAIL/ADMIN_PASSWORD not used: %s", exc.detail)
+            return None
     logger.info("Created initial admin account for %s", email)
     return email

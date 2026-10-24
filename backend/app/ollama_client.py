@@ -62,7 +62,12 @@ def ask_strict(
     except (RequestException, ValueError) as exc:
         logger.warning("Ollama request failed: %s", exc)
         raise AIUnavailableError(UNAVAILABLE_MSG) from exc
-    return ((data.get("message") or {}).get("content") or "").strip()
+    reply = data.get("message") if isinstance(data, dict) else None
+    answer = reply.get("content") if isinstance(reply, dict) else None
+    if not isinstance(answer, str):
+        logger.warning("Unexpected Ollama response shape: %.200r", data)
+        raise AIUnavailableError("AI service returned an unexpected response.")
+    return answer.strip()
 
 
 def ask(

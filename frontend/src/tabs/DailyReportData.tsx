@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { deleteReport, listReports, updateReport } from '../api'
+import { METHOD_OPTIONS, USCS_OPTIONS, withCurrent } from '../options'
 
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 25]
 const BOREHOLE_COLUMNS = [
@@ -36,6 +37,19 @@ function csvCell(value: unknown): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
+const EDITABLE_FIELDS: Array<{ key: string; label: string; type?: string }> = [
+  { key: 'ProjectName', label: 'Project' },
+  { key: 'SiteName', label: 'Site / Zone' },
+  { key: 'StartDate', label: 'Start Date', type: 'date' },
+  { key: 'EndDate', label: 'End Date', type: 'date' },
+  { key: 'DrillingMethod', label: 'Method' },
+  { key: 'FinalDepth_m', label: 'Final Depth (m)', type: 'number' },
+  { key: 'GroundwaterDepth_m', label: 'Groundwater Depth (m)', type: 'number' },
+  { key: 'USCS_Class', label: 'USCS' },
+  { key: 'Avg_SPT_N60', label: 'Avg SPT N60', type: 'number' },
+  { key: 'Remarks', label: 'Remarks' },
+]
+
 export default function DailyReportData() {
   const [reports, setReports] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -54,14 +68,16 @@ export default function DailyReportData() {
   const [actionStatus, setActionStatus] = useState('')
   const [editTarget, setEditTarget] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<Record<string, string>>({})
+  const [editOriginal, setEditOriginal] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
 
+  // Keeps the current page after an edit or delete; only the first load starts at page 1.
   const loadReports = async () => {
     setLoading(true)
     setError('')
     try {
       const data = await listReports()
       setReports(Array.isArray(data) ? data : [])
-      setPage(0)
     } catch (err: any) {
       setError(err.message || 'Failed to load reports')
     } finally {
@@ -73,14 +89,6 @@ export default function DailyReportData() {
     void loadReports()
   }, [])
 
-  useEffect(() => {
-    if (!reports.length) {
-      if (page !== 0) setPage(0)
-      return
-    }
-    const lastPage = Math.max(0, Math.ceil(reports.length / pageSize) - 1)
-    if (page > lastPage) setPage(lastPage)
-  }, [reports, page, pageSize])
 
   const columns = useMemo(() => {
     if (!reports.length) return []
@@ -114,15 +122,26 @@ export default function DailyReportData() {
   const sortedReports = useMemo(() => {
     if (!sortKey) return filteredReports
     const sorted = [...filteredReports].sort((a: any, b: any) => {
-      const left = a?.[sortKey] ?? ''
-      const right = b?.[sortKey] ?? ''
-      if (!isNaN(Number(left)) && !isNaN(Number(right))) {
-        return Number(left) - Number(right)
-      }
-      return String(left).localeCompare(String(right))
+      const left = String(a?.[sortKey] ?? '').trim()
+      const right = String(b?.[sortKey] ?? '').trim()
+      // Empty cells always go last; Number('') would otherwise count them as 0.
+      if (!left || !right) return left === right ? 0 : left ? -1 : 1
+      const ln = Number(left)
+      const rn = Number(right)
+      if (Number.isFinite(ln) && Number.isFinite(rn)) return ln - rn
+      return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
     })
-    return sortDir === 'asc' ? sorted : sorted.reverse()
+    if (sortDir === 'asc') return sorted
+    // Reverse only the filled cells so empty ones stay at the bottom in both directions.
+    const filled = sorted.filter((r: any) => String(r?.[sortKey] ?? '').trim() !== '')
+    const empty = sorted.filter((r: any) => String(r?.[sortKey] ?? '').trim() === '')
+    return [...filled.reverse(), ...empty]
   }, [filteredReports, sortKey, sortDir])
+
+  // A new search, filter or sort order starts again at the first page.
+  useEffect(() => {
+    setPage(0)
+  }, [search, projectFilter, siteFilter, methodFilter, uscsFilter, dateFrom, dateTo, sortKey, sortDir])
 
   const totalPages = sortedReports.length ? Math.ceil(sortedReports.length / pageSize) : 0
   const safePage = totalPages ? Math.min(page, totalPages - 1) : 0
@@ -139,8 +158,13 @@ export default function DailyReportData() {
     setPage(0)
   }
 
-  const nextDisabled = !sortedReports.length || page + 1 >= totalPages
-  const prevDisabled = page === 0
+  // Keep the stored page inside the (filtered) result, e.g. after deleting the last row of a page.
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage)
+  }, [page, safePage])
+
+  const nextDisabled = !sortedReports.length || safePage + 1 >= totalPages
+  const prevDisabled = safePage === 0
 
   const uniqueValues = useMemo(() => {
     const getUnique = (key: string) => Array.from(new Set(reports.map(r => r?.[key]).filter(Boolean))).sort()
@@ -161,16 +185,26 @@ export default function DailyReportData() {
     }
   }
 
+  const closeEdit = () => {
+    setEditTarget(null)
+    setEditDraft({})
+    setEditOriginal({})
+  }
+
   const handleDelete = async (boreholeId: string) => {
-    if (!boreholeId) return
+    if (!boreholeId || busy) return
     if (!window.confirm(`Delete borehole ${boreholeId}?`)) return
+    setBusy(true)
     setActionStatus('Deleting...')
     try {
       await deleteReport(boreholeId)
+      if (editTarget === boreholeId) closeEdit()
       setActionStatus('Deleted')
       await loadReports()
     } catch (err: any) {
       setActionStatus(`Error: ${err.message}`)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -178,26 +212,39 @@ export default function DailyReportData() {
     if (!row?.BoreholeID) return
     setEditTarget(row.BoreholeID)
     const draft: Record<string, string> = {}
-    columns.forEach(col => {
-      draft[col] = row[col] ?? ''
+    EDITABLE_FIELDS.forEach(({ key }) => {
+      draft[key] = row[key] === null || row[key] === undefined ? '' : String(row[key])
     })
     setEditDraft(draft)
+    setEditOriginal(draft)
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setActionStatus(`Editing ${row.BoreholeID}`)
   }
 
   const saveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editTarget) return
+    if (!editTarget || busy) return
+    // Send only what was changed, so untouched (possibly legacy-formatted) values are never rewritten.
+    const changes: Record<string, string> = {}
+    Object.entries(editDraft).forEach(([key, value]) => {
+      if (value !== editOriginal[key]) changes[key] = value
+    })
+    if (!Object.keys(changes).length) {
+      setActionStatus('No changes to save')
+      closeEdit()
+      return
+    }
+    setBusy(true)
     setActionStatus('Saving changes...')
     try {
-      await updateReport(editTarget, editDraft)
+      await updateReport(editTarget, changes)
       setActionStatus('Saved')
-      setEditTarget(null)
-      setEditDraft({})
+      closeEdit()
       await loadReports()
     } catch (err: any) {
       setActionStatus(`Error: ${err.message}`)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -212,22 +259,13 @@ export default function DailyReportData() {
     const link = document.createElement('a')
     link.href = url
     link.download = 'borehole-logs.csv'
+    document.body.appendChild(link)
     link.click()
-    URL.revokeObjectURL(url)
+    link.remove()
+    // Revoking immediately can cancel the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  const editableFields: Array<{ key: string; label: string; type?: string }> = [
-    { key: 'ProjectName', label: 'Project' },
-    { key: 'SiteName', label: 'Site / Zone' },
-    { key: 'StartDate', label: 'Start Date', type: 'date' },
-    { key: 'EndDate', label: 'End Date', type: 'date' },
-    { key: 'DrillingMethod', label: 'Method' },
-    { key: 'FinalDepth_m', label: 'Final Depth (m)', type: 'number' },
-    { key: 'GroundwaterDepth_m', label: 'Groundwater Depth (m)', type: 'number' },
-    { key: 'USCS_Class', label: 'USCS' },
-    { key: 'Avg_SPT_N60', label: 'Avg SPT N60', type: 'number' },
-    { key: 'Remarks', label: 'Remarks' },
-  ]
 
   return (
     <div>
@@ -235,34 +273,34 @@ export default function DailyReportData() {
         <h3 style={{ marginTop: 0 }}>Find & Filter</h3>
         <div className="row">
           <div>
-            <label>Search</label>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search any field..." />
-            <label>Project</label>
-            <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
+            <label htmlFor="filter-search">Search</label>
+            <input id="filter-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search any field..." />
+            <label htmlFor="filter-project">Project</label>
+            <select id="filter-project" value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
               <option value="">All</option>
               {uniqueValues.projects.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            <label>Site</label>
-            <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
+            <label htmlFor="filter-site">Site</label>
+            <select id="filter-site" value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
               <option value="">All</option>
               {uniqueValues.sites.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div>
-            <label>Method</label>
-            <select value={methodFilter} onChange={e => setMethodFilter(e.target.value)}>
+            <label htmlFor="filter-method">Method</label>
+            <select id="filter-method" value={methodFilter} onChange={e => setMethodFilter(e.target.value)}>
               <option value="">All</option>
               {uniqueValues.methods.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
-            <label>USCS</label>
-            <select value={uscsFilter} onChange={e => setUscsFilter(e.target.value)}>
+            <label htmlFor="filter-uscs">USCS</label>
+            <select id="filter-uscs" value={uscsFilter} onChange={e => setUscsFilter(e.target.value)}>
               <option value="">All</option>
               {uniqueValues.uscs.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
             <label>Date range (Start {'->'} End)</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem' }}>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+              <input type="date" aria-label="Start date from" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+              <input type="date" aria-label="End date to" value={dateTo} onChange={e => setDateTo(e.target.value)} />
             </div>
           </div>
         </div>
@@ -277,28 +315,30 @@ export default function DailyReportData() {
         <div className="card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ marginTop: 0 }}>Edit Borehole {editTarget}</h3>
           <form onSubmit={saveEdit} className="row">
-            {editableFields.map(field => (
+            {EDITABLE_FIELDS.map(field => (
               <div key={field.key}>
-                <label>{field.label}</label>
+                <label htmlFor={`edit-${field.key}`}>{field.label}</label>
                 {field.key === 'USCS_Class' ? (
-                  <select value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
+                  <select id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
                     <option value="">Select</option>
-                    {['CL','ML','SM','SC','GC','SP','SW'].map(code => (
+                    {withCurrent(USCS_OPTIONS, editOriginal[field.key]).map(code => (
                       <option key={code} value={code}>{code}</option>
                     ))}
                   </select>
                 ) : field.key === 'DrillingMethod' ? (
-                  <select value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
+                  <select id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
                     <option value="">Select</option>
-                    {['Wash Boring + SPT','Rotary Wash + SPT','Hollow Stem Auger','Coring + SPT'].map(m => (
+                    {withCurrent(METHOD_OPTIONS, editOriginal[field.key]).map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
                 ) : field.key === 'Remarks' ? (
-                  <textarea value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))} />
+                  <textarea id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))} />
                 ) : (
                   <input
+                    id={`edit-${field.key}`}
                     type={field.type || 'text'}
+                    step={field.type === 'number' ? 'any' : undefined}
                     value={editDraft[field.key] ?? ''}
                     onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}
                   />
@@ -306,8 +346,8 @@ export default function DailyReportData() {
               </div>
             ))}
             <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="submit">Save</button>
-              <button type="button" onClick={() => { setEditTarget(null); setEditDraft({}); }}>Cancel</button>
+              <button type="submit" disabled={busy}>Save</button>
+              <button type="button" onClick={closeEdit}>Cancel</button>
             </div>
           </form>
         </div>
@@ -322,13 +362,9 @@ export default function DailyReportData() {
             ))}
           </select>
         </label>
-        <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={prevDisabled}>Previous</button>
+        <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={prevDisabled}>Previous</button>
         <button
-          onClick={() => setPage(p => {
-            if (!reports.length) return 0
-            const lastPage = Math.max(0, Math.ceil(sortedReports.length / pageSize) - 1)
-            return Math.min(lastPage, p + 1)
-          })}
+          onClick={() => setPage(Math.min(Math.max(0, totalPages - 1), safePage + 1))}
           disabled={nextDisabled}
         >
           Next
@@ -398,7 +434,7 @@ export default function DailyReportData() {
                   })}
                   <td style={{ padding: '.35rem', borderBottom: '1px dashed #1b263f', whiteSpace: 'nowrap' }}>
                     <button onClick={() => startEdit(row)} style={{ marginRight: '.5rem' }}>Edit</button>
-                    <button onClick={() => handleDelete(row.BoreholeID)} style={{ background: 'var(--danger, #c62828)' }}>Delete</button>
+                    <button onClick={() => handleDelete(row.BoreholeID)} disabled={busy} style={{ background: 'var(--danger, #c62828)' }}>Delete</button>
                   </td>
                 </tr>
               ))}
