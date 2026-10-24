@@ -10,7 +10,8 @@ import Login from './Login'
 import ChangePassword from './ChangePassword'
 import Security from './Security'
 import Activity from './tabs/Activity'
-import { discardOutboxItem, flushOutbox, outboxItems, retryOutboxItem, subscribeOutbox, type OutboxItem } from './outbox'
+import { discardOutboxItem, flushOutbox, outboxItems, retryOutboxItem, setOutboxUser, subscribeOutbox, type OutboxItem } from './outbox'
+import { confirmLeave } from './unsaved'
 import { lang, setLang, t } from './i18n'
 import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler, setupFirstAdmin } from './api'
 import type { Session } from './api'
@@ -31,6 +32,12 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>('report')
   const [auth, setAuth] = useState<AuthState>(() => {
     if (typeof window === 'undefined') return null
+    // A password-reset link opened in a browser where someone is signed in: show the reset form.
+    if (window.location.hash.startsWith('#reset=')) {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY)
+      clearUserData()
+      return null
+    }
     const raw = window.localStorage.getItem(AUTH_STORAGE_KEY)
     if (!raw) return null
     try {
@@ -96,6 +103,9 @@ export default function App() {
   }
 
   const handleLogout = () => {
+    if (!confirmLeave()) return
+    const waiting = outboxItems().length
+    if (waiting && !window.confirm(t('{n} log(s) on this device have not been sent yet. They stay here and are sent the next time you sign in. Sign out anyway?', { n: waiting }))) return
     setShowPasswordForm(false)
     setNotice('')
     clearUserData()
@@ -125,15 +135,29 @@ export default function App() {
   // Offline: logs saved without a connection wait here and are sent when back online.
   const [online, setOnline] = useState(() => navigator.onLine)
   const [outbox, setOutbox] = useState<OutboxItem[]>(outboxItems)
+  const userEmail = auth?.email ?? ''
   useEffect(() => {
+    setOutboxUser(userEmail)
+    setOutbox(outboxItems())
     const off = subscribeOutbox(setOutbox)
-    const up = () => { setOnline(true); if (auth) void flushOutbox() }
+    const tryNow = () => { if (userEmail && navigator.onLine && outboxItems().some(i => !i.error)) void flushOutbox() }
+    const up = () => { setOnline(true); tryNow() }
     const down = () => setOnline(false)
+    const visible = () => { if (document.visibilityState === 'visible') tryNow() }
     window.addEventListener('online', up)
     window.addEventListener('offline', down)
-    if (auth && navigator.onLine) void flushOutbox()
-    return () => { off(); window.removeEventListener('online', up); window.removeEventListener('offline', down) }
-  }, [auth])
+    document.addEventListener('visibilitychange', visible)
+    // Weak or captive connections do not always fire "online": try again every minute.
+    const timer = window.setInterval(tryNow, 60000)
+    tryNow()
+    return () => {
+      off()
+      window.removeEventListener('online', up)
+      window.removeEventListener('offline', down)
+      document.removeEventListener('visibilitychange', visible)
+      window.clearInterval(timer)
+    }
+  }, [userEmail])
 
   const tabs: { key: TabKey, label: string }[] = [
     { key: 'report', label: t('Borehole Log') },
@@ -167,7 +191,7 @@ export default function App() {
         </span>
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
           <button onClick={() => { setShowPasswordForm(v => !v); setNotice('') }}>{t('Account & security')}</button>
-          <button className="button-secondary" onClick={() => setLang(lang() === 'id' ? 'en' : 'id')} title={t('Language')}>
+          <button className="button-secondary" onClick={() => { if (confirmLeave()) setLang(lang() === 'id' ? 'en' : 'id') }} title={t('Language')}>
             {lang() === 'id' ? 'EN' : 'ID'}
           </button>
           <button onClick={handleLogout}>{t('Sign Out')}</button>
@@ -211,7 +235,7 @@ export default function App() {
           <button
             key={t.key}
             className={tab === t.key ? 'active' : ''}
-            onClick={() => setTab(t.key)}
+            onClick={() => { if (t.key !== tab && confirmLeave()) setTab(t.key) }}
           >
             {t.label}
           </button>

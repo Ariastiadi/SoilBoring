@@ -311,12 +311,19 @@ def build_ags(
                 "ISPT_REM": _ascii(test.get("remarks")),
             })
         type_counts: Dict[str, int] = {}
+        # Generated references (D1, D2 ...) skip any reference the user typed.
+        used_refs = {_ascii(s.get("ref")).upper() for s in depth.get("samples", []) if _ascii(s.get("ref"))}
         for sample in depth.get("samples", []):
             code = str(sample.get("type") or "").upper()
             if code not in _SAMPLE_DESCRIPTIONS:
                 continue
-            type_counts[code] = type_counts.get(code, 0) + 1
-            ref = _ascii(sample.get("ref")) or f"{code}{type_counts[code]}"
+            ref = _ascii(sample.get("ref"))
+            while not ref:
+                type_counts[code] = type_counts.get(code, 0) + 1
+                candidate = f"{code}{type_counts[code]}"
+                if candidate.upper() not in used_refs:
+                    ref = candidate
+                    used_refs.add(candidate.upper())
             top = _dp(sample.get("top"), 2)
             samp_rows.append({
                 "LOCA_ID": loca_id,

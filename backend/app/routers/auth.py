@@ -1,13 +1,15 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 
 from .. import audit, mailer
 from ..auth import (
     TOKEN_TTL,
+    allow_reset_email,
     authenticate_user,
     change_own_password,
+    confirm_password,
     confirm_totp_setup,
     create_first_admin,
     disable_totp,
@@ -21,6 +23,7 @@ from ..auth import (
     reset_with_token,
     setup_needed,
     start_totp_setup,
+    verify_current_totp,
 )
 from ..config import producer_name
 from ..models import Email
@@ -110,9 +113,15 @@ class PasswordConfirm(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class DisableRequest(PasswordConfirm):
+    code: str = Field(min_length=6, max_length=16)
+
+
 @router.post("/2fa/disable")
-def totp_disable(payload: PasswordConfirm, user=Depends(get_current_user)):
-    authenticate_user(user["email"], payload.password, check_otp=False)
+def totp_disable(payload: DisableRequest, user=Depends(get_current_user)):
+    """Needs the password and a current authenticator code (a stolen session is not enough)."""
+    confirm_password(user["email"], payload.password)
+    verify_current_totp(user["email"], payload.code)
     disable_totp(user["email"])
     audit.record(user["email"], "account.2fa_disabled", user["email"])
     return {"status": "disabled"}
@@ -120,7 +129,7 @@ def totp_disable(payload: PasswordConfirm, user=Depends(get_current_user)):
 
 @router.post("/recovery-codes")
 def new_recovery_codes(payload: PasswordConfirm, user=Depends(get_current_user)):
-    authenticate_user(user["email"], payload.password, check_otp=False)
+    confirm_password(user["email"], payload.password)
     codes = regenerate_recovery_codes(user["email"])
     audit.record(user["email"], "account.recovery_codes_created", user["email"])
     return {"recovery_codes": codes}
@@ -132,11 +141,13 @@ class RecoveryReset(BaseModel):
     email: Email
     recovery_code: str = Field(min_length=4, max_length=32)
     new_password: str = Field(min_length=1, max_length=256)
+    # Needed when the account has two-step verification on.
+    otp: Optional[str] = Field(default=None, max_length=16)
 
 
 @router.post("/reset-with-code")
 def reset_by_code(payload: RecoveryReset):
-    reset_with_recovery_code(payload.email, payload.recovery_code, payload.new_password)
+    reset_with_recovery_code(payload.email, payload.recovery_code, payload.new_password, payload.otp)
     audit.record(payload.email, "account.password_reset_with_code", payload.email)
     return {"status": "updated"}
 
@@ -145,21 +156,30 @@ class ForgotRequest(BaseModel):
     email: Email
 
 
+def _send_reset_mail(email: str) -> None:
+    token = make_reset_token(email)
+    if not token:
+        return
+    link = f"{mailer.base_url()}/#reset={token}"
+    sent = mailer.send(
+        email,
+        f"{producer_name()}: reset your password",
+        "Someone asked to reset the password of your account.\n\n"
+        f"Open this link within 30 minutes to choose a new password:\n{link}\n\n"
+        "If this was not you, ignore this email; your password stays the same.\n",
+    )
+    audit.record(email, "account.reset_email_sent" if sent else "account.reset_email_failed", email, public=True)
+
+
 @router.post("/forgot")
-def forgot(payload: ForgotRequest):
-    """Emails a reset link when email is configured. Same answer whether or not the account exists."""
-    if mailer.email_enabled():
-        token = make_reset_token(payload.email)
-        if token:
-            link = f"{mailer.base_url()}/#reset={token}"
-            sent = mailer.send(
-                payload.email,
-                f"{producer_name()}: reset your password",
-                "Someone asked to reset the password of your account.\n\n"
-                f"Open this link within 30 minutes to choose a new password:\n{link}\n\n"
-                "If this was not you, ignore this email; your password stays the same.\n",
-            )
-            audit.record(payload.email, "account.reset_email_sent" if sent else "account.reset_email_failed", payload.email)
+def forgot(payload: ForgotRequest, background: BackgroundTasks):
+    """Emails a reset link when email is configured.
+
+    The answer is the same, and equally fast, whether or not the account exists: the mail
+    is sent after the response. At most a few mails per address per hour.
+    """
+    if mailer.email_enabled() and allow_reset_email(payload.email):
+        background.add_task(_send_reset_mail, payload.email)
     return {"status": "ok", "email_enabled": mailer.email_enabled()}
 
 

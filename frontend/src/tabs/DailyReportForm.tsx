@@ -5,6 +5,9 @@ import { t } from '../i18n'
 
 const DRAFT_KEY = 'borehole-form-draft'
 
+// Typed as text: a number input would silently turn "1,5" into 15.
+const decimal = (v: string) => v.replace(/,/g, '.')
+
 export default function DailyReportForm() {
   const draft = useMemo(() => {
     if (typeof window === 'undefined') return null
@@ -266,11 +269,11 @@ export default function DailyReportForm() {
           <label title={tooltips.SiteName}>{t('Site / Zone')}</label>
           <input value={SiteName} onChange={e => setSiteName(e.target.value)} required title={tooltips.SiteName} placeholder={t('Zone B-2')} />
           <label title={tooltips.Latitude}>{t('Latitude')}</label>
-          <input type="number" step="any" min={-90} max={90} value={Latitude} onChange={e => setLatitude(e.target.value)} title={tooltips.Latitude} placeholder="-6.17510" />
+          <input type="text" pattern="-?[0-9]*[.]?[0-9]*" value={Latitude} onChange={e => setLatitude(decimal(e.target.value))} title={tooltips.Latitude} placeholder="-6.17510" />
           <label title={tooltips.Longitude}>{t('Longitude')}</label>
-          <input type="number" step="any" min={-180} max={180} value={Longitude} onChange={e => setLongitude(e.target.value)} title={tooltips.Longitude} placeholder="106.86520" />
+          <input type="text" pattern="-?[0-9]*[.]?[0-9]*" value={Longitude} onChange={e => setLongitude(decimal(e.target.value))} title={tooltips.Longitude} placeholder="106.86520" />
           <label title={tooltips.GroundElevation_mRL}>{t('Ground Elevation (mRL)')}</label>
-          <input type="number" step="any" value={GroundElevation_mRL} onChange={e => setGroundElevation(e.target.value)} title={tooltips.GroundElevation_mRL} placeholder="8.5" />
+          <input type="text" pattern="-?[0-9]*[.]?[0-9]*" value={GroundElevation_mRL} onChange={e => setGroundElevation(decimal(e.target.value))} title={tooltips.GroundElevation_mRL} placeholder="8.5" />
         </div>
         <div>
           <h3>{t('Schedule & Team')}</h3>
@@ -317,17 +320,17 @@ export default function DailyReportForm() {
               {CORE_SIZES.map(s => <option key={s.code} value={s.code}>{coreSizeLabel(s.code)}</option>)}
             </select>
             <label title={tooltips.BoreholeDiameter_mm}>{t('Borehole Diameter (mm)')}</label>
-            <input type="number" min={0} step="any" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(e.target.value)} title={tooltips.BoreholeDiameter_mm} />
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={BoreholeDiameter_mm} onChange={e => setBoreholeDiameter(decimal(e.target.value))} title={tooltips.BoreholeDiameter_mm} />
             <label title={tooltips.CasingInstalled_mm}>{t('Casing Installed (mm)')}</label>
-            <input type="number" min={0} step="any" value={CasingInstalled_mm} onChange={e => setCasingInstalled(e.target.value)} title={tooltips.CasingInstalled_mm} />
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={CasingInstalled_mm} onChange={e => setCasingInstalled(decimal(e.target.value))} title={tooltips.CasingInstalled_mm} />
           </div>
           <div>
             <label title={tooltips.TargetDepth_m}>{t('Target Depth (m)')}</label>
-            <input type="number" min={0} step="any" value={TargetDepth_m} onChange={e => setTargetDepth(e.target.value)} title={tooltips.TargetDepth_m} />
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={TargetDepth_m} onChange={e => setTargetDepth(decimal(e.target.value))} title={tooltips.TargetDepth_m} />
             <label title={tooltips.FinalDepth_m}>{t('Final Depth (m)')}</label>
-            <input type="number" min={0} step="any" value={FinalDepth_m} onChange={e => setFinalDepth(e.target.value)} required title={tooltips.FinalDepth_m} />
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={FinalDepth_m} onChange={e => setFinalDepth(decimal(e.target.value))} required title={tooltips.FinalDepth_m} />
             <label title={tooltips.Avg_SPT_N60}>{t('Average SPT N60')}</label>
-            <input type="number" min={0} step="any" value={Avg_SPT_N60} onChange={e => setAvgSpt(e.target.value)} title={tooltips.Avg_SPT_N60} placeholder="28" />
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={Avg_SPT_N60} onChange={e => setAvgSpt(decimal(e.target.value))} title={tooltips.Avg_SPT_N60} placeholder="28" />
           </div>
         </div>
       </div>
@@ -337,7 +340,7 @@ export default function DailyReportForm() {
         <div className="row">
           <div>
             <label title={tooltips.GroundwaterDepth_m}>{t('Groundwater Depth (m)')}</label>
-            <input type="number" min={0} step="any" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(e.target.value)} title={tooltips.GroundwaterDepth_m} />
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={GroundwaterDepth_m} onChange={e => setGroundwaterDepth(decimal(e.target.value))} title={tooltips.GroundwaterDepth_m} />
             <label className="checkbox" title={tooltips.GroundwaterEncountered}>
               <input type="checkbox" checked={GroundwaterEncountered} onChange={e => setGroundwaterEncountered(e.target.checked)} />
               {t('Groundwater encountered')}

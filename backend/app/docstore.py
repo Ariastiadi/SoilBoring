@@ -261,7 +261,9 @@ def lock(name: str) -> Iterator[None]:
 
 
 def reset_all_for_tests() -> None:
-    """Remove every document (test helper)."""
+    """Remove every document (test helper; refuses to run outside the test suite)."""
+    if os.environ.get("SOILBORING_TESTING") != "1":
+        raise RuntimeError("reset_all_for_tests() is only allowed in the test suite")
     if not USE_DATABASE:
         for path in DATA_PATH.iterdir():
             if path.is_file():

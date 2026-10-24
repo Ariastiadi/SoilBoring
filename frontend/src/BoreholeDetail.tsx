@@ -6,6 +6,7 @@ import {
 import BoreLog from './BoreLog'
 import { USCS_OPTIONS } from './options'
 import { locale, t } from './i18n'
+import { setUnsaved } from './unsaved'
 
 type Row = Record<string, string | undefined>
 type Section = 'layers' | 'spt' | 'samples' | 'core' | 'photos' | 'history'
@@ -90,12 +91,15 @@ function problems(d: ReturnType<typeof fromDraft>, finalDepth: number | null): {
   return { errors: out, warnings }
 }
 
+/** Numbers are typed as text: a number input would silently turn "1,5" into 15. */
 function Field({ value, onChange, type = 'number', disabled, placeholder }: {
   value: string, onChange: (v: string) => void, type?: string, disabled?: boolean, placeholder?: string
 }) {
+  const numeric = type === 'number'
   return (
-    <input value={value} type={type} inputMode={type === 'number' ? 'decimal' : undefined} step="any"
-      onChange={e => onChange(e.target.value)} disabled={disabled} placeholder={placeholder} />
+    <input value={value} type="text" inputMode={numeric ? 'decimal' : undefined}
+      onChange={e => onChange(numeric ? e.target.value.replace(/,/g, '.') : e.target.value)}
+      disabled={disabled} placeholder={placeholder} />
   )
 }
 
@@ -195,39 +199,57 @@ function Photos({ boreholeId, photos, canEdit, onChanged }: { boreholeId: string
   const [zoom, setZoom] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Each photo is downloaded once; its address is released only when the photo is gone.
+  const made = useRef<Record<string, string>>({})
   useEffect(() => {
     let active = true
-    const made: string[] = []
-    photos.forEach(p => {
+    const ids = new Set(photos.map(p => p.id))
+    Object.entries(made.current).forEach(([id, u]) => {
+      if (!ids.has(id)) { URL.revokeObjectURL(u); delete made.current[id] }
+    })
+    setUrls({ ...made.current })
+    photos.filter(p => !made.current[p.id]).forEach(p => {
       photoBlob(p.id).then(b => {
-        const u = URL.createObjectURL(b)
-        made.push(u)
-        if (active) setUrls(prev => ({ ...prev, [p.id]: u }))
-        else URL.revokeObjectURL(u)
+        if (!active || made.current[p.id]) return
+        made.current[p.id] = URL.createObjectURL(b)
+        setUrls({ ...made.current })
       }).catch(() => {})
     })
-    return () => { active = false; made.forEach(u => URL.revokeObjectURL(u)) }
+    return () => { active = false }
   }, [photos])
+  useEffect(() => () => { Object.values(made.current).forEach(u => URL.revokeObjectURL(u)); made.current = {} }, [])
+  useEffect(() => {
+    if (!zoom) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoom(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom])
 
   const onUpload = async () => {
     const files = Array.from(fileRef.current?.files || [])
     if (!files.length) { setStatus(t('Choose one or more photos first.')); return }
     setBusy(true)
+    let done = 0
     try {
       for (const [i, file] of files.entries()) {
         setStatus(t('Uploading {i} of {n}…', { i: i + 1, n: files.length }))
-        const { data, type } = await compress(file)
-        await uploadPhoto({ borehole_id: boreholeId, content_type: type, data_base64: data, caption: caption || file.name.replace(/\.[^.]+$/, ''), depth: n(depth) })
+        try {
+          const { data, type } = await compress(file)
+          await uploadPhoto({ borehole_id: boreholeId, content_type: type, data_base64: data, caption: caption || file.name.replace(/\.[^.]+$/, ''), depth: n(depth) })
+          done += 1
+        } catch (e: any) {
+          // Stop here; the photos before this one are already saved, so they are not sent again.
+          setStatus(t('{done} of {n} photos uploaded. "{name}" failed: {error}', { done, n: files.length, name: file.name, error: e.message }))
+          return
+        }
       }
       setStatus(t('Photos uploaded.'))
       setCaption('')
       setDepth('')
-      if (fileRef.current) fileRef.current.value = ''
-      onChanged()
-    } catch (e: any) {
-      setStatus(`${t('Error')}: ${e.message}`)
     } finally {
+      if (fileRef.current) fileRef.current.value = ''
       setBusy(false)
+      if (done) onChanged()
     }
   }
 
@@ -236,7 +258,7 @@ function Photos({ boreholeId, photos, canEdit, onChanged }: { boreholeId: string
       {canEdit && (
         <div className="card" style={{ marginBottom: '1rem', display: 'grid', gap: '.5rem' }}>
           <label>{t('Core box or field photos (taken with the camera or chosen from the gallery)')}
-            <input ref={fileRef} type="file" accept="image/*" multiple capture="environment" />
+            <input ref={fileRef} type="file" accept="image/*" multiple />
           </label>
           <div className="row">
             <div><label>{t('Caption')}<input value={caption} onChange={e => setCaption(e.target.value)} maxLength={200} placeholder={t('e.g. Core box 1, 25.0–28.0 m')} /></label></div>
@@ -252,11 +274,13 @@ function Photos({ boreholeId, photos, canEdit, onChanged }: { boreholeId: string
         <div className="photo-grid">
           {photos.map(p => (
             <figure key={p.id}>
-              {urls[p.id] ? <img src={urls[p.id]} alt={p.caption} onClick={() => setZoom(urls[p.id])} /> : <div style={{ height: 140 }} />}
+              {urls[p.id]
+                ? <button type="button" className="photo-open" onClick={() => setZoom(urls[p.id])} aria-label={t('Enlarge photo')}><img src={urls[p.id]} alt={p.caption} /></button>
+                : <div style={{ height: 140 }} />}
               <figcaption>
                 {p.caption}{p.depth !== null ? ` · ${p.depth} m` : ''}
                 {canEdit && (
-                  <button type="button" className="button-danger" style={{ float: 'right', padding: '.1rem .45rem' }}
+                  <button type="button" className="button-danger" style={{ float: 'right', padding: '.1rem .45rem' }} aria-label={t('Delete this photo?')}
                     onClick={async () => {
                       if (!window.confirm(t('Delete this photo?'))) return
                       try { await deletePhoto(p.id); onChanged() } catch (e: any) { setStatus(e.message) }
@@ -267,7 +291,7 @@ function Photos({ boreholeId, photos, canEdit, onChanged }: { boreholeId: string
           ))}
         </div>
       )}
-      {zoom && <div className="lightbox" onClick={() => setZoom(null)}><img src={zoom} alt="" /></div>}
+      {zoom && <div className="lightbox" role="dialog" aria-label={t('Photo')} onClick={() => setZoom(null)}><img src={zoom} alt="" /></div>}
     </div>
   )
 }
@@ -343,6 +367,8 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
   const checks = parsed ? problems(parsed, Number.isFinite(finalDepth as number) ? finalDepth : null) : { errors: [], warnings: [] }
   const issues = [...checks.errors, ...checks.warnings]
   const dirty = details && draft ? JSON.stringify(toDraft(details)) !== JSON.stringify(draft) : false
+  useEffect(() => { setUnsaved(dirty) }, [dirty])
+  useEffect(() => () => setUnsaved(false), [])
 
   const save = async () => {
     if (!parsed || saving) return
@@ -353,12 +379,14 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
     setSaving(true)
     setStatus(t('Saving…'))
     try {
-      const saved = await saveDetails(id, parsed)
+      const saved = await saveDetails(id, { ...parsed, expected_updated_at: details?.updated_at ?? '' })
       setDetails(saved)
       setDraft(toDraft(saved))
       setStatus(t('Saved.'))
     } catch (e: any) {
-      setStatus(`${t('Error')}: ${e.message}`)
+      setStatus(e?.status === 409
+        ? t('Someone else saved this depth data while you were editing. Your changes are still on screen: copy what you need, then reload the page to see their version.')
+        : `${t('Error')}: ${e.message}`)
     } finally {
       setSaving(false)
     }
@@ -366,6 +394,7 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
 
   const close = () => {
     if (dirty && !window.confirm(t('You have unsaved changes. Close anyway?'))) return
+    setUnsaved(false)
     onClose()
   }
 
@@ -395,7 +424,7 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
       {error && <p className="notice error">{error}</p>}
       <div className="subtabs" role="tablist">
         {sections.map(([key, label, count]) => (
-          <button key={key} type="button" className={section === key ? 'active' : ''} onClick={() => setSection(key)}>
+          <button key={key} type="button" role="tab" aria-selected={section === key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>
             {label}{count !== null ? ` (${count})` : ''}
           </button>
         ))}
@@ -448,7 +477,7 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
                 { key: 'remarks', label: t('Remarks'), type: 'text' },
               ]} />
           )}
-          {section === 'photos' && <Photos boreholeId={id} photos={details.photos} canEdit={canEdit} onChanged={() => { void getDetails(id).then(setDetails) }} />}
+          {section === 'photos' && <Photos boreholeId={id} photos={details.photos} canEdit={canEdit} onChanged={() => { getDetails(id).then(setDetails).catch(e => setError(e.message)) }} />}
           {section === 'history' && <History boreholeId={id} />}
 
           {['layers', 'spt', 'samples', 'core'].includes(section) && (

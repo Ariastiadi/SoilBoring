@@ -213,8 +213,10 @@ def _save_throttle(data: Dict[str, List[float]]) -> None:
 
 
 def _live(data: Dict[str, List[float]], now: float) -> Dict[str, List[float]]:
-    cutoff = now - LOCKOUT_WINDOW_SECONDS
-    live = {k: [t for t in v if t > cutoff] for k, v in data.items()}
+    def cutoff(key: str) -> float:
+        return now - (3600 if key.startswith("reset:") else LOCKOUT_WINDOW_SECONDS)
+
+    live = {k: [t for t in v if t > cutoff(k)] for k, v in data.items()}
     live = {k: v for k, v in live.items() if v}
     overflow = len(live) - _MAX_TRACKED_KEYS
     if overflow > 0:
@@ -266,40 +268,54 @@ class OTPRequired(HTTPException):
         super().__init__(status_code=status.HTTP_401_UNAUTHORIZED, detail="otp_required")
 
 
+def _login_lock(email_key: str) -> str:
+    """Lock name for one account's sign-in attempts (64 buckets, so the lock table stays small).
+
+    Attempts for the same email run one at a time, so "check the lockout" and "record the
+    failure" cannot be raced by parallel guesses; other accounts are not held up, and the
+    slow password hash never runs under the global users.json lock.
+    """
+    bucket = int(hashlib.sha256(email_key.encode("utf-8")).hexdigest(), 16) % 64
+    return f"login:{bucket}"
+
+
 def authenticate_user(email: str, password: str, otp: Optional[str] = None, *, check_otp: bool = True) -> Dict[str, Any]:
     email_key = (email or "").strip().lower()
     password = password or ""
-    # Password checks run one at a time under this lock, so "check the lockout" and
-    # "record the failure" happen together: parallel guesses cannot slip past the
-    # limit, and only real failures count (correct logins arriving at once are fine).
-    # The failure is recorded inside the lock but raised after it, so the record is committed
+    # Failures are recorded inside the lock but raised after it, so the record is committed
     # (in database mode an exception inside the lock would roll it back).
     failure: Optional[HTTPException] = None
-    with docstore.lock(USERS_DOC):
+    user: Optional[Dict[str, Any]] = None
+    with docstore.lock(_login_lock(email_key)):
         _check_throttle(email_key)
-        users = _load_users()
-        user = users.get(email_key)
+        user = _load_users().get(email_key)
         # Always run one hash so unknown emails cost the same as wrong passwords.
         valid = _verify_password(password, user["password"] if user else _DUMMY_HASH)
         if not user or not valid:
             _record_failure(email_key)
             failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
         else:
-            changed = False
-            if check_otp and user.get("totp_enabled"):
-                if not (otp or "").strip():
-                    raise OTPRequired()
-                if _accept_second_factor(user, otp or ""):
-                    changed = True
-                else:
+            needs_otp = check_otp and bool(user.get("totp_enabled"))
+            if needs_otp and not (otp or "").strip():
+                raise OTPRequired()
+            rehash = _hash_password(password) if _needs_rehash(user["password"]) else None
+            if needs_otp or rehash:
+                # Short write under the global lock: the code is checked against the stored
+                # state (last used step, remaining recovery codes) and the change saved together.
+                with docstore.lock(USERS_DOC):
+                    users = _load_users()
+                    current = users.get(email_key)
+                    if current is None or current["password"] != user["password"]:
+                        failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+                    elif needs_otp and not _accept_second_factor(current, otp or ""):
+                        failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
+                    else:
+                        if rehash:
+                            current["password"] = rehash
+                        _save_users(users)
+                        user = current
+                if failure is not None:
                     _record_failure(email_key)
-                    failure = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
-            if failure is None and _needs_rehash(user["password"]):
-                user["password"] = _hash_password(password)
-                changed = True
-            if failure is None and changed:
-                users[email_key] = user
-                _save_users(users)
     if failure is not None:
         raise failure
     assert user is not None
@@ -569,24 +585,47 @@ def _totp_match(secret_b32: str, code: str, last_step: int = -1, now: Optional[f
     return None
 
 
+RECOVERY_ITERATIONS = 60_000
+
+
+def _clean_code(code: str) -> str:
+    return "".join(ch for ch in (code or "").upper() if ch.isalnum())
+
+
 def _hash_recovery(code: str) -> str:
-    cleaned = "".join(ch for ch in code.upper() if ch.isalnum())
-    return hashlib.sha256(("soilboring-recovery:" + cleaned).encode("utf-8")).hexdigest()
+    """Salted PBKDF2, so a leaked users.json does not reveal the codes."""
+    salt = secrets.token_hex(8)
+    digest = hashlib.pbkdf2_hmac("sha256", _clean_code(code).encode("utf-8"), bytes.fromhex(salt), RECOVERY_ITERATIONS).hex()
+    return f"pbkdf2${salt}${digest}"
+
+
+def _recovery_matches(code: str, stored: str) -> bool:
+    cleaned = _clean_code(code)
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt, digest = stored.split("$", 2)
+            calc = hashlib.pbkdf2_hmac("sha256", cleaned.encode("utf-8"), bytes.fromhex(salt), RECOVERY_ITERATIONS).hex()
+        except ValueError:
+            return False
+        return hmac.compare_digest(calc, digest)
+    # First version (unsalted SHA-256).
+    return hmac.compare_digest(hashlib.sha256(("soilboring-recovery:" + cleaned).encode("utf-8")).hexdigest(), stored)
 
 
 def _new_recovery_codes() -> List[str]:
     codes = []
     for _ in range(RECOVERY_CODE_COUNT):
-        raw = "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(8))
-        codes.append(f"{raw[:4]}-{raw[4:]}")
+        raw = "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(12))  # 60 bits
+        codes.append(f"{raw[:4]}-{raw[4:8]}-{raw[8:]}")
     return codes
 
 
 def _use_recovery_code(user: Dict[str, Any], code: str) -> bool:
-    hashed = _hash_recovery(code)
+    if len(_clean_code(code)) < 8:
+        return False
     stored = list(user.get("recovery_codes") or [])
     for index, value in enumerate(stored):
-        if hmac.compare_digest(value, hashed):
+        if _recovery_matches(code, value):
             del stored[index]
             user["recovery_codes"] = stored
             return True
@@ -655,7 +694,8 @@ def disable_totp(email: str) -> None:
     with docstore.lock(USERS_DOC):
         users = _load_users()
         user = _user_or_404(users, email)
-        for field in ("totp_secret", "totp_enabled", "totp_pending", "totp_last"):
+        # Recovery codes go too: a lost code sheet must not outlive the phone it backed up.
+        for field in ("totp_secret", "totp_enabled", "totp_pending", "totp_last", "recovery_codes"):
             user.pop(field, None)
         _save_users(users)
 
@@ -675,24 +715,68 @@ def recovery_codes_left(email: str) -> int:
     return len(user.get("recovery_codes") or [])
 
 
-def reset_with_recovery_code(email: str, code: str, new_password: str) -> None:
-    """Forgotten password: one recovery code proves the account owner (also turns off nothing else)."""
+def reset_with_recovery_code(email: str, code: str, new_password: str, otp: Optional[str] = None) -> None:
+    """Forgotten password: a recovery code proves the account owner.
+
+    With two-step verification on, the current authenticator code is needed as well, so
+    the code sheet alone is never enough to take over the account (lost phone: an admin
+    turns two-step verification off first).
+    """
     _check_new_password(new_password)
     email_key = (email or "").strip().lower()
+    bad = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email, recovery code or authentication code is not correct")
     ok = False
-    with docstore.lock(USERS_DOC):
+    with docstore.lock(_login_lock(email_key)):
         _check_throttle(email_key)
+        with docstore.lock(USERS_DOC):
+            users = _load_users()
+            user = users.get(email_key)
+            if user and user.get("totp_enabled"):
+                step = _totp_match(user.get("totp_secret") or "", otp or "", int(user.get("totp_last") or -1))
+                if step is not None and _use_recovery_code(user, code or ""):
+                    user["totp_last"] = step
+                    ok = True
+            elif user and _use_recovery_code(user, code or ""):
+                ok = True
+            if ok and user is not None:
+                user["password"] = _hash_password(new_password)
+                _save_users(users)
+        if not ok:
+            _record_failure(email_key)  # committed: raised only after the locks below
+    if not ok:
+        raise bad
+    _clear_failures(email_key)
+
+
+def account_uses_totp(email: str) -> bool:
+    user = _load_users().get((email or "").strip().lower()) or {}
+    return bool(user.get("totp_enabled"))
+
+
+def confirm_password(email: str, password: str) -> None:
+    """Re-check the password of a signed-in user before a sensitive change (400, not 401,
+    so a typo does not look like an expired session)."""
+    try:
+        authenticate_user(email, password, check_otp=False)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is incorrect") from exc
+        raise
+
+
+def verify_current_totp(email: str, code: str) -> None:
+    with docstore.lock(USERS_DOC):
         users = _load_users()
-        user = users.get(email_key)
-        if not user or not _use_recovery_code(user, code or ""):
-            _record_failure(email_key)  # committed: raised only after the lock below
+        user = users.get((email or "").strip().lower())
+        step = _totp_match(user.get("totp_secret") or "", code or "", int(user.get("totp_last") or -1)) if user else None
+        if step is None or user is None:
+            ok = False
         else:
-            user["password"] = _hash_password(new_password)
+            user["totp_last"] = step
             _save_users(users)
             ok = True
     if not ok:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email or recovery code is not correct")
-    _clear_failures(email_key)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The authentication code is not correct")
 
 
 # --------------------------------------------------------------------------- #
@@ -700,6 +784,21 @@ def reset_with_recovery_code(email: str, code: str, new_password: str) -> None:
 # --------------------------------------------------------------------------- #
 
 RESET_TTL = 30 * 60
+RESET_MAILS_PER_HOUR = 3
+
+
+def allow_reset_email(email: str) -> bool:
+    """At most RESET_MAILS_PER_HOUR reset mails per address (shared across instances)."""
+    key = "reset:" + (email or "").strip().lower()
+    now = time.time()
+    with docstore.lock(THROTTLE_DOC):
+        data = _load_throttle()
+        recent = [t for t in data.get(key, []) if t > now - 3600]
+        if len(recent) >= RESET_MAILS_PER_HOUR:
+            return False
+        data[key] = recent + [now]
+        _save_throttle(_live(data, now))
+    return True
 
 
 def make_reset_token(email: str) -> Optional[str]:

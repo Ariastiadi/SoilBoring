@@ -161,3 +161,10 @@ def test_depth_groups_pass_official_checker(tmp_path):
     assert core.iloc[0].CORE_RQD == "60" and core.iloc[0].CORE_DIAM == "48"
     abbr = tables["ABBR"][tables["ABBR"].HEADING == "DATA"]
     assert {"201", "403", "S", "U", "D"} <= set(abbr.ABBR_CODE)
+
+
+def test_generated_sample_refs_never_collide_with_typed_ones(tmp_path):
+    rows = _rows()
+    depth = {"BH-01": {"samples": [{"top": 1, "type": "D", "ref": ""}, {"top": 1, "type": "D", "ref": "D1"}]}}
+    name, text = build_ags("jembatan kali", rows, depth_data=depth)
+    assert _check(tmp_path, text, name) == {}

@@ -49,10 +49,13 @@ export default function BoreholeMap({ reports, onOpen }: { reports: Row[], onOpe
       open.style.marginTop = '.4rem'
       open.onclick = () => onOpen(r.BoreholeID)
       popup.append(title, info, open)
+      // A text node, never HTML: a Borehole ID may contain < or >.
+      const tip = document.createElement('span')
+      tip.textContent = String(r.BoreholeID)
       L.circleMarker([lat, lon], {
         radius: 7, weight: 2, color: '#fff', fillOpacity: 0.9,
         fillColor: COLORS[projects.indexOf(r.ProjectName) % COLORS.length],
-      }).bindPopup(popup).bindTooltip(String(r.BoreholeID)).addTo(layer.current!)
+      }).bindPopup(popup).bindTooltip(tip).addTo(layer.current!)
     })
     if (points.length === 1) map.current.setView(points[0], 15)
     else if (points.length > 1) map.current.fitBounds(L.latLngBounds(points), { padding: [30, 30], maxZoom: 16 })

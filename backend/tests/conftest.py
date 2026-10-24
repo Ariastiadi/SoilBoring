@@ -6,6 +6,13 @@ _TMP = tempfile.mkdtemp(prefix="soilboring-tests-")
 os.environ["DATA_DIR"] = _TMP
 os.environ["AUTH_TOKEN_SECRET"] = "test-secret-" + "x" * 32
 os.environ.pop("OLLAMA_URL", None)
+# The tests empty the whole store between runs, so they never use a database URL that
+# happens to be set in the shell (it could be production). Use TEST_DATABASE_URL instead.
+for _name in ("DATABASE_URL", "POSTGRES_URL"):
+    os.environ.pop(_name, None)
+if os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+os.environ["SOILBORING_TESTING"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient

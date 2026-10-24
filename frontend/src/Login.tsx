@@ -25,6 +25,7 @@ export default function Login({ onLogin, onSetup, title }: Props) {
   const [confirm, setConfirm] = useState('')
   const [otp, setOtp] = useState('')
   const [recovery, setRecovery] = useState('')
+  const [resetOtp, setResetOtp] = useState('')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -86,10 +87,11 @@ export default function Login({ onLogin, onSetup, title }: Props) {
         await onSetup(email.trim(), password)
       } else if (mode === 'forgot') {
         checkNew()
-        await resetWithCode(email.trim(), recovery.trim(), password)
+        await resetWithCode(email.trim(), recovery.trim(), password, resetOtp.trim() || undefined)
         setPassword('')
         setConfirm('')
         setRecovery('')
+        setResetOtp('')
         setMode('login')
         setStatus(t('Password changed. Sign in with the new password.'))
       } else if (mode === 'reset-link') {
@@ -148,14 +150,20 @@ export default function Login({ onLogin, onSetup, title }: Props) {
         {mode === 'otp' && (
           <label style={fieldStyle}>
             {t('Authentication code')}
-            <input value={otp} onChange={e => setOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" autoFocus
+            <input value={otp} onChange={e => setOtp(e.target.value)} autoComplete="one-time-code" autoCapitalize="characters" autoFocus
               placeholder={t('6 digits, or a recovery code')} maxLength={16} required />
           </label>
         )}
         {mode === 'forgot' && (
           <label style={fieldStyle}>
             {t('Recovery code')}
-            <input value={recovery} onChange={e => setRecovery(e.target.value)} placeholder="ABCD-EFGH" autoComplete="off" maxLength={16} required />
+            <input value={recovery} onChange={e => setRecovery(e.target.value)} placeholder="XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters" maxLength={20} required />
+          </label>
+        )}
+        {mode === 'forgot' && (
+          <label style={fieldStyle}>
+            {t('Authenticator code (only if two-step verification is on)')}
+            <input value={resetOtp} onChange={e => setResetOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} placeholder="123456" />
           </label>
         )}
         {needsNewPassword && (

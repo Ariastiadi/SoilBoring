@@ -472,4 +472,11 @@ export const ID: Record<string, string> = {
   "{model} is not downloaded yet.": "{model} belum diunduh.",
   "{n} log(s) saved on this device, waiting to be sent.": "{n} log tersimpan di perangkat ini, menunggu untuk dikirim.",
   "{n} of {total} boreholes have coordinates. Colours show projects.": "{n} dari {total} titik bor memiliki koordinat. Warna menunjukkan proyek.",
+  "Authenticator code (only if two-step verification is on)": "Kode autentikator (hanya jika verifikasi dua langkah aktif)",
+  "6-digit code from the app": "Kode 6 digit dari aplikasi",
+  "{n} log(s) on this device have not been sent yet. They stay here and are sent the next time you sign in. Sign out anyway?": "{n} log di perangkat ini belum terkirim. Log tetap disimpan di sini dan dikirim saat Anda masuk lagi. Tetap keluar?",
+  "{done} of {n} photos uploaded. \"{name}\" failed: {error}": "{done} dari {n} foto terunggah. \"{name}\" gagal: {error}",
+  "Enlarge photo": "Perbesar foto",
+  "Photo": "Foto",
+  "Someone else saved this depth data while you were editing. Your changes are still on screen: copy what you need, then reload the page to see their version.": "Orang lain menyimpan data kedalaman ini saat Anda sedang mengedit. Perubahan Anda masih tampil di layar: salin yang diperlukan, lalu muat ulang halaman untuk melihat versi mereka.",
 }

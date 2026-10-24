@@ -167,12 +167,27 @@ export async function setupFirstAdmin(email: string, password: string) {
 }
 
 export async function postReport(data: any) {
-  const r = await fetch(`${BASE}/api/reports`, {
-    method: "POST",
-    headers: buildHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(data),
-  });
-  return parseJson<{ status: string }>(r, t("Failed to post report"));
+  // A weak field connection can hang for minutes: give up after 30 s (the log is then kept offline).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const r = await fetch(`${BASE}/api/reports`, {
+      method: "POST",
+      headers: buildHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+    return await parseJson<{ status: string }>(r, t("Failed to post report"));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** One log by Borehole ID (case-insensitive), or null. */
+export async function getReport(boreholeId: string): Promise<Record<string, string> | null> {
+  const wanted = boreholeId.trim().toLowerCase();
+  const rows = await listReports();
+  return rows.find(r => String(r?.BoreholeID || "").trim().toLowerCase() === wanted) ?? null;
 }
 
 export async function listReports() {
@@ -359,7 +374,7 @@ export async function getDetails(boreholeId: string) {
   return parseJson<Details>(r, t("Failed to load depth data"));
 }
 
-export async function saveDetails(boreholeId: string, data: Pick<Details, 'layers' | 'spt' | 'samples' | 'core'>) {
+export async function saveDetails(boreholeId: string, data: Pick<Details, 'layers' | 'spt' | 'samples' | 'core'> & { expected_updated_at?: string }) {
   const r = await fetch(`${BASE}/api/details/${enc(boreholeId)}`, {
     method: "PUT",
     headers: buildHeaders({ "Content-Type": "application/json" }),
@@ -418,10 +433,10 @@ async function postJson<T>(path: string, body: unknown, message: string, auth = 
 
 export const startTwoFactor = () => postJson<{ secret: string; otpauth_uri: string }>("/api/auth/2fa/setup", {}, t("Setup failed"))
 export const enableTwoFactor = (code: string) => postJson<{ recovery_codes: string[] }>("/api/auth/2fa/enable", { code }, t("Could not turn on two-step verification"))
-export const disableTwoFactor = (password: string) => postJson<{ status: string }>("/api/auth/2fa/disable", { password }, t("Could not turn off two-step verification"))
+export const disableTwoFactor = (password: string, code: string) => postJson<{ status: string }>("/api/auth/2fa/disable", { password, code }, t("Could not turn off two-step verification"))
 export const newRecoveryCodes = (password: string) => postJson<{ recovery_codes: string[] }>("/api/auth/recovery-codes", { password }, t("Could not create recovery codes"))
-export const resetWithCode = (email: string, recovery_code: string, new_password: string) =>
-  postJson<{ status: string }>("/api/auth/reset-with-code", { email, recovery_code, new_password }, t("Reset failed"), false)
+export const resetWithCode = (email: string, recovery_code: string, new_password: string, otp?: string) =>
+  postJson<{ status: string }>("/api/auth/reset-with-code", { email, recovery_code, new_password, ...(otp ? { otp } : {}) }, t("Reset failed"), false)
 export const requestResetEmail = (email: string) => postJson<{ status: string; email_enabled: boolean }>("/api/auth/forgot", { email }, t("Request failed"), false)
 export const resetWithToken = (token: string, new_password: string) =>
   postJson<{ status: string }>("/api/auth/reset", { token, new_password }, t("Reset failed"), false)

@@ -31,6 +31,7 @@ export default function Security() {
   const [setup, setSetup] = useState<{ secret: string, qr: string } | null>(null)
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
+  const [offCode, setOffCode] = useState('')
   const [codes, setCodes] = useState<string[] | null>(null)
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
@@ -65,8 +66,9 @@ export default function Security() {
   const turnOff = (e: FormEvent) => {
     e.preventDefault()
     void run(async () => {
-      await disableTwoFactor(password)
+      await disableTwoFactor(password, offCode.trim())
       setPassword('')
+      setOffCode('')
       setStatus(t('Two-step verification is off.'))
       await refresh()
     })
@@ -94,6 +96,9 @@ export default function Security() {
           <form onSubmit={turnOff} className="actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label style={{ display: 'grid', gap: '.25rem' }}>{t('Password')}
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />
+            </label>
+            <label style={{ display: 'grid', gap: '.25rem' }}>{t('6-digit code from the app')}
+              <input value={offCode} onChange={e => setOffCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} required />
             </label>
             <button type="submit" className="button-danger" disabled={busy}>{t('Turn off')}</button>
           </form>

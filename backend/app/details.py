@@ -17,6 +17,7 @@ import binascii
 import json
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -55,7 +56,15 @@ def _text(value: Optional[str], limit: int) -> str:
 
 
 class _Row(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    # NaN/Infinity are refused (they also break JSON error answers).
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+
+    @field_validator("top", "base", "depth", mode="after", check_fields=False)
+    @classmethod
+    def _cm(cls, value: Optional[float]) -> Optional[float]:
+        # Depths are kept to the centimetre, like the AGS4 export (2 decimals), so two
+        # entries can never round to the same depth there.
+        return None if value is None else round(value, 2)
 
 
 class Layer(_Row):
@@ -177,10 +186,17 @@ def _no_overlap(rows: List[Any], what: str) -> None:
             raise ValueError(f"{what} {before.top:g}-{before.base:g} m and {after.top:g}-{after.base:g} m overlap")
 
 
+def ascii_ref(value: str) -> str:
+    """Sample reference as it appears in AGS4 (ASCII, compared without case)."""
+    return unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii").strip().upper()
+
+
 class DetailsIn(BaseModel):
     """What the client sends; photos are managed through their own endpoints."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+    # updated_at of the version the user started from; a newer save by someone else -> 409.
+    expected_updated_at: Optional[str] = Field(default=None, max_length=40)
 
     layers: List[Layer] = Field(default_factory=list, max_length=MAX_ROWS)
     spt: List[SPTTest] = Field(default_factory=list, max_length=MAX_ROWS)
@@ -194,7 +210,9 @@ class DetailsIn(BaseModel):
         depths = [round(t.depth, 3) for t in self.spt]
         if len(depths) != len(set(depths)):
             raise ValueError("Two SPT tests have the same depth")
-        refs = [s.ref.lower() for s in self.samples if s.ref]
+        refs = [ascii_ref(s.ref) for s in self.samples if s.ref]
+        if any(s.ref and not ascii_ref(s.ref) for s in self.samples):
+            raise ValueError("Sample references need letters or digits (A-Z, 0-9)")
         if len(refs) != len(set(refs)):
             raise ValueError("Two samples have the same reference")
         self.layers.sort(key=lambda r: r.top)
@@ -245,15 +263,26 @@ def all_details() -> Dict[str, Dict[str, Any]]:
     return {key: _public(value) for key, value in _load_all().items()}
 
 
+class ConflictError(Exception):
+    """Someone else saved this borehole's depth data in the meantime."""
+
+
 def save_details(borehole_id: str, details: DetailsIn, user_email: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Replace the depth data of one borehole; returns (before, after) for the audit log."""
     with docstore.lock(DOC):
         data = _load_all()
-        before = _public(data.get(borehole_id, {}))
-        entry = dict(data.get(borehole_id, {}))
-        entry.update(details.model_dump())
+        current = data.get(borehole_id, {})
+        if details.expected_updated_at is not None and (current.get("updated_at") or "") != details.expected_updated_at:
+            raise ConflictError(
+                f"{current.get('updated_by') or 'Someone'} saved this borehole at {current.get('updated_at')}; "
+                "reload to see their changes before saving"
+            )
+        before = _public(current)
+        entry = dict(current)
+        entry.update(details.model_dump(exclude={"expected_updated_at"}))
         entry.setdefault("photos", [])
-        entry["updated_at"] = _now()
+        # Microseconds: two saves within one second must still differ (edit conflict check).
+        entry["updated_at"] = datetime.now(timezone.utc).isoformat()
         entry["updated_by"] = user_email
         data[borehole_id] = entry
         _save_all(data)
@@ -286,6 +315,8 @@ def _photo_doc(photo_id: str) -> str:
 
 
 class PhotoIn(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     content_type: Literal["image/jpeg", "image/png", "image/webp"]
     data_base64: str = Field(min_length=8, max_length=MAX_PHOTO_BYTES * 4 // 3 + 16)
     caption: str = ""

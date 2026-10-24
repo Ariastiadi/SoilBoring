@@ -91,3 +91,44 @@ def test_ai_context_includes_depth_data(client, admin_headers):
     body = client.post("/api/ai/prompt", json={"question": "BH-11 strata"}, headers=admin_headers).json()
     assert "0-4 CH Lempung lunak" in body["context"]
     assert "2:5; 10:50/90mm" in body["context"]
+
+
+def test_account_events_are_not_visible_through_a_borehole_named_like_an_email(client, admin_headers):
+    email, password = make_user("snoop@example.com", role="general")
+    other = login_headers(client, email, password)
+    make_user("victim@example.com", role="general")
+    client.put("/api/users/victim@example.com/password", json={"password": "reset-by-admin"}, headers=admin_headers)
+    assert client.post("/api/reports", json=sample_report(BoreholeID="victim@example.com"), headers=other).status_code == 201
+    events = client.get("/api/audit?target=VICTIM@example.com", headers=other).json()
+    assert [e["action"] for e in events] == ["log.created"]
+
+
+def test_nan_and_tiny_or_duplicate_depths_are_rejected(client, admin_headers):
+    _log(client, admin_headers, BoreholeID="BH-N")
+    res = client.put("/api/details/BH-N", content='{"layers":[{"top":NaN,"base":2}]}',
+                     headers={**admin_headers, "Content-Type": "application/json"})
+    assert res.status_code == 422
+    assert client.put("/api/details/BH-N", json={"layers": [{"top": 1.001, "base": 1.003}]}, headers=admin_headers).status_code == 422
+    spt = [{"depth": 1.501, "seat": 1, "inc1": 1}, {"depth": 1.504, "seat": 1, "inc1": 1}]
+    assert client.put("/api/details/BH-N", json={"spt": spt}, headers=admin_headers).status_code == 422
+    same = [{"top": 1, "type": "D", "ref": "é1"}, {"top": 2, "type": "D", "ref": "E1"}]
+    assert client.put("/api/details/BH-N", json={"samples": same}, headers=admin_headers).status_code == 422
+
+
+def test_concurrent_edit_is_refused_instead_of_lost(client, admin_headers):
+    _log(client, admin_headers, BoreholeID="BH-C")
+    first = client.put("/api/details/BH-C", json={"layers": [{"top": 0, "base": 1}]}, headers=admin_headers).json()
+    stamp = first["updated_at"]
+    ok = client.put("/api/details/BH-C", json={"layers": [{"top": 0, "base": 2}], "expected_updated_at": stamp}, headers=admin_headers)
+    assert ok.status_code == 200
+    stale = client.put("/api/details/BH-C", json={"layers": [{"top": 0, "base": 3}], "expected_updated_at": stamp}, headers=admin_headers)
+    assert stale.status_code == 409
+
+
+def test_recreated_id_starts_without_old_depth_data(client, admin_headers):
+    _log(client, admin_headers, BoreholeID="BH-R")
+    details.save_details("BH-R", details.DetailsIn.model_validate({"layers": [{"top": 0, "base": 1}]}), "x@example.com")
+    client.delete("/api/reports/BH-R", headers=admin_headers)
+    details.save_details("BH-R", details.DetailsIn.model_validate({"layers": [{"top": 0, "base": 1}]}), "x@example.com")  # stray leftover
+    _log(client, admin_headers, BoreholeID="BH-R")
+    assert client.get("/api/details/BH-R", headers=admin_headers).json()["layers"] == []

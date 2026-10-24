@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
-from .. import audit, details
+from .. import audit, details, docstore, storage
 from ..auth import get_current_user
 from ..storage import get_report
 from .reports import can_modify
@@ -32,9 +32,19 @@ def read_details(borehole_id: str, user=Depends(get_current_user)):
 
 @router.put("/details/{borehole_id:path}")
 def write_details(borehole_id: str, payload: details.DetailsIn, user=Depends(get_current_user)):
-    report = _report_or_404(borehole_id)
-    _require_edit(user, report)
-    before, after = details.save_details(report["BoreholeID"], payload, user["email"])
+    # Under the reports lock (always reports -> details), so a log deleted at the same
+    # moment cannot leave its depth data behind for a later log with the same ID.
+    with docstore.lock(storage.DOC):
+        report = _report_or_404(borehole_id)
+        _require_edit(user, report)
+        try:
+            before, after = details.save_details(report["BoreholeID"], payload, user["email"])
+        except details.ConflictError as exc:
+            conflict = str(exc)
+        else:
+            conflict = ""
+    if conflict:
+        raise HTTPException(status_code=409, detail=conflict)
     counts = {
         key: [len(before[key]), len(after[key])]
         for key in ("layers", "spt", "samples", "core")
@@ -51,14 +61,21 @@ class PhotoUpload(details.PhotoIn):
 
 @router.post("/photos", status_code=201)
 def upload_photo(payload: PhotoUpload, user=Depends(get_current_user)):
-    report = _report_or_404(payload.borehole_id)
-    _require_edit(user, report)
     try:
-        meta = details.add_photo(report["BoreholeID"], payload, user["email"])
+        payload.decoded()  # size and type checks before any lock is taken
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except details.PhotoLimitError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    with docstore.lock(storage.DOC):
+        report = _report_or_404(payload.borehole_id)
+        _require_edit(user, report)
+        try:
+            meta = details.add_photo(report["BoreholeID"], payload, user["email"])
+        except details.PhotoLimitError as exc:
+            limit_error = str(exc)
+        else:
+            limit_error = ""
+    if limit_error:
+        raise HTTPException(status_code=409, detail=limit_error)
     audit.record(user["email"], "photo.added", report["BoreholeID"], {"caption": [None, meta["caption"]]})
     return meta
 
@@ -69,7 +86,8 @@ def get_photo(photo_id: str, user=Depends(get_current_user)):
     if found is None:
         raise HTTPException(status_code=404, detail="Photo not found")
     content_type, data = found
-    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=86400"})
+    # Not kept in the browser cache: field tablets are often shared.
+    return Response(content=data, media_type=content_type, headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/photos/{photo_id}")
@@ -78,8 +96,9 @@ def remove_photo(photo_id: str, user=Depends(get_current_user)):
     if found is None:
         raise HTTPException(status_code=404, detail="Photo not found")
     borehole_id, meta = found
-    _require_edit(user, _report_or_404(borehole_id))
-    details.delete_photo(photo_id)
+    with docstore.lock(storage.DOC):
+        _require_edit(user, _report_or_404(borehole_id))
+        details.delete_photo(photo_id)
     audit.record(user["email"], "photo.deleted", borehole_id, {"caption": [meta.get("caption"), None]})
     return {"status": "deleted"}
 
@@ -94,5 +113,8 @@ def activity(
     if user.get("role") != "admin":
         if not target:
             raise HTTPException(status_code=403, detail="Admin privileges are required to see all activity")
-        _report_or_404(target)
+        report = _report_or_404(target)
+        # Only the history of that log; account events stay admin-only even when a
+        # BoreholeID happens to look like an email address.
+        return audit.list_events(target=report["BoreholeID"], limit=limit, logs_only=True)
     return audit.list_events(target=target, limit=limit)

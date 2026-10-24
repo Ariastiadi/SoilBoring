@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import audit, details
+from .. import audit, details, docstore, storage
 from ..auth import get_current_user
 from ..models import Report, ReportUpdate
 from ..storage import DuplicateReportError, delete_report, load_reports, save_report, update_report
@@ -45,7 +45,10 @@ def _check_dates(row: Dict[str, Any]) -> None:
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_report(report: Report, user=Depends(get_current_user)):
     try:
-        save_report(report.model_dump(), submitted_by=user["email"])
+        with docstore.lock(storage.DOC):
+            save_report(report.model_dump(), submitted_by=user["email"])
+            # Leftovers of an earlier log with this ID never carry over to the new one.
+            details.delete_details(report.BoreholeID)
     except DuplicateReportError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -63,10 +66,13 @@ def list_reports(user=Depends(get_current_user)):
 # ":path" so that legacy IDs containing "/" can still be edited and deleted.
 @router.delete("/{borehole_id:path}")
 def remove_report(borehole_id: str, user=Depends(get_current_user)):
-    removed = delete_report(borehole_id, authorize=_owner_check(user, "delete"))
+    # One locked step: the log and its depth data/photos go together (or not at all).
+    with docstore.lock(storage.DOC):
+        removed = delete_report(borehole_id, authorize=_owner_check(user, "delete"))
+        if removed:
+            details.delete_details(removed["BoreholeID"])
     if not removed:
         raise HTTPException(status_code=404, detail="Report not found")
-    details.delete_details(removed["BoreholeID"])
     audit.record(user["email"], "log.deleted", removed["BoreholeID"])
     return {"status": "deleted"}
 

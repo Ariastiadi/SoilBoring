@@ -90,3 +90,51 @@ def test_lockout_is_shared_through_storage(client):
     # Another app instance reads the same document.
     assert "lock@example.com" in auth._load_throttle()
     assert client.post("/api/auth/login", json={"email": email, "password": password}).status_code == 429
+
+
+def _enable_2fa(client, email, password):
+    headers = login_headers(client, email, password)
+    secret = client.post("/api/auth/2fa/setup", headers=headers).json()["secret"]
+    codes = client.post("/api/auth/2fa/enable", json={"code": _code(secret)}, headers=headers).json()["recovery_codes"]
+    return headers, secret, codes
+
+
+def test_recovery_codes_need_the_authenticator_when_2fa_is_on(client):
+    email, password = make_user("both@example.com", role="general")
+    _, secret, codes = _enable_2fa(client, email, password)
+    assert len(codes[0].replace("-", "")) == 12
+    alone = client.post("/api/auth/reset-with-code", json={"email": email, "recovery_code": codes[0], "new_password": "new-pass-123"})
+    assert alone.status_code == 400
+    both = client.post("/api/auth/reset-with-code", json={
+        "email": email, "recovery_code": codes[0], "new_password": "new-pass-123", "otp": _code(secret, 1)})
+    assert both.status_code == 200
+
+
+def test_turning_2fa_off_needs_a_code_and_drops_recovery_codes(client, admin_headers):
+    email, password = make_user("off@example.com", role="general")
+    headers, secret, codes = _enable_2fa(client, email, password)
+    login = client.post("/api/auth/login", json={"email": email, "password": password, "otp": _code(secret, 1)}).json()
+    headers = {"Authorization": f"Bearer {login['token']}"}
+    wrong_pw = client.post("/api/auth/2fa/disable", json={"password": "nope-nope", "code": _code(secret)}, headers=headers)
+    assert wrong_pw.status_code == 400  # not 401: the session stays valid
+    assert client.post("/api/auth/2fa/disable", json={"password": password, "code": "000000"}, headers=headers).status_code == 400
+    assert client.post("/api/auth/recovery-codes", json={"password": "nope-nope"}, headers=headers).status_code == 400
+    # Admin turns it off (lost phone): the old code sheet stops working too.
+    assert client.delete(f"/api/users/{email}/2fa", headers=admin_headers).status_code == 200
+    res = client.post("/api/auth/reset-with-code", json={"email": email, "recovery_code": codes[1], "new_password": "taken-over-1"})
+    assert res.status_code == 400
+
+
+def test_forgot_is_rate_limited_and_kept_out_of_the_main_log(client, admin_headers, monkeypatch):
+    from backend.app import audit, mailer
+
+    email, _ = make_user("flood@example.com", role="general")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("APP_BASE_URL", "https://soil.example.com")
+    sent = []
+    monkeypatch.setattr(mailer, "send", lambda to, subject, body: sent.append(to) or True)
+    for _ in range(6):
+        assert client.post("/api/auth/forgot", json={"email": email}).status_code == 200
+    assert len(sent) == auth.RESET_MAILS_PER_HOUR
+    assert not any(e["action"].startswith("account.reset") for e in audit._load(audit.DOC))
+    assert any(e["action"] == "account.reset_email_sent" for e in audit.list_events())

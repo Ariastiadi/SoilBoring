@@ -28,7 +28,7 @@ jobs:
       - run: python -m pytest backend/tests -q
 
   backend-postgres:
-    # Same tests with DATABASE_URL set (storage in Postgres, as on Render + Neon).
+    # Same tests with storage in Postgres (as on Vercel/Render + Neon); the suite reads TEST_DATABASE_URL.
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -39,7 +39,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

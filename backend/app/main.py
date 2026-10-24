@@ -1,12 +1,14 @@
 import logging
+import math
 import mimetypes
 import os
 from contextlib import asynccontextmanager
-
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
@@ -44,6 +46,23 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Soil Boring Ops API", lifespan=lifespan)
+
+
+def _json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(_request: Request, exc: RequestValidationError):
+    # Same answer as FastAPI's default, but NaN/Infinity in the echoed input become text
+    # instead of crashing the JSON encoder (500).
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors(), custom_encoder={float: _json_safe}))})
 
 
 @app.exception_handler(SchemaMismatchError)
