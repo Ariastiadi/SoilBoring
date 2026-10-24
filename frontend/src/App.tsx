@@ -8,7 +8,7 @@ import AboutSoilBoring from './tabs/AboutSoilBoring'
 import UserAdmin from './tabs/UserAdmin'
 import Login from './Login'
 import ChangePassword from './ChangePassword'
-import { APP_TITLE, ORG_NAME, login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
+import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
 
 type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users'
 type AuthState = { token: string; email: string; role: 'admin' | 'general'; expiresAt?: number } | null
@@ -92,8 +92,15 @@ export default function App() {
     setAuthToken(null)
   }
 
+  const [orgName, setOrgName] = useState('')
   useEffect(() => {
-    document.title = APP_TITLE
+    let active = true
+    getPublicConfig().then(cfg => {
+      if (!active) return
+      setOrgName(cfg.org_name)
+      document.title = appTitle(cfg.org_name)
+    })
+    return () => { active = false }
   }, [])
 
   const isAdmin = auth?.role === 'admin'
@@ -121,7 +128,7 @@ export default function App() {
             {authNotice}
           </div>
         )}
-        <Login onLogin={handleLogin} />
+        <Login onLogin={handleLogin} title={appTitle(orgName)} />
       </div>
     )
   }
@@ -130,7 +137,7 @@ export default function App() {
     <div>
       <div className="actions topbar">
         <span>
-          {ORG_NAME && <strong style={{ marginRight: '.75rem' }}>{ORG_NAME}</strong>}
+          {orgName && <strong style={{ marginRight: '.75rem' }}>{orgName}</strong>}
           Signed in as <strong>{auth.email}</strong> ({auth.role})
         </span>
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>

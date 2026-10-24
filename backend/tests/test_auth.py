@@ -44,19 +44,19 @@ def test_successful_login_resets_failure_counter(client):
 def test_legacy_sha256_hash_still_works_and_is_upgraded(client):
     salt = "c18ef9cb596f199c"
     digest = hashlib.sha256((salt + "old-password-1").encode()).hexdigest()
-    auth.USER_FILE.write_text(json.dumps([
+    auth.docstore.write_text(auth.USERS_DOC, json.dumps([
         {"email": "legacy@example.com", "password": f"sha256${salt}${digest}", "role": "admin"}
     ]))
     login_headers(client, "legacy@example.com", "old-password-1")
-    stored = json.loads(auth.USER_FILE.read_text())[0]["password"]
+    stored = json.loads(auth.docstore.read_text(auth.USERS_DOC))[0]["password"]
     assert stored.startswith("pbkdf2_sha256$")
     login_headers(client, "legacy@example.com", "old-password-1")
 
 
 def test_plaintext_entry_is_upgraded_to_a_hash(client):
-    auth.USER_FILE.write_text(json.dumps([{"email": "p@example.com", "password": "plain-secret-1", "role": "admin"}]))
+    auth.docstore.write_text(auth.USERS_DOC, json.dumps([{"email": "p@example.com", "password": "plain-secret-1", "role": "admin"}]))
     login_headers(client, "p@example.com", "plain-secret-1")
-    assert json.loads(auth.USER_FILE.read_text())[0]["password"].startswith("pbkdf2_sha256$")
+    assert json.loads(auth.docstore.read_text(auth.USERS_DOC))[0]["password"].startswith("pbkdf2_sha256$")
 
 
 def test_tampered_and_expired_tokens_are_rejected(client):
@@ -81,12 +81,11 @@ def test_weak_or_default_secret_is_refused(monkeypatch):
 
 def test_secret_is_generated_and_persisted_when_missing(monkeypatch):
     monkeypatch.delenv("AUTH_TOKEN_SECRET", raising=False)
-    if auth.SECRET_FILE.exists():
-        auth.SECRET_FILE.unlink()
+    auth.docstore.delete(auth.SECRET_DOC)
     first = auth._resolve_token_secret()
     assert len(first) >= 32
     assert auth._resolve_token_secret() == first
-    auth.SECRET_FILE.unlink()
+    auth.docstore.delete(auth.SECRET_DOC)
 
 
 def test_bootstrap_admin_only_when_no_users(monkeypatch):

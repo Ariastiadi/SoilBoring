@@ -1,3 +1,4 @@
+import pytest
 import threading
 
 from backend.app import storage
@@ -90,17 +91,18 @@ def test_concurrent_saves_do_not_lose_rows(client):
 
 
 def test_unknown_csv_columns_return_conflict_instead_of_crashing(client, admin_headers):
-    storage.FILE.write_text("Foo,Bar\n1,2\n")
+    storage.docstore.write_text(storage.DOC, "Foo,Bar\n1,2\n")
     assert client.get("/api/reports", headers=admin_headers).status_code == 409
 
 
 def test_older_csv_with_fewer_columns_is_migrated_on_write(client, admin_headers):
-    storage.FILE.write_text("BoreholeID,ProjectName\nBH-OLD,Legacy\n")
+    storage.docstore.write_text(storage.DOC, "BoreholeID,ProjectName\nBH-OLD,Legacy\n")
     assert client.post("/api/reports", json=sample_report(), headers=admin_headers).status_code == 201
     ids = [r["BoreholeID"] for r in client.get("/api/reports", headers=admin_headers).json()]
     assert ids == ["BH-OLD", "BH-001"]
 
 
+@pytest.mark.skipif(storage.docstore.USE_DATABASE, reason="file mode only")
 def test_file_permissions_data_readable_secrets_private(client, admin_headers):
     import os
     import stat

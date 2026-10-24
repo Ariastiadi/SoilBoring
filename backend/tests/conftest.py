@@ -10,15 +10,13 @@ os.environ.pop("OLLAMA_URL", None)
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import analytics, auth, storage
+from backend.app import analytics, auth, docstore
 from backend.app.main import app
 
 
 @pytest.fixture(autouse=True)
 def clean_state():
-    for path in (storage.FILE, auth.USER_FILE):
-        if path.exists():
-            path.unlink()
+    docstore.reset_all_for_tests()
     auth.reset_login_throttle()
     analytics.clear_ai_cache()
     yield

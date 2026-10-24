@@ -2,10 +2,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from pathlib import Path
+from typing import Optional
 
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+
+from . import config, docstore
 from .auth import bootstrap_admin_from_env
 from .routers import ai, auth, dashboard, export, reports, summaries, users
 from .storage import AmbiguousReportError, SchemaMismatchError
@@ -27,6 +31,7 @@ CORS_ORIGINS = [
 async def lifespan(_app: FastAPI):
     bootstrap_admin_from_env()
     yield
+    docstore.close_pool()
 
 
 app = FastAPI(title="Soil Boring Ops API", lifespan=lifespan)
@@ -58,12 +63,32 @@ app.add_middleware(
 )
 
 
+# Same policy as frontend/nginx.conf, used when this app also serves the built UI.
+_CSP = (
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+)
+
+
+_API_DOC_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
+
+
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
     response = await call_next(request)
+    path = request.url.path
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Cache-Control", "no-store")
+    if path.startswith("/api/") or path == "/api":
+        response.headers.setdefault("Cache-Control", "no-store")
+    elif path.startswith("/assets/"):
+        # Hashed build files never change.
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    elif path not in _API_DOC_PATHS:
+        # The web UI. (Swagger UI at /docs loads its files from a CDN, so it is skipped.)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", _CSP)
     return response
 
 
@@ -87,11 +112,44 @@ app.include_router(users.router)
 app.include_router(export.router)
 
 
-@app.get("/")
-def root():
-    return {"status": "ok", "service": "soilboring-ops"}
-
-
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+def public_config():
+    """Non-secret settings the UI needs before sign-in (shown on the login page)."""
+    return {"org_name": config.ORG_NAME, "app_name": config.APP_NAME}
+
+
+# Single-service deployments (root Dockerfile, e.g. on Render) serve the built UI from
+# FRONTEND_DIST; with docker-compose nginx serves it and FRONTEND_DIST stays unset.
+_FRONTEND_ENV = os.environ.get("FRONTEND_DIST", "").strip()
+_FRONTEND: Optional[Path] = Path(_FRONTEND_ENV).resolve() if _FRONTEND_ENV else None
+
+if _FRONTEND is not None and (_FRONTEND / "index.html").is_file():
+    _UI_DIR: Path = _FRONTEND
+
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    def frontend(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        try:
+            candidate = (_UI_DIR / full_path).resolve()
+            found = bool(full_path) and candidate.is_file() and _UI_DIR in candidate.parents
+        except (ValueError, OSError):  # NUL bytes, over-long names ...
+            found = False
+        if found:
+            return FileResponse(candidate)
+        if full_path.startswith("assets/"):
+            # A missing build file must not be answered with the app shell (and cached for a year).
+            raise HTTPException(status_code=404, detail="Not Found")
+        # Client-side routes all load the app shell.
+        return FileResponse(_UI_DIR / "index.html")
+
+else:
+
+    @app.get("/")
+    def root():
+        return {"status": "ok", "service": "soilboring-ops"}

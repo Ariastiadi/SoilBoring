@@ -15,14 +15,16 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from . import docstore
 from .models import normalize_email
-from .storage import DATA_PATH, atomic_write_text
 
 
 logger = logging.getLogger(__name__)
 
-USER_FILE = DATA_PATH / "users.json"
-SECRET_FILE = DATA_PATH / ".token_secret"
+USERS_DOC = "users.json"
+SECRET_DOC = ".token_secret"
+USER_FILE = docstore.path_for(USERS_DOC)  # only meaningful in file mode
+SECRET_FILE = docstore.path_for(SECRET_DOC)
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL", "28800"))  # 8 hours
 VALID_ROLES = {"admin", "general"}
 MIN_PASSWORD_LENGTH = 8
@@ -34,15 +36,14 @@ _LEGACY_PREFIX = "sha256"
 
 _WEAK_SECRETS = {"", "change-me-please", "changeme", "secret", "password"}
 _bearer = HTTPBearer(auto_error=False)
-_USERS_LOCK = threading.RLock()
 
 
 def _resolve_token_secret() -> str:
     """Return the token signing secret.
 
     * ``AUTH_TOKEN_SECRET`` is used when set (must not be a known weak value).
-    * Otherwise a random secret is generated once and stored next to the data
-      files, so tokens survive restarts without shipping a guessable default.
+    * Otherwise a random secret is generated once and stored with the data (file or
+      database), so tokens survive restarts without shipping a guessable default.
     """
     configured = os.environ.get("AUTH_TOKEN_SECRET")
     if configured is not None and configured.strip():
@@ -52,16 +53,15 @@ def _resolve_token_secret() -> str:
                 "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
             )
         return configured
-    if SECRET_FILE.exists():
-        stored = SECRET_FILE.read_text(encoding="utf-8").strip()
+    with docstore.lock(SECRET_DOC):
+        stored = (docstore.read_text(SECRET_DOC) or "").strip()
         if len(stored) >= 32:
             return stored
-    generated = secrets.token_urlsafe(48)
-    atomic_write_text(SECRET_FILE, generated + "\n", mode=0o600)
+        generated = secrets.token_urlsafe(48)
+        docstore.write_text(SECRET_DOC, generated + "\n", private=True)
     logger.warning(
-        "AUTH_TOKEN_SECRET is not set; generated a random secret at %s. "
-        "Set AUTH_TOKEN_SECRET explicitly in production.",
-        SECRET_FILE,
+        "AUTH_TOKEN_SECRET is not set; generated a random secret and stored it with the data (%s).",
+        "database" if docstore.USE_DATABASE else SECRET_FILE,
     )
     return generated
 
@@ -120,11 +120,11 @@ _DUMMY_HASH = _hash_password(secrets.token_urlsafe(12))
 # --------------------------------------------------------------------------- #
 
 def _load_users() -> Dict[str, Dict[str, Any]]:
-    if not USER_FILE.exists():
+    text = docstore.read_text(USERS_DOC)
+    if text is None or not text.strip():
         return {}
     try:
-        with USER_FILE.open("r", encoding="utf-8-sig") as f:
-            payload = json.load(f)
+        payload = json.loads(text)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid users.json: {exc}") from exc
     users: Dict[str, Dict[str, Any]] = {}
@@ -170,7 +170,7 @@ def _save_users(users: Dict[str, Dict[str, Any]]) -> None:
         {"email": item[1]["email"], "password": item[1]["password"], "role": item[1].get("role", "general")}
         for item in sorted_items
     ]
-    atomic_write_text(USER_FILE, json.dumps(payload, indent=2) + "\n", mode=0o600)
+    docstore.write_text(USERS_DOC, json.dumps(payload, indent=2) + "\n", private=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -244,7 +244,7 @@ def authenticate_user(email: str, password: str) -> Dict[str, Any]:
     # Password checks run one at a time under this lock, so "check the lockout" and
     # "record the failure" happen together: parallel guesses cannot slip past the
     # limit, and only real failures count (correct logins arriving at once are fine).
-    with _USERS_LOCK:
+    with docstore.lock(USERS_DOC):
         _check_throttle(email_key)
         users = _load_users()
         user = users.get(email_key)
@@ -372,7 +372,7 @@ def create_user(email: str, password: str, role: str) -> Dict[str, str]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Role must be one of: {', '.join(sorted(VALID_ROLES))}"
         )
-    with _USERS_LOCK:
+    with docstore.lock(USERS_DOC):
         users = _load_users()
         if email_key in users:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists")
@@ -393,7 +393,7 @@ def set_password(email: str, new_password: str) -> None:
     """Replace a user's password. Existing sessions of that user stop working."""
     _check_new_password(new_password)
     email_key = (email or "").strip().lower()
-    with _USERS_LOCK:
+    with docstore.lock(USERS_DOC):
         users = _load_users()
         user = users.get(email_key)
         if user is None:
@@ -421,7 +421,7 @@ def change_own_password(email: str, current_password: str, new_password: str) ->
 
 def delete_user(email: str, *, acting_email: Optional[str] = None) -> None:
     email_key = (email or "").strip().lower()
-    with _USERS_LOCK:
+    with docstore.lock(USERS_DOC):
         users = _load_users()
         target = users.get(email_key)
         if target is None:
@@ -444,7 +444,7 @@ def bootstrap_admin_from_env() -> Optional[str]:
     password = os.environ.get("ADMIN_PASSWORD") or ""
     if not email or not password:
         return None
-    with _USERS_LOCK:
+    with docstore.lock(USERS_DOC):
         if _load_users():
             return None
         try:

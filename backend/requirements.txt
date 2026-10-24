@@ -4,3 +4,5 @@ pydantic>=2.7.0,<3.0
 requests>=2.31.0,<3.0
 # Time-zone database for APP_TIMEZONE (slim images and Windows have none).
 tzdata>=2024.1
+# Postgres driver, used only when DATABASE_URL is set (e.g. Neon on Render).
+psycopg[binary,pool]>=3.2,<4.0

@@ -98,13 +98,14 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="overwrite an existing reports.csv")
     args = parser.parse_args()
 
-    if storage.FILE.exists() and not args.force:
-        print(f"{storage.FILE} already exists; use --force to overwrite.", file=sys.stderr)
+    where = "the database (DATABASE_URL)" if storage.docstore.USE_DATABASE else str(storage.FILE)
+    if storage.docstore.read_text(storage.DOC) is not None and not args.force:
+        print(f"Logs already exist in {where}; use --force to overwrite.", file=sys.stderr)
         return 1
     if not 1 <= args.count <= 100_000:
         parser.error("--count must be between 1 and 100000")
     storage._write_reports(build_rows(args.count, args.seed))
-    print(f"Wrote {args.count} synthetic logs to {storage.FILE}")
+    print(f"Wrote {args.count} synthetic logs to {where}")
     return 0
 
 

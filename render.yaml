@@ -1,0 +1,25 @@
+# Render Blueprint: one free web service (UI + API) using the root Dockerfile.
+# Data lives in Postgres (DATABASE_URL, e.g. a free Neon database) because the free
+# web service has no persistent disk. See README "Deploy on Render (free)".
+services:
+  - type: web
+    name: soilboring
+    runtime: docker
+    plan: free
+    region: ohio         # same AWS region as the Neon project (US East 2, Ohio)
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # paste the Neon connection string when creating the service
+      - key: AUTH_TOKEN_SECRET
+        generateValue: true  # Render generates a strong random value
+      - key: ADMIN_EMAIL
+        sync: false          # first admin, created only while there are no users yet
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ORG_NAME
+        sync: false
+      - key: APP_TIMEZONE
+        value: Asia/Jakarta

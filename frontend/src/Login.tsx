@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { APP_TITLE } from './api'
 
 type Props = {
   onLogin: (email: string, password: string) => Promise<void>
+  title: string
 }
 
-export default function Login({ onLogin }: Props) {
+export default function Login({ onLogin, title }: Props) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState('')
@@ -30,7 +30,7 @@ export default function Login({ onLogin }: Props) {
 
   return (
     <div className="card" style={{ maxWidth: '480px', margin: '4rem auto', padding: '2rem' }}>
-      <h2 style={{ marginTop: 0 }}>{APP_TITLE}</h2>
+      <h2 style={{ marginTop: 0 }}>{title}</h2>
       <p style={{ color: 'var(--muted)', marginBottom: '1.5rem' }}>
         Sign in with your assigned operator email and password to log boreholes.
       </p>

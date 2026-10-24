@@ -319,7 +319,7 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
     # ABBR, TYPE and UNIT must list exactly what the file uses. Headings follow the order of
     # the standard dictionary (AGS4 rule 7).
     abbr_rows = []
-    used_codes = set()
+    used_codes: set[Tuple[str, str]] = set()
     for group_rows, heading in ((loca_rows, "LOCA_TYPE"), (hdph_rows, "HDPH_TYPE")):
         used_codes.update((heading, r[heading]) for r in group_rows if r.get(heading))
     descriptions = {}

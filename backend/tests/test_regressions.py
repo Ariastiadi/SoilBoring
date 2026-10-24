@@ -21,7 +21,7 @@ def lenient_client():
 
 
 def test_unknown_or_missing_role_is_not_admin(client):
-    auth.USER_FILE.write_text(json.dumps([
+    auth.docstore.write_text(auth.USERS_DOC, json.dumps([
         {"email": "v@example.com", "password": "viewerpass1", "role": "Viewer"},
         {"email": "n@example.com", "password": "nopass-role1"},
         {"email": "g@example.com", "password": "generalpass1", "role": "General"},
@@ -67,12 +67,12 @@ def test_throttle_table_is_bounded(monkeypatch):
 
 
 def test_legacy_dict_users_file_strips_emails(client):
-    auth.USER_FILE.write_text(json.dumps({" Boss@Example.com ": "legacy-password"}))
+    auth.docstore.write_text(auth.USERS_DOC, json.dumps({" Boss@Example.com ": "legacy-password"}))
     login_headers(client, "boss@example.com", "legacy-password")
 
 
 def test_extra_csv_column_is_409_everywhere(lenient_client, admin_headers):
-    storage.FILE.write_text(",".join(storage.HEADERS) + ",Extra\n", encoding="utf-8")
+    storage.docstore.write_text(storage.DOC, ",".join(storage.HEADERS) + ",Extra\n")
     calls = [
         ("get", "/api/reports", {}),
         ("get", "/api/dashboard", {}),
@@ -89,7 +89,7 @@ def test_extra_csv_column_is_409_everywhere(lenient_client, admin_headers):
 
 def test_csv_with_bom_is_read(client, admin_headers):
     row = ",".join(str(sample_report().get(h, "")) for h in storage.HEADERS)
-    storage.FILE.write_text("﻿" + ",".join(storage.HEADERS) + "\n" + row + "\n", encoding="utf-8")
+    storage.docstore.write_text(storage.DOC, "﻿" + ",".join(storage.HEADERS) + "\n" + row + "\n")
     res = client.get("/api/reports", headers=admin_headers)
     assert res.status_code == 200
     assert res.json()[0]["BoreholeID"] == "BH-001"
@@ -236,7 +236,7 @@ def test_control_characters_are_stripped_and_lists_rejected(client, admin_header
     res = client.put("/api/reports/BH-001", json={"Remarks": "a\x00b\x1bc\r\nd"}, headers=admin_headers)
     assert res.status_code == 200
     assert storage.get_report("BH-001")["Remarks"] == "abc\nd"
-    assert b"\x00" not in storage.FILE.read_bytes()
+    assert "\x00" not in storage.docstore.read_text(storage.DOC)
     res = client.put("/api/reports/BH-001", json={"Remarks": ["x"]}, headers=admin_headers)
     assert res.status_code == 422
 

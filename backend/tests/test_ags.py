@@ -113,9 +113,9 @@ def test_rig_and_core_size(tmp_path, client, admin_headers):
 def test_old_csv_without_new_columns_still_loads(client, admin_headers):
     old_headers = [h for h in storage.HEADERS if h not in {"DrillRig", "CoreSize"}]
     row = sample_report()
-    storage.FILE.write_text(
-        ",".join(old_headers) + "\n" + ",".join(str(row.get(h, "")) for h in old_headers) + "\n", encoding="utf-8"
+    storage.docstore.write_text(
+        storage.DOC, ",".join(old_headers) + "\n" + ",".join(str(row.get(h, "")) for h in old_headers) + "\n"
     )
     assert client.get("/api/reports", headers=admin_headers).json()[0]["DrillRig"] == ""
     assert client.put("/api/reports/BH-001", json={"DrillRig": "Rig 7"}, headers=admin_headers).status_code == 200
-    assert storage.FILE.read_text(encoding="utf-8").splitlines()[0] == ",".join(storage.HEADERS)
+    assert storage.docstore.read_text(storage.DOC).splitlines()[0] == ",".join(storage.HEADERS)

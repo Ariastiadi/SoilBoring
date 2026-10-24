@@ -257,6 +257,20 @@ export async function downloadAgs(project: string) {
   return filename;
 }
 
-// Optional organisation name shown in the title bar (build-time setting).
-export const ORG_NAME = String(import.meta.env.VITE_ORG_NAME ?? "").trim();
-export const APP_TITLE = ORG_NAME ? `${ORG_NAME} · Soil Boring Ops` : "Soil Boring Ops";
+export const APP_NAME = "Soil Boring Ops";
+
+export function appTitle(orgName: string) {
+  return orgName ? `${orgName} · ${APP_NAME}` : APP_NAME;
+}
+
+// Public, non-secret settings (organisation name) from the backend's ORG_NAME.
+export async function getPublicConfig(): Promise<{ org_name: string }> {
+  try {
+    const r = await fetch(`${BASE}/api/config`);
+    if (!r.ok) return { org_name: "" };
+    const body = await r.json();
+    return { org_name: typeof body?.org_name === "string" ? body.org_name.trim() : "" };
+  } catch {
+    return { org_name: "" };
+  }
+}
