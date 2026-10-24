@@ -211,3 +211,11 @@ Notes:
 - Set `DATA_DIR` to an external volume to keep field logs on shared storage.
 - Put the app behind HTTPS and keep `AUTH_TOKEN_SECRET` out of version control.
 - Override `OLLAMA_MODEL`/`OLLAMA_URL` to plug in your own model or hosted AI endpoint.
+
+---
+
+### License & Credits
+
+Licensed under the [GNU General Public License v3.0](LICENSE).
+
+SoilBoring was originally created by **Abu Hanifah** ([abuhanifah86/SoilBoring](https://github.com/abuhanifah86/SoilBoring)). This repository continues that work with security, data-integrity, testing and deployment improvements.
