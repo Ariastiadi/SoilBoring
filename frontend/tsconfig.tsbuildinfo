@@ -1,1 +1,0 @@
-{"root":["./src/App.tsx","./src/Login.tsx","./src/api.ts","./src/main.tsx","./src/vite-env.d.ts","./src/tabs/AboutSoilBoring.tsx","./src/tabs/DailyReportData.tsx","./src/tabs/DailyReportForm.tsx","./src/tabs/Dashboard.tsx","./src/tabs/QA.tsx","./src/tabs/Summary.tsx","./src/tabs/UserAdmin.tsx"],"version":"5.9.3"}

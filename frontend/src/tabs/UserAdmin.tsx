@@ -73,7 +73,7 @@ export default function UserAdmin({ currentUserEmail }: Props) {
           </div>
           <div>
             <label>Password</label>
-            <input type="text" value={password} onChange={e => setPassword(e.target.value)} placeholder="Temporary password" required />
+            <input type="password" autoComplete="new-password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" required />
             <label>Role</label>
             <select value={role} onChange={e => setRole(e.target.value as User['role'])}>
               <option value="general">General (no user admin)</option>

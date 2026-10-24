@@ -1,4 +1,10 @@
-const BASE = (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim() !== "" ? import.meta.env.VITE_API_URL : "/api");
+// Origin of the backend. Empty = same origin (Docker/nginx and the Vite dev proxy).
+// Every request path below already starts with "/api", so a trailing "/api" or "/"
+// in VITE_API_URL (older docs told people to use "/api") is stripped to avoid "/api/api".
+const BASE = String(import.meta.env.VITE_API_URL ?? "")
+  .trim()
+  .replace(/\/+$/, "")
+  .replace(/\/api$/, "");
 
 export type User = {
   email: string
@@ -78,12 +84,35 @@ function buildHeaders(init?: HeadersInit) {
   return headers;
 }
 
-async function parseJson<T>(response: Response, message: string): Promise<T> {
+// Turns FastAPI error bodies ({detail: "..."} or a list of validation errors) into one readable line.
+async function readErrorDetail(response: Response): Promise<string> {
+  try {
+    const body = await response.json();
+    const detail = body?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item: any) => {
+          const field = Array.isArray(item?.loc) ? item.loc[item.loc.length - 1] : "";
+          const text = String(item?.msg ?? "").replace(/^Value error, /, "");
+          return field && !text.includes(String(field)) ? `${field}: ${text}` : text;
+        })
+        .filter(Boolean)
+        .join("; ");
+    }
+  } catch {
+    // body was not JSON
+  }
+  return "";
+}
+
+async function parseJson<T>(response: Response, message: string, opts?: { skipUnauthorizedHandler?: boolean }): Promise<T> {
   if (!response.ok) {
-    if (response.status === 401 && unauthorizedHandler) {
+    if (response.status === 401 && unauthorizedHandler && !opts?.skipUnauthorizedHandler) {
       unauthorizedHandler();
     }
-    const error = new Error(`${message}: ${response.status}`) as Error & { status?: number };
+    const detail = await readErrorDetail(response);
+    const error = new Error(`${message}: ${detail || response.status}`) as Error & { status?: number };
     error.status = response.status;
     throw error;
   }
@@ -96,7 +125,8 @@ export async function login(email: string, password: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  return parseJson<{ token: string; email: string; role: User['role']; expires_in: number }>(r, "Login failed");
+  // A wrong password is a 401 too, but it must not look like an expired session.
+  return parseJson<{ token: string; email: string; role: User['role']; expires_in: number }>(r, "Login failed", { skipUnauthorizedHandler: true });
 }
 
 export async function postReport(data: any) {
@@ -135,7 +165,7 @@ export async function deleteReport(boreholeId: string) {
 export async function askAI(question: string, context?: string, history?: Array<{ role: string; content: string }>) {
   const r = await fetch(`${BASE}/api/ai/analyze`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ question, context, history }),
   });
   return parseJson<any>(r, "AI error");
@@ -150,12 +180,12 @@ export async function getSummary(period: "weekly" | "monthly", filters?: Record<
       }
     })
   }
-  const r = await fetch(`${BASE}/api/summaries?${params.toString()}`);
+  const r = await fetch(`${BASE}/api/summaries?${params.toString()}`, { headers: buildHeaders() });
   return parseJson<SummaryResponse>(r, "Failed to get summary");
 }
 
 export async function getDashboard() {
-  const r = await fetch(`${BASE}/api/dashboard`);
+  const r = await fetch(`${BASE}/api/dashboard`, { headers: buildHeaders() });
   return parseJson<DashboardResponse>(r, "Failed to get dashboard");
 }
 

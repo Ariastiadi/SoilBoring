@@ -26,6 +26,16 @@ const BOREHOLE_COLUMNS = [
   'Remarks',
 ]
 
+// Quotes a CSV cell and neutralises spreadsheet formulas (=, +, -, @) so a malicious
+// log entry cannot execute when the export is opened in Excel/Sheets.
+function csvCell(value: unknown): string {
+  let text = value === null || value === undefined ? '' : String(value)
+  if (/^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)) {
+    text = `'${text}`
+  }
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
 export default function DailyReportData() {
   const [reports, setReports] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -193,16 +203,10 @@ export default function DailyReportData() {
 
   const exportCsv = () => {
     if (!columns.length || !sortedReports.length) return
-    const header = columns.join(',')
-    const rows = sortedReports.map(row => columns.map(col => {
-      const val = row?.[col] ?? ''
-      const needsQuote = val?.toString().includes(',') || val?.toString().includes('"')
-      if (needsQuote) {
-        return `"${val.toString().replace(/"/g, '""')}"`
-      }
-      return val
-    }).join(','))
-    const content = [header, ...rows].join('\n')
+    const header = columns.map(csvCell).join(',')
+    const rows = sortedReports.map(row => columns.map(col => csvCell(row?.[col])).join(','))
+    // BOM so Excel opens UTF-8 text (e.g. Indonesian place names) correctly.
+    const content = '\uFEFF' + [header, ...rows].join('\r\n')
     const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

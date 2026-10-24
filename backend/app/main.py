@@ -1,27 +1,52 @@
+import logging
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from .routers import reports, ai, summaries, dashboard, auth, users
+from .auth import bootstrap_admin_from_env
+from .routers import ai, auth, dashboard, reports, summaries, users
 
 
-app = FastAPI(title="DDR Ops API")
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
+# Comma-separated list of browser origins allowed to call the API cross-origin.
+# The Docker setup serves UI and API from one origin, so no CORS is needed there.
+DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
+    if origin.strip() and origin.strip() != "*"
+]
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    bootstrap_admin_from_env()
+    yield
+
+
+app = FastAPI(title="Soil Boring Ops API", lifespan=lifespan)
+
+# Authentication uses bearer tokens (no cookies), so credentials are not needed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
-app.include_router(reports.router)
-app.include_router(ai.router)
-app.include_router(summaries.router)
-app.include_router(dashboard.router)
-app.include_router(auth.router)
-app.include_router(users.router)
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.middleware("http")
@@ -35,6 +60,19 @@ async def _dedupe_api_prefix(request: Request, call_next):
     return await call_next(request)
 
 
+app.include_router(reports.router)
+app.include_router(ai.router)
+app.include_router(summaries.router)
+app.include_router(dashboard.router)
+app.include_router(auth.router)
+app.include_router(users.router)
+
+
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "ddr-ops"}
+    return {"status": "ok", "service": "soilboring-ops"}
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}

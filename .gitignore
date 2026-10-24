@@ -3,16 +3,19 @@ __pycache__/
 .venv/
 venv/
 *.pyc
+.pytest_cache/
 
 # Node
 node_modules/
 dist/
+*.tsbuildinfo
 
-# Data
-data/*.csv
+# Runtime data (reports, users, token secret) never goes into git
+data/*
+!data/.gitkeep
 
 # Env
 .env
-frontend/.env.local
 frontend/.env
+frontend/.env.local
 backend/.env

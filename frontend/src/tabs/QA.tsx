@@ -3,6 +3,12 @@ import { askAI } from '../api'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+// Must stay within the backend limits (20 turns, 4000 characters each, 2000-character question).
+const MAX_HISTORY_MESSAGES = 16
+const MAX_TURN_CHARS = 4000
+const MAX_QUESTION_CHARS = 2000
+const MAX_CONTEXT_CHARS = 8000
+
 export default function QA() {
   const [question, setQuestion] = useState('')
   const [context, setContext] = useState('')
@@ -20,10 +26,11 @@ export default function QA() {
       // Build chat history for backend: alternating user/assistant turns
       const turns: Array<{role: string, content: string}> = []
       history.forEach(h => {
-        turns.push({ role: 'user', content: h.q })
-        if (h.a) turns.push({ role: 'assistant', content: h.a })
+        turns.push({ role: 'user', content: h.q.slice(0, MAX_TURN_CHARS) })
+        if (h.a) turns.push({ role: 'assistant', content: h.a.slice(0, MAX_TURN_CHARS) })
       })
-      const res = await askAI(question, context || undefined, turns)
+      const recentTurns = turns.slice(-MAX_HISTORY_MESSAGES)
+      const res = await askAI(question, context || undefined, recentTurns)
       const next = [...history, { q: question, a: res.answer, evidence: res.context, ts: Date.now() }]
       setHistory(next)
       localStorage.setItem('qa_history', JSON.stringify(next))
@@ -108,15 +115,15 @@ export default function QA() {
       <div className="row">
         <div>
           <label>Question</label>
-          <textarea value={question} onChange={e => setQuestion(e.target.value)} placeholder="Ask about soil boring progress, groundwater, or lab data..." />
+          <textarea value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)} placeholder="Ask about soil boring progress, groundwater, or lab data..." />
         </div>
         <div>
           <label>Optional Context</label>
-          <textarea value={context} onChange={e => setContext(e.target.value)} placeholder="Paste related report text or notes (optional)" />
+          <textarea value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder="Paste related report text or notes (optional)" />
         </div>
       </div>
       <div className="actions" style={{ marginTop: '.75rem', gap: '.5rem', display: 'flex', alignItems: 'center' }}>
-        <button onClick={onAsk}>Ask</button>
+        <button onClick={onAsk} disabled={status === 'Thinking...'}>Ask</button>
         <button
           onClick={() => {
             setHistory([])

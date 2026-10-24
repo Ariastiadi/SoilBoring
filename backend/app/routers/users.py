@@ -1,9 +1,9 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, EmailStr, Field
 
-from ..auth import VALID_ROLES, create_user, delete_user, get_current_user, list_users
+from ..auth import MIN_PASSWORD_LENGTH, create_user, delete_user, list_users, require_admin
 
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -11,32 +11,21 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=256)
     role: Literal["admin", "general"]
 
 
-def _ensure_admin(user) -> None:
-    if user.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges are required for this action",
-        )
-
-
 @router.get("")
-def get_users(user=Depends(get_current_user)):
-    _ensure_admin(user)
+def get_users(admin=Depends(require_admin)):
     return list_users()
 
 
 @router.post("", status_code=201)
-def add_user(payload: UserCreate, user=Depends(get_current_user)):
-    _ensure_admin(user)
+def add_user(payload: UserCreate, admin=Depends(require_admin)):
     return create_user(payload.email, payload.password, payload.role)
 
 
 @router.delete("/{email}")
-def remove_user(email: str, user=Depends(get_current_user)):
-    _ensure_admin(user)
-    delete_user(email)
+def remove_user(email: str, admin=Depends(require_admin)):
+    delete_user(email, acting_email=admin["email"])
     return {"status": "deleted"}

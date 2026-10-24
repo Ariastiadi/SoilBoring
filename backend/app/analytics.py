@@ -1,24 +1,37 @@
 from __future__ import annotations
 
-from collections import Counter
-from datetime import datetime, timedelta
+from collections import Counter, OrderedDict
+import csv
+from datetime import datetime, timedelta, timezone
+import hashlib
+import io
 import json
 import logging
+import math
+import re
+import threading
+import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from .ollama_client import ask as ollama_ask
+from .ollama_client import AIUnavailableError, ask_strict
 
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    """Naive UTC "now" (dates in the CSV are naive), without the deprecated utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def parse_float(val: Any) -> Optional[float]:
     try:
         if val in (None, "", "None"):
             return None
-        return float(val)
+        number = float(val)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def parse_date(val: Any) -> Optional[datetime]:
@@ -90,7 +103,7 @@ def filter_period(
                 if start_date <= dt <= end_date:
                     filtered.append(r)
             else:
-                cutoff = datetime.utcnow() - timedelta(days=7)
+                cutoff = _utcnow() - timedelta(days=7)
                 if dt >= cutoff:
                     filtered.append(r)
         else:
@@ -98,7 +111,7 @@ def filter_period(
                 if dt.year == year and dt.month == month:
                     filtered.append(r)
             else:
-                cutoff = datetime.utcnow() - timedelta(days=30)
+                cutoff = _utcnow() - timedelta(days=30)
                 if dt >= cutoff:
                     filtered.append(r)
     return filtered
@@ -178,7 +191,7 @@ def build_summary_report(
     rows_all = [normalize_row(r) for r in rows_raw]
     rows_all = sorted([r for r in rows_all if r.get("start_dt")], key=lambda r: r["start_dt"])
     rows = filter_period(rows_all, period, start_date=start_date, end_date=end_date, month=month, year=year)
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = _utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     projects = sorted({r["project"] for r in rows if r.get("project")})
     sites = sorted({r["site"] for r in rows if r.get("site")})
@@ -291,61 +304,102 @@ def build_dashboard_report(rows_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
     return report
 
 
+_AI_CACHE_TTL_SECONDS = 600
+_AI_CACHE_MAX_ENTRIES = 64
+_ai_cache: "OrderedDict[str, tuple[float, str]]" = OrderedDict()
+_ai_cache_lock = threading.Lock()
+
+
+def clear_ai_cache() -> None:
+    with _ai_cache_lock:
+        _ai_cache.clear()
+
+
 def _ai_exec_summary(title: str, instruction: str, payload: Dict[str, Any]) -> Optional[str]:
+    """Generate an AI narrative, cached by content so reloads do not re-run the model.
+
+    Failures are never cached, so the narrative appears as soon as the AI service is back.
+    """
     if not payload:
         return None
     try:
-        context = json.dumps({"title": title, "data": payload}, indent=2, default=str)
+        context = json.dumps({"title": title, "data": payload}, indent=2, default=str, sort_keys=True)
     except (TypeError, ValueError):
         context = str(payload)
+
+    key = hashlib.sha256(f"{instruction}\n{context}".encode("utf-8")).hexdigest()
+    now = time.time()
+    with _ai_cache_lock:
+        hit = _ai_cache.get(key)
+        if hit and now - hit[0] < _AI_CACHE_TTL_SECONDS:
+            _ai_cache.move_to_end(key)
+            return hit[1]
+
     try:
-        return ollama_ask(instruction, context=context, timeout=90)
-    except Exception as exc:  # pragma: no cover
+        text = ask_strict(instruction, context=context, timeout=90)
+    except AIUnavailableError as exc:
+        logger.info("Executive summary skipped: %s", exc)
+        return None
+    except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Executive summary generation failed: %s", exc)
         return None
+    if not text:
+        return None
+
+    with _ai_cache_lock:
+        _ai_cache[key] = (time.time(), text)
+        _ai_cache.move_to_end(key)
+        while len(_ai_cache) > _AI_CACHE_MAX_ENTRIES:
+            _ai_cache.popitem(last=False)
+    return text
+
+
+_STOPWORDS = frozenset(
+    "the and for what which that this with from have has are was were how many much show list give tell "
+    "about all any per each into onto over under than then there their them they you your our out not".split()
+)
+_CONTEXT_COLUMNS = (
+    "BoreholeID", "Project", "Site", "StartDate", "Method", "FinalDepth_m", "USCS",
+    "GroundwaterDepth_m", "AvgSPT", "Contractor", "SoilDescription", "Remarks",
+)
+
+
+def _fmt_number(value: Optional[float]) -> str:
+    return "" if value is None else str(value)
 
 
 def build_ai_context(question: str, rows_raw: List[Dict[str, Any]], max_rows: int = 30) -> str:
+    """Return the most relevant rows as a properly escaped CSV block (no prose)."""
     rows = [normalize_row(r) for r in rows_raw]
     rows = [r for r in rows if r.get("start_dt")]
     rows.sort(key=lambda r: r["start_dt"], reverse=True)
-    q = question.lower()
-    tokens = {t.strip(",. ") for t in q.split() if len(t) >= 3}
+    tokens = {t for t in re.findall(r"\w+", question.lower()) if len(t) >= 3 and t not in _STOPWORDS}
 
     def score_row(r: Dict[str, Any]) -> int:
-        fields = [
-            (r.get("project") or "").lower(),
-            (r.get("site") or "").lower(),
-            (r.get("borehole_id") or "").lower(),
-            (r.get("soil_description") or "").lower(),
-        ]
-        score = 0
-        for field in fields:
-            if any(tok in field for tok in tokens):
-                score += 1
-        return score
+        fields = " ".join(
+            (r.get(key) or "")
+            for key in ("project", "site", "borehole_id", "soil_description", "contractor", "method", "uscs", "geologist")
+        ).lower()
+        words = set(re.findall(r"\w+", fields))
+        return sum(1 for tok in tokens if tok in words)
 
     ranked = sorted(rows, key=lambda r: (score_row(r), r["start_dt"]), reverse=True)[:max_rows]
-    as_csv = "BoreholeID,Project,Site,StartDate,Method,FinalDepth_m,USCS,GroundwaterDepth_m,AvgSPT,Remarks\n"
-    csv_lines = []
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(_CONTEXT_COLUMNS)
     for r in ranked:
-        csv_lines.append(",".join([
+        writer.writerow([
             r["borehole_id"],
             r["project"],
             r["site"],
             r["start_date"],
             r["method"],
-            str(r["final_depth"] or ""),
+            _fmt_number(r["final_depth"]),
             r["uscs"],
-            str(r["groundwater_depth"] or ""),
-            str(r["avg_spt"] or ""),
-            (r["remarks"] or "").replace(",", ";"),
-        ]))
-    as_csv += "\n".join(csv_lines)
-
-    context = (
-        "You are assisting geotechnical engineers with soil boring logs. "
-        "Use the structured CSV data and answer precisely from it.\n"
-        f"{as_csv}"
-    )
-    return context
+            _fmt_number(r["groundwater_depth"]),
+            _fmt_number(r["avg_spt"]),
+            r["contractor"],
+            (r["soil_description"] or "")[:200],
+            (r["remarks"] or "")[:200],
+        ])
+    return buffer.getvalue().rstrip("\n")

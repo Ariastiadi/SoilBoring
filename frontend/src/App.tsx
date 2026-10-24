@@ -10,8 +10,16 @@ import Login from './Login'
 import { login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
 
 type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users'
-type AuthState = { token: string; email: string; role: 'admin' | 'general' } | null
-const AUTH_STORAGE_KEY = 'ddr-auth'
+type AuthState = { token: string; email: string; role: 'admin' | 'general'; expiresAt?: number } | null
+const AUTH_STORAGE_KEY = 'soilboring-auth'
+// AI answers cached in the browser contain data from the logs, so they are cleared when the
+// session ends. The unsaved borehole form draft is kept on purpose so field work is never lost.
+const USER_DATA_KEYS = ['qa_history']
+
+function clearUserData() {
+  if (typeof window === 'undefined') return
+  USER_DATA_KEYS.forEach(key => window.localStorage.removeItem(key))
+}
 
 export default function App() {
   const [tab, setTab] = useState<TabKey>('report')
@@ -22,8 +30,12 @@ export default function App() {
     try {
       const parsed = JSON.parse(raw)
       if (parsed?.token && parsed?.email) {
-        const role = parsed?.role === 'general' ? 'general' : 'admin'
-        return { token: parsed.token, email: parsed.email, role }
+        if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
+          window.localStorage.removeItem(AUTH_STORAGE_KEY)
+          return null
+        }
+        const role = parsed?.role === 'admin' ? 'admin' : 'general'
+        return { token: parsed.token, email: parsed.email, role, expiresAt: parsed.expiresAt }
       }
     } catch {
       return null
@@ -45,6 +57,7 @@ export default function App() {
   useEffect(() => {
     const handler = () => {
       setAuth(null)
+      clearUserData()
       setAuthNotice('Your session has expired. Please sign in again.')
     }
     setUnauthorizedHandler(handler)
@@ -53,12 +66,18 @@ export default function App() {
 
   const handleLogin = async (email: string, password: string) => {
     const session = await loginApi(email, password)
-    setAuth({ token: session.token, email: session.email, role: session.role })
+    setAuth({
+      token: session.token,
+      email: session.email,
+      role: session.role,
+      expiresAt: Date.now() + session.expires_in * 1000,
+    })
     setAuthNotice('')
     setTab('report')
   }
 
   const handleLogout = () => {
+    clearUserData()
     setAuth(null)
     setAuthNotice('')
     setAuthToken(null)

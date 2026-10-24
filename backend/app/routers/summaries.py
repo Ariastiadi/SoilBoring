@@ -1,14 +1,15 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query as Q
 
+from ..auth import get_current_user
 from ..storage import load_reports
 from ..analytics import build_summary_report
 
 
-router = APIRouter(prefix="/api/summaries", tags=["summaries"])
+router = APIRouter(prefix="/api/summaries", tags=["summaries"], dependencies=[Depends(get_current_user)])
 
 
 def _parse_date(value: Optional[str], label: str) -> Optional[datetime]:
@@ -50,9 +51,3 @@ def summaries(
         year=year,
     )
 
-
-def _latest_date(reports):
-    if not reports:
-        return None
-    last = reports[-1]
-    return last.get("date") or last.get("Date")

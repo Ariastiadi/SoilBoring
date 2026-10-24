@@ -31,7 +31,7 @@ export default function Login({ onLogin }: Props) {
     <div className="card" style={{ maxWidth: '480px', margin: '4rem auto', padding: '2rem' }}>
       <h2 style={{ marginTop: 0 }}>Soil Boring Access</h2>
       <p style={{ color: 'var(--muted)', marginBottom: '1.5rem' }}>
-        Sign in with your assigned operator email and static password to log boreholes.
+        Sign in with your assigned operator email and password to log boreholes.
       </p>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
@@ -41,6 +41,7 @@ export default function Login({ onLogin }: Props) {
             value={email}
             onChange={e => setEmail(e.target.value)}
             placeholder="operator@example.com"
+            autoComplete="username"
             required
           />
         </label>
@@ -50,7 +51,8 @@ export default function Login({ onLogin }: Props) {
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            placeholder="Static password"
+            placeholder="Password"
+            autoComplete="current-password"
             required
           />
         </label>
