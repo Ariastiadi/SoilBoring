@@ -4,6 +4,8 @@ export const METHOD_OPTIONS = [
   'Rotary Wash + SPT',
   'Hollow Stem Auger',
   'Coring + SPT',
+  'CPT / CPTu (Sondir)',
+  'Hand Auger',
 ]
 
 // All USCS group symbols (ASTM D2487); the first entry is the form default.

@@ -2,3 +2,5 @@ fastapi>=0.115.0,<1.0
 uvicorn[standard]>=0.30.0,<1.0
 pydantic>=2.7.0,<3.0
 requests>=2.31.0,<3.0
+# Time-zone database for APP_TIMEZONE (slim images and Windows have none).
+tzdata>=2024.1

@@ -62,6 +62,8 @@ Environment variables:
 | `OLLAMA_URL` | *(empty = AI off)* | e.g. `http://localhost:11434/api/chat`. |
 | `OLLAMA_MODEL` | `gpt-oss:120b-cloud` | Model name. |
 | `OLLAMA_API_KEY` | – | Bearer token for hosted/proxied Ollama endpoints. |
+| `ORG_NAME` | – | Organisation name used in AGS4 exports (e.g. `Soilens`). In Docker it is also shown in the title bar; for `npm run dev` set `VITE_ORG_NAME`. |
+| `APP_TIMEZONE` | `Asia/Jakarta` | Time zone for "today", report timestamps and the last-7/30-days views. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
 
 > **Run a single Uvicorn worker.** Storage is a CSV file guarded by an in-process lock, and the login throttle and AI cache are in-memory. For multiple workers or instances, move storage to a database first.
@@ -126,11 +128,28 @@ Rules enforced by the API:
 ### Features at a Glance
 
 - **Borehole Log:** Form-driven capture of project/site, drilling parameters, groundwater, USCS, and SPT stats.
-- **Borehole Data:** Filter/search/sort logs, export CSV (spreadsheet-formula safe), and edit/delete rows with confirmations.
+- **Borehole Data:** Filter/search/sort logs, export CSV (spreadsheet-formula safe) or **AGS4**, and edit/delete rows with confirmations.
 - **Dashboard:** KPIs, method and USCS breakdowns, and recent activity with an executive AI brief (cached for 10 minutes; failures are never cached).
 - **Summaries:** Weekly (date range) and monthly (month/year) rollups with stats, highlights, and markdown AI narratives.
 - **Geo AI:** Q&A backed by the borehole CSV with evidence display. The model only sees the most relevant rows and is told to answer from them.
 - **About:** Primer derived from `archive/template/soilboring.md`.
+
+---
+
+### AGS4 export
+
+Choose a project in the **Project** filter of the Borehole Data tab and press **Export AGS4** (or call `GET /api/export/ags?project=<name>`). The file follows AGS4 edition 4.1.1, the ground-investigation data format read by gINT, HoleBASE, OpenGround and similar tools, and passes the official AGS4 checker ([python-ags4](https://pypi.org/project/python-ags4/), used in the tests).
+
+| App field | AGS4 |
+| --- | --- |
+| BoreholeID, ground level, final depth, start/end date, lat/long (as D:M:S, WGS84), site | `LOCA` |
+| Drilling method | `LOCA_TYPE` / `HDPH_TYPE` (standard codes: W, RO, RC, AUGH, SCP, HA; other methods get M1, M2 … listed in `ABBR`) |
+| Hole 0 m to final depth, logging geologist, contractor | `HDPH` |
+| Borehole / casing diameter | `HDIA` / `CDIA` |
+| Groundwater depth (when encountered) | `WSTG` |
+| USCS class, average SPT N60, target depth, soil description, remarks | `LOCA_REM` |
+
+The daily log keeps one soil description and one average N60 per hole, so no layer (`GEOL`) or individual SPT (`ISPT`) rows are invented. Text is converted to ASCII as AGS4 requires (é → e).
 
 ---
 
@@ -145,7 +164,9 @@ backend/
     ollama_client.py
     storage.py         # locked, atomic CSV storage
     manage.py          # admin CLI
-    routers/           # auth, users, reports, ai, summaries, dashboard
+    ags.py             # AGS4 export
+    config.py          # ORG_NAME, APP_TIMEZONE
+    routers/           # auth, users, reports, ai, summaries, dashboard, export
   tests/               # pytest suite
 frontend/
   src/                 # React app (api.ts, App.tsx, Login.tsx, tabs/)

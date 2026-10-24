@@ -236,3 +236,27 @@ export async function resetUserPassword(email: string, password: string) {
   });
   return parseJson<{ status: string }>(r, "Could not reset the password");
 }
+
+// Downloads all logs of one project as an AGS4 file (the browser saves it).
+export async function downloadAgs(project: string) {
+  const r = await fetch(`${BASE}/api/export/ags?${new URLSearchParams({ project })}`, { headers: buildHeaders() });
+  if (!r.ok) {
+    await parseJson<unknown>(r, "AGS4 export failed");
+  }
+  const match = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "");
+  const filename = match ? match[1] : "export.ags";
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return filename;
+}
+
+// Optional organisation name shown in the title bar (build-time setting).
+export const ORG_NAME = String(import.meta.env.VITE_ORG_NAME ?? "").trim();
+export const APP_TITLE = ORG_NAME ? `${ORG_NAME} · Soil Boring Ops` : "Soil Boring Ops";

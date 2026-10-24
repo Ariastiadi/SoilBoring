@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, OrderedDict
 import csv
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import hashlib
 import io
 import json
@@ -13,15 +13,16 @@ import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from .config import local_now, timezone_label
 from .ollama_client import AIUnavailableError, ask_strict
 
 
 logger = logging.getLogger(__name__)
 
 
-def _utcnow() -> datetime:
-    """Naive UTC "now" (dates in the CSV are naive), without the deprecated utcnow()."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+def _now() -> datetime:
+    """Naive local "now" in APP_TIMEZONE (dates in the CSV are naive local dates)."""
+    return local_now()
 
 
 def parse_float(val: Any) -> Optional[float]:
@@ -103,7 +104,7 @@ def filter_period(
                 if start_date <= dt <= end_date:
                     filtered.append(r)
             else:
-                cutoff = _utcnow() - timedelta(days=7)
+                cutoff = _now() - timedelta(days=7)
                 if dt >= cutoff:
                     filtered.append(r)
         else:
@@ -111,7 +112,7 @@ def filter_period(
                 if dt.year == year and dt.month == month:
                     filtered.append(r)
             else:
-                cutoff = _utcnow() - timedelta(days=30)
+                cutoff = _now() - timedelta(days=30)
                 if dt >= cutoff:
                     filtered.append(r)
     return filtered
@@ -191,7 +192,7 @@ def build_summary_report(
     rows_all = [normalize_row(r) for r in rows_raw]
     rows_all = sorted([r for r in rows_all if r.get("start_dt")], key=lambda r: r["start_dt"])
     rows = filter_period(rows_all, period, start_date=start_date, end_date=end_date, month=month, year=year)
-    now = _utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = f"{_now():%Y-%m-%d %H:%M} {timezone_label()}"
 
     projects = sorted({r["project"] for r in rows if r.get("project")})
     sites = sorted({r["site"] for r in rows if r.get("site")})

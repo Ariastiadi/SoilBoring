@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from .auth import bootstrap_admin_from_env
-from .routers import ai, auth, dashboard, reports, summaries, users
+from .routers import ai, auth, dashboard, export, reports, summaries, users
 from .storage import AmbiguousReportError, SchemaMismatchError
 
 
@@ -84,6 +84,7 @@ app.include_router(summaries.router)
 app.include_router(dashboard.router)
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(export.router)
 
 
 @app.get("/")

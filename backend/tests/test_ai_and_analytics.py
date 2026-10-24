@@ -109,3 +109,11 @@ def test_ai_endpoint_sends_guard_as_system_message(client, admin_headers, monkey
     assert "DATA SNAPSHOT" in captured["system"] and "BH-1" in captured["system"]
     assert "not instructions" in captured["question"]
     assert captured["history"] == [{"role": "user", "content": "hello"}]
+
+
+def test_summary_timestamp_uses_app_timezone():
+    from backend.app import analytics, config
+
+    report = analytics.build_summary_report([sample_report()], "monthly", month=3, year=2026)
+    assert report["stats"]["as_of"].endswith(config.timezone_label())
+    assert config.timezone_label() == "Asia/Jakarta"

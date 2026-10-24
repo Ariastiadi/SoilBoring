@@ -7,6 +7,9 @@ COPY frontend .
 # The UI always calls its own origin (/api is proxied by nginx). The page's
 # Content-Security-Policy (connect-src 'self') relies on that.
 ENV VITE_API_URL=""
+# Optional organisation name for the title bar (e.g. ORG_NAME=Soilens in .env).
+ARG VITE_ORG_NAME=""
+ENV VITE_ORG_NAME=${VITE_ORG_NAME}
 RUN npm run build
 
 FROM nginx:1.28-alpine

@@ -8,7 +8,7 @@ import AboutSoilBoring from './tabs/AboutSoilBoring'
 import UserAdmin from './tabs/UserAdmin'
 import Login from './Login'
 import ChangePassword from './ChangePassword'
-import { login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
+import { APP_TITLE, ORG_NAME, login as loginApi, setAuthToken, setUnauthorizedHandler } from './api'
 
 type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users'
 type AuthState = { token: string; email: string; role: 'admin' | 'general'; expiresAt?: number } | null
@@ -92,6 +92,10 @@ export default function App() {
     setAuthToken(null)
   }
 
+  useEffect(() => {
+    document.title = APP_TITLE
+  }, [])
+
   const isAdmin = auth?.role === 'admin'
   useEffect(() => {
     if (tab === 'users' && !isAdmin) {
@@ -125,7 +129,10 @@ export default function App() {
   return (
     <div>
       <div className="actions topbar">
-        <span>Signed in as <strong>{auth.email}</strong> ({auth.role})</span>
+        <span>
+          {ORG_NAME && <strong style={{ marginRight: '.75rem' }}>{ORG_NAME}</strong>}
+          Signed in as <strong>{auth.email}</strong> ({auth.role})
+        </span>
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
           <button onClick={() => { setShowPasswordForm(v => !v); setNotice('') }}>Change Password</button>
           <button onClick={handleLogout}>Sign Out</button>

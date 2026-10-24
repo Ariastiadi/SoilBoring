@@ -189,9 +189,9 @@ def test_summary_cache_survives_clock_minute(monkeypatch):
     calls = []
     monkeypatch.setattr(analytics, "ask_strict", lambda *a, **k: calls.append(1) or "narrative")
     rows = [sample_report()]
-    monkeypatch.setattr(analytics, "_utcnow", lambda: datetime(2026, 3, 12, 10, 0))
+    monkeypatch.setattr(analytics, "_now", lambda: datetime(2026, 3, 12, 10, 0))
     analytics.build_summary_report(rows, "monthly", month=3, year=2026)
-    monkeypatch.setattr(analytics, "_utcnow", lambda: datetime(2026, 3, 12, 10, 1))
+    monkeypatch.setattr(analytics, "_now", lambda: datetime(2026, 3, 12, 10, 1))
     analytics.build_summary_report(rows, "monthly", month=3, year=2026)
     assert len(calls) == 1
 

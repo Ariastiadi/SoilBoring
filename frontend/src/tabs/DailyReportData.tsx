@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { deleteReport, listReports, updateReport } from '../api'
+import { deleteReport, downloadAgs, listReports, updateReport } from '../api'
 import { METHOD_OPTIONS, USCS_OPTIONS, withCurrent } from '../options'
 
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 25]
@@ -248,6 +248,21 @@ export default function DailyReportData() {
     }
   }
 
+  // AGS4 (ground investigation data exchange format) holds one project per file.
+  const exportAgs = async () => {
+    if (!projectFilter || busy) return
+    setBusy(true)
+    setActionStatus('Preparing AGS4 file...')
+    try {
+      const filename = await downloadAgs(projectFilter)
+      setActionStatus(`Downloaded ${filename}`)
+    } catch (err: any) {
+      setActionStatus(`Error: ${err.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportCsv = () => {
     if (!columns.length || !sortedReports.length) return
     const header = columns.map(csvCell).join(',')
@@ -307,6 +322,13 @@ export default function DailyReportData() {
         <div className="actions" style={{ marginTop: '.5rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <button onClick={() => { setSearch(''); setProjectFilter(''); setSiteFilter(''); setMethodFilter(''); setUscsFilter(''); setDateFrom(''); setDateTo(''); }}>Clear Filters</button>
           <button onClick={exportCsv} disabled={!sortedReports.length}>Export CSV</button>
+          <button
+            onClick={exportAgs}
+            disabled={!projectFilter || busy}
+            title={projectFilter ? `AGS4 file with every log of ${projectFilter}` : 'Choose a project in the Project filter first'}
+          >
+            Export AGS4
+          </button>
           <span>{actionStatus}</span>
         </div>
       </div>

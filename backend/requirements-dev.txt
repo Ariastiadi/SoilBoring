@@ -1,2 +1,4 @@
 pytest>=8.0,<10
 httpx>=0.27,<1.0
+# Official AGS4 checker, used by the AGS4 export tests.
+python-ags4>=1.0,<2.0
