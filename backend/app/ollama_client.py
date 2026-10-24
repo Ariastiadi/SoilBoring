@@ -23,6 +23,11 @@ UNAVAILABLE_MSG = (
 NOT_CONFIGURED_MSG = "AI service unavailable: OLLAMA_URL is not configured."
 
 
+def ai_server_configured() -> bool:
+    """True when the server itself can answer AI questions (OLLAMA_URL is set)."""
+    return bool(OLLAMA_URL)
+
+
 class AIUnavailableError(Exception):
     """Raised when the AI backend is not configured or cannot be reached."""
 

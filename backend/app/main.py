@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from . import config, docstore
 from .auth import bootstrap_admin_from_env
+from .ollama_client import ai_server_configured
 from .routers import ai, auth, dashboard, export, reports, summaries, users
 from .storage import AmbiguousReportError, SchemaMismatchError
 
@@ -69,9 +70,13 @@ app.add_middleware(
 
 
 # Same policy as frontend/nginx.conf, used when this app also serves the built UI.
+# The on-device AI (Geo AI "Qwen on this device") downloads its model from Hugging Face
+# and its engine from jsDelivr, compiles WebAssembly and runs it in blob: workers.
 _CSP = (
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-    "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "connect-src 'self' blob: https://huggingface.co https://*.huggingface.co https://*.hf.co "
+    "https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'"
 )
 
 
@@ -94,6 +99,9 @@ async def _security_headers(request: Request, call_next):
         response.headers.setdefault("Cache-Control", "no-cache")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Content-Security-Policy", _CSP)
+        # Cross-origin isolation lets the on-device AI use several CPU threads.
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
     return response
 
 
@@ -125,7 +133,7 @@ def health():
 @app.get("/api/config")
 def public_config():
     """Non-secret settings the UI needs before sign-in (shown on the login page)."""
-    return {"org_name": config.ORG_NAME, "app_name": config.APP_NAME}
+    return {"org_name": config.ORG_NAME, "app_name": config.APP_NAME, "ai_server": ai_server_configured()}
 
 
 # Single-service deployments (root Dockerfile, e.g. on Render) serve the built UI from

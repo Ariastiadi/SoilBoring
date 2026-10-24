@@ -14,7 +14,7 @@ import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .config import local_now, timezone_label
-from .ollama_client import AIUnavailableError, ask_strict
+from .ollama_client import AIUnavailableError, ai_server_configured, ask_strict
 
 
 logger = logging.getLogger(__name__)
@@ -264,9 +264,9 @@ def build_summary_report(
         lines.append(f"- {line}")
         highlights.append(line)
 
-    narrative = None
+    narrative: Dict[str, Any] = {"narrative": None, "narrative_prompt": None}
     if rows:
-        narrative = _ai_exec_summary(
+        narrative = _narrative(
             title=f"Soil boring {period} performance",
             instruction=(
                 "You are a geotechnical engineer summarizing soil boring progress. "
@@ -286,7 +286,7 @@ def build_summary_report(
         "text": "\n".join(lines),
         "stats": stats,
         "highlights": highlights,
-        "narrative": narrative,
+        **narrative,
         "period_range": stats["period_range"],
         "period_label": period_label,
     }
@@ -298,9 +298,9 @@ def build_summary_text(rows_raw: List[Dict[str, Any]], period: str) -> str:
 
 def build_dashboard_report(rows_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
     metrics = compute_dashboard(rows_raw)
-    narrative = None
+    narrative: Dict[str, Any] = {"narrative": None, "narrative_prompt": None}
     if metrics.get("total_boreholes"):
-        narrative = _ai_exec_summary(
+        narrative = _narrative(
             title="Soil boring operations dashboard",
             instruction=(
                 "Review the soil boring KPIs and write a short executive briefing (<=90 words). "
@@ -310,7 +310,7 @@ def build_dashboard_report(rows_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
             payload=metrics,
         )
     report = dict(metrics)
-    report["narrative"] = narrative
+    report.update(narrative)
     return report
 
 
@@ -325,6 +325,24 @@ def clear_ai_cache() -> None:
         _ai_cache.clear()
 
 
+def _narrative_context(title: str, payload: Dict[str, Any]) -> str:
+    try:
+        return json.dumps({"title": title, "data": payload}, indent=2, default=str, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(payload)
+
+
+def _narrative(title: str, instruction: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Server-written narrative, or the prompt so the browser's on-device AI can write it."""
+    text = _ai_exec_summary(title, instruction, payload)
+    if text:
+        return {"narrative": text, "narrative_prompt": None}
+    return {
+        "narrative": None,
+        "narrative_prompt": {"instruction": instruction, "context": _narrative_context(title, payload)},
+    }
+
+
 def _ai_exec_summary(title: str, instruction: str, payload: Dict[str, Any]) -> Optional[str]:
     """Generate an AI narrative, cached by content so reloads do not re-run the model.
 
@@ -332,10 +350,9 @@ def _ai_exec_summary(title: str, instruction: str, payload: Dict[str, Any]) -> O
     """
     if not payload:
         return None
-    try:
-        context = json.dumps({"title": title, "data": payload}, indent=2, default=str, sort_keys=True)
-    except (TypeError, ValueError):
-        context = str(payload)
+    if not ai_server_configured():
+        return None
+    context = _narrative_context(title, payload)
 
     key = hashlib.sha256(f"{instruction}\n{context}".encode("utf-8")).hexdigest()
     now = time.time()
@@ -378,8 +395,14 @@ def _fmt_number(value: Optional[float]) -> str:
     return "" if value is None else str(value)
 
 
-def build_ai_context(question: str, rows_raw: List[Dict[str, Any]], max_rows: int = 30) -> str:
-    """Return the most relevant rows as a properly escaped CSV block (no prose)."""
+def build_ai_context(
+    question: str, rows_raw: List[Dict[str, Any]], max_rows: int = 30, max_chars: Optional[int] = None
+) -> str:
+    """Return the most relevant rows as a properly escaped CSV block (no prose).
+
+    max_chars keeps the block small enough for models with a short context window (the
+    on-device AI); the most relevant rows come first, so the least relevant are dropped.
+    """
     rows = [normalize_row(r) for r in rows_raw]
     rows = [r for r in rows if r.get("start_dt")]
     rows.sort(key=lambda r: r["start_dt"], reverse=True)
@@ -398,6 +421,7 @@ def build_ai_context(question: str, rows_raw: List[Dict[str, Any]], max_rows: in
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(_CONTEXT_COLUMNS)
     for r in ranked:
+        before = buffer.tell()
         writer.writerow([
             r["borehole_id"],
             r["project"],
@@ -412,4 +436,8 @@ def build_ai_context(question: str, rows_raw: List[Dict[str, Any]], max_rows: in
             (r["soil_description"] or "")[:200],
             (r["remarks"] or "")[:200],
         ])
+        if max_chars is not None and buffer.tell() > max_chars:
+            buffer.seek(before)
+            buffer.truncate()
+            break
     return buffer.getvalue().rstrip("\n")

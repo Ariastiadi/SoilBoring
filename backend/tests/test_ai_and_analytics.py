@@ -46,6 +46,7 @@ def test_narrative_is_cached_and_failures_are_not(monkeypatch):
             raise AIUnavailableError("down")
         return "All good."
 
+    monkeypatch.setattr(analytics, "ai_server_configured", lambda: True)
     monkeypatch.setattr(analytics, "ask_strict", fake_ask)
     data = rows()
     assert analytics.build_dashboard_report(data)["narrative"] is None
@@ -117,3 +118,37 @@ def test_summary_timestamp_uses_app_timezone():
     report = analytics.build_summary_report([sample_report()], "monthly", month=3, year=2026)
     assert report["stats"]["as_of"].endswith(config.timezone_label())
     assert config.timezone_label() == "Asia/Jakarta"
+
+
+def test_ai_context_respects_max_chars():
+    data = [sample_report(BoreholeID=f"BH-{i:02d}", StartDate=f"2026-03-{i + 1:02d}", EndDate=f"2026-03-{i + 1:02d}")
+            for i in range(20)]
+    full = analytics.build_ai_context("x", data)
+    small = analytics.build_ai_context("x", data, max_chars=len(full) // 3)
+    assert len(small) <= len(full) // 3
+    parsed = list(csv.reader(io.StringIO(small)))
+    assert parsed[0][0] == "BoreholeID" and 1 <= len(parsed) - 1 < 20
+    assert all(len(r) == len(parsed[0]) for r in parsed)  # rows are never cut in half
+
+
+def test_without_server_ai_the_browser_gets_the_narrative_prompt():
+    report = analytics.build_dashboard_report(rows())
+    assert report["narrative"] is None
+    prompt = report["narrative_prompt"]
+    assert "executive briefing" in prompt["instruction"]
+    assert "BH-" in prompt["context"] or "total_boreholes" in prompt["context"]
+    summary = analytics.build_summary_report(rows(), "monthly", month=3, year=2026)
+    assert summary["narrative"] is None and summary["narrative_prompt"]["instruction"]
+
+
+def test_prompt_endpoint_for_on_device_ai(client, admin_headers):
+    for r in rows():
+        assert client.post("/api/reports", json=r, headers=admin_headers).status_code in (200, 201)
+    res = client.post("/api/ai/prompt", json={"question": "pasir lanau", "max_chars": 1000}, headers=admin_headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["system"]) <= 1000
+    assert body["system"].startswith("You are an assistant for soil boring")
+    assert body["context"].splitlines()[0].startswith("BoreholeID")
+    assert client.post("/api/ai/prompt", json={"question": "x", "max_chars": 10}, headers=admin_headers).status_code == 422
+    assert client.post("/api/ai/prompt", json={"question": "x"}).status_code == 401

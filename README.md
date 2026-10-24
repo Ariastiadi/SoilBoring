@@ -35,7 +35,7 @@ Open `http://localhost:5173` and sign in with the account you just created.
 
 - Python 3.10+
 - Node.js 20.19+ (22 LTS recommended)
-- (Optional) An Ollama server for AI narratives. AI is **off until `OLLAMA_URL` is set**; without it the AI endpoints answer with a friendly "AI service unavailable" message and everything else keeps working.
+- Nothing extra for AI: without a server AI, **Geo AI runs Qwen in the browser** (see below). Optionally an Ollama server (`OLLAMA_URL`) for server-side answers and automatic narratives.
 
 ---
 
@@ -61,7 +61,7 @@ Environment variables:
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | – | If both are set and no users exist yet, the first admin is created at startup. |
 | `ALLOW_FIRST_RUN_SETUP` | `true` | While no account exists, the sign-in page offers to create the first admin (limited to `ADMIN_EMAIL` when that is set). Set `false` to turn this off. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API cross-origin (`*` is not accepted). Not needed when UI and API share one origin (Docker). |
-| `OLLAMA_URL` | *(empty = AI off)* | e.g. `http://localhost:11434/api/chat`. |
+| `OLLAMA_URL` | *(empty = server AI off)* | e.g. `http://localhost:11434/api/chat`, or `https://ollama.com/api/chat` with `OLLAMA_API_KEY` and a cloud model such as `gpt-oss:120b`. Without it, Geo AI runs Qwen in the browser. |
 | `OLLAMA_MODEL` | `gpt-oss:120b-cloud` | Model name. |
 | `OLLAMA_API_KEY` | – | Bearer token for hosted/proxied Ollama endpoints. |
 | `ORG_NAME` | – | Organisation name shown in the title bar and login page and used in AGS4 exports (e.g. `Soilens`). |
@@ -136,6 +136,16 @@ Rules enforced by the API:
 - **Dashboard:** KPIs, method and USCS breakdowns, and recent activity with an executive AI brief (cached for 10 minutes; failures are never cached).
 - **Summaries:** Weekly (date range) and monthly (month/year) rollups with stats, highlights, and markdown AI narratives.
 - **Geo AI:** Q&A backed by the borehole CSV with evidence display. The model only sees the most relevant rows and is told to answer from them.
+
+### AI without an API key: Qwen on this device
+
+Geo AI works on every deployment, also without any AI server or key: the browser runs a small open model (Qwen 2.5 1.5B or 0.5B, GGUF from Hugging Face) with llama.cpp compiled to WebAssembly ([wllama](https://github.com/ngxson/wllama)), the same approach as the browser engine of [talkdude](https://github.com/Ariastiadi/talkdude).
+
+- Open **Geo AI**, pick a model and press **Download** once (about 1 GB for 1.5B, 400 MB for 0.5B). It stays in the browser's private storage; later visits start right away and answers work offline.
+- The server only supplies the most relevant data rows (`POST /api/ai/prompt`, sized for the model's short context); the question and the answer never leave the browser. No cost, no account, no usage limit.
+- Summaries and Dashboard then offer **Write summary with Qwen (this device)** instead of the server narrative.
+- The engine (`wllama.wasm`) is fetched from jsDelivr and checked against the SHA-256 of the exact version in `package-lock.json`. The page is cross-origin isolated (COOP/COEP) so the model can use several CPU threads; WebGPU is used on desktops when available.
+- Needs a recent Chrome, Edge or Firefox (Safari uses a slower compatibility build); not in private windows. Small models give simpler answers than large server models; when `OLLAMA_URL` is set, Geo AI offers both.
 - **About:** Primer derived from `archive/template/soilboring.md`.
 
 ---

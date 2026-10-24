@@ -187,6 +187,7 @@ def test_old_token_rejected_after_account_recreated(client, admin_headers):
 
 def test_summary_cache_survives_clock_minute(monkeypatch):
     calls = []
+    monkeypatch.setattr(analytics, "ai_server_configured", lambda: True)
     monkeypatch.setattr(analytics, "ask_strict", lambda *a, **k: calls.append(1) or "narrative")
     rows = [sample_report()]
     monkeypatch.setattr(analytics, "_now", lambda: datetime(2026, 3, 12, 10, 0))

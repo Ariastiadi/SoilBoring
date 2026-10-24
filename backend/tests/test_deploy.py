@@ -9,7 +9,7 @@ def test_public_config_exposes_only_org_name(client, monkeypatch):
     from backend.app import config
 
     monkeypatch.setattr(config, "ORG_NAME", "Soilens")
-    assert client.get("/api/config").json() == {"org_name": "Soilens", "app_name": "Soil Boring Ops"}
+    assert client.get("/api/config").json() == {"org_name": "Soilens", "app_name": "Soil Boring Ops", "ai_server": False}
 
 
 def test_serves_built_ui_with_spa_fallback(tmp_path, monkeypatch):
@@ -25,7 +25,13 @@ def test_serves_built_ui_with_spa_fallback(tmp_path, monkeypatch):
         with TestClient(module.app) as c:
             page = c.get("/")
             assert page.status_code == 200 and "<title>ui</title>" in page.text
-            assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+            csp = page.headers["content-security-policy"]
+            assert "frame-ancestors 'none'" in csp
+            # On-device AI: WebAssembly, blob workers, model from Hugging Face, engine from jsDelivr.
+            assert "'wasm-unsafe-eval'" in csp and "worker-src 'self' blob:" in csp
+            assert "https://huggingface.co" in csp and "https://cdn.jsdelivr.net" in csp
+            assert page.headers["cross-origin-opener-policy"] == "same-origin"
+            assert page.headers["cross-origin-embedder-policy"] == "require-corp"
             asset = c.get("/assets/app.js")
             assert asset.status_code == 200 and "immutable" in asset.headers["cache-control"]
             assert c.get("/some/client/route").text == page.text

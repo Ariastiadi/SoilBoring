@@ -29,12 +29,16 @@ export type SummaryStats = {
 
 export type SummaryPeriodRange = { from?: string | null; to?: string | null }
 
+// Prompt for the browser's on-device AI when the server has no AI configured.
+export type NarrativePrompt = { instruction: string; context: string }
+
 export type SummaryResponse = {
   period: "weekly" | "monthly"
   text: string
   stats?: SummaryStats
   highlights?: string[]
   narrative?: string | null
+  narrative_prompt?: NarrativePrompt | null
   period_range?: SummaryPeriodRange
   period_label?: string | null
 }
@@ -61,6 +65,7 @@ export type DashboardResponse = {
   top_contractor?: string | null
   recent_reports?: DashboardRecent[]
   narrative?: string | null
+  narrative_prompt?: NarrativePrompt | null
   period_range?: SummaryPeriodRange
   period_label?: string | null
 }
@@ -200,6 +205,16 @@ export async function askAI(question: string, context?: string, history?: Array<
   return parseJson<any>(r, "AI error");
 }
 
+// System prompt plus the relevant data rows, sized for the on-device AI's short context.
+export async function getAIPrompt(question: string, maxChars: number) {
+  const r = await fetch(`${BASE}/api/ai/prompt`, {
+    method: "POST",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ question, max_chars: Math.max(1000, Math.min(60000, Math.floor(maxChars))) }),
+  });
+  return parseJson<{ system: string; context: string }>(r, "AI error");
+}
+
 export async function getSummary(period: "weekly" | "monthly", filters?: Record<string, string | number>) {
   const params = new URLSearchParams({ period })
   if (filters) {
@@ -287,13 +302,26 @@ export function appTitle(orgName: string) {
 }
 
 // Public, non-secret settings (organisation name) from the backend's ORG_NAME.
-export async function getPublicConfig(): Promise<{ org_name: string }> {
-  try {
-    const r = await fetch(`${BASE}/api/config`);
-    if (!r.ok) return { org_name: "" };
-    const body = await r.json();
-    return { org_name: typeof body?.org_name === "string" ? body.org_name.trim() : "" };
-  } catch {
-    return { org_name: "" };
+export type PublicConfig = { org_name: string; ai_server: boolean }
+
+let publicConfig: Promise<PublicConfig> | null = null
+
+export function getPublicConfig(): Promise<PublicConfig> {
+  if (!publicConfig) {
+    publicConfig = (async () => {
+      try {
+        const r = await fetch(`${BASE}/api/config`);
+        if (!r.ok) throw new Error(String(r.status));
+        const body = await r.json();
+        return {
+          org_name: typeof body?.org_name === "string" ? body.org_name.trim() : "",
+          ai_server: body?.ai_server === true,
+        };
+      } catch {
+        publicConfig = null; // try again next time
+        return { org_name: "", ai_server: false };
+      }
+    })();
   }
+  return publicConfig;
 }

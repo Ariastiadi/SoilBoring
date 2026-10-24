@@ -2,6 +2,12 @@ import { useMemo, useRef, useState } from 'react'
 import { getSummary, SummaryResponse } from '../api'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { LocalNarrative } from '../LocalAI'
+
+function markdownBlock(text: string) {
+  const html = DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
+  return <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
+}
 
 export default function Summary() {
   const [data, setData] = useState<SummaryResponse | null>(null)
@@ -144,6 +150,8 @@ export default function Summary() {
             )}
             {narrativeHtml ? (
               <div className="markdown" dangerouslySetInnerHTML={{ __html: narrativeHtml }} />
+            ) : data.narrative_prompt ? (
+              <LocalNarrative prompt={data.narrative_prompt} render={markdownBlock} />
             ) : (
               <p style={{ whiteSpace: 'pre-wrap', color: 'var(--muted)' }}>
                 {data.narrative || 'Narrative unavailable. Run the summary again once the AI service is reachable.'}
