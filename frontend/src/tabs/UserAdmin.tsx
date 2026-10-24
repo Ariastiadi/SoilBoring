@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { createUser, deleteUser, listUsers, resetUserPassword, User } from '../api'
+import { createUser, deleteUser, listUsers, resetUserPassword, resetUserTwoFactor, User } from '../api'
 
 type Props = {
   currentUserEmail: string
@@ -129,12 +129,29 @@ export default function UserAdmin({ currentUserEmail }: Props) {
               <li key={u.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', border: '1px solid var(--border)', borderRadius: '.5rem', padding: '.75rem 1rem' }}>
                 <div>
                   <div><strong>{u.email}</strong></div>
-                  <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>Role: {u.role}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>Role: {u.role} · {u.totp_enabled ? 'Two-step verification: on' : 'Two-step verification: off'}</div>
                 </div>
                 <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {u.email.toLowerCase() !== currentUserEmail.toLowerCase() && (
                   <button onClick={() => { setResetTarget(u.email); setResetPassword('') }} disabled={busy}>
                     Reset Password
+                  </button>
+                )}
+                {u.totp_enabled && (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`Turn off two-step verification for ${u.email}? Use this when they lost their phone and their recovery codes.`)) return
+                      try {
+                        await resetUserTwoFactor(u.email)
+                        setStatus('Two-step verification turned off')
+                        await loadUsers(true)
+                      } catch (err: any) {
+                        setStatus(`Error: ${err.message}`)
+                      }
+                    }}
+                    disabled={busy}
+                  >
+                    Turn off 2FA
                   </button>
                 )}
                 <button

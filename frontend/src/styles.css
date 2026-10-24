@@ -63,3 +63,55 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .markdown pre { background: var(--code-bg); padding: .6rem; border-radius: .5rem; overflow: auto; border: 1px solid var(--border); }
 .markdown table { width: 100%; border-collapse: collapse; margin: .5rem 0; }
 .markdown th, .markdown td { border-bottom: 1px solid var(--border); padding: .4rem; text-align: left; }
+
+/* Tables used to edit depth data */
+.grid-table { width: 100%; border-collapse: collapse; }
+.grid-table th { text-align: left; font-size: .8rem; color: var(--muted); font-weight: 600; padding: .3rem; border-bottom: 1px solid var(--border); }
+.grid-table td { padding: .2rem; vertical-align: top; }
+.grid-table input, .grid-table select, .grid-table textarea { width: 100%; padding: .35rem .4rem; min-height: 0; }
+.grid-table textarea { min-height: 2.2rem; resize: vertical; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.subtabs { display: flex; gap: .4rem; flex-wrap: wrap; margin: .75rem 0; }
+.subtabs button { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+.subtabs button.active { border-color: var(--accent); color: var(--accent); }
+.button-secondary { background: transparent !important; color: var(--accent) !important; border: 1px solid var(--accent) !important; }
+.button-danger { background: var(--danger) !important; }
+.notice { padding: .6rem .8rem; border-radius: .5rem; background: #e0f2fe; color: #0c4a6e; margin: .5rem 0; }
+.notice.warn { background: #fef3c7; color: #78350f; }
+.notice.error { background: #fee2e2; color: #7f1d1d; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .75rem; }
+.photo-grid figure { margin: 0; background: var(--code-bg); border-radius: .5rem; overflow: hidden; }
+.photo-grid img { width: 100%; height: 140px; object-fit: cover; display: block; cursor: zoom-in; }
+.photo-grid figcaption { padding: .35rem .5rem; font-size: .85rem; }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.lightbox img { max-width: 95vw; max-height: 90vh; }
+.map-box { height: 420px; border-radius: .75rem; overflow: hidden; border: 1px solid var(--border); }
+.leaflet-container { font: inherit; }
+.codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .25rem .75rem; font-family: ui-monospace, Menlo, monospace; font-size: 1rem; }
+.qr { background: #fff; padding: .5rem; display: inline-block; border-radius: .5rem; }
+.offline-banner { background: #fef3c7; color: #78350f; padding: .5rem .75rem; text-align: center; font-size: .9rem; }
+
+/* Bore log sheet (screen preview + print) */
+.borelog-root { position: fixed; inset: 0; z-index: 40; background: #e5e7eb; overflow: auto; padding: 1rem; }
+.borelog-toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; max-width: 210mm; margin: 0 auto 1rem; }
+.borelog-toolbar span { color: var(--muted); font-size: .85rem; }
+.borelog-page { background: #fff; color: #111; width: 210mm; min-height: 297mm; margin: 0 auto 1rem; padding: 10mm; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.borelog-page h2 { margin: 0 0 3mm; font-size: 14pt; }
+.borelog-head { width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 3mm; }
+.borelog-head td { border: 1px solid #555; padding: 1mm 1.5mm; width: 25%; }
+.borelog-head td span { display: block; color: #555; font-size: 7pt; }
+.borelog-body { position: relative; width: 100%; height: 215mm; }
+.borelog-svg { position: absolute; inset: 0; width: 100%; height: 100%; font-family: system-ui, sans-serif; }
+.borelog-desc { position: absolute; overflow: hidden; font-size: 7.5pt; line-height: 1.2; padding: 1mm 1.5mm; }
+.borelog-legend { font-size: 7pt; color: #444; margin: 2mm 0 0; }
+@media (max-width: 860px) {
+  .borelog-root { padding: .5rem; }
+  .borelog-page { transform-origin: top left; zoom: .45; }
+}
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  body.printing-borelog > #root { display: none !important; }
+  body.printing-borelog .borelog-root { position: static; background: #fff; padding: 0; overflow: visible; }
+  body.printing-borelog .no-print { display: none !important; }
+  body.printing-borelog .borelog-page { box-shadow: none; margin: 0; zoom: 1; page-break-after: always; break-after: page; }
+}

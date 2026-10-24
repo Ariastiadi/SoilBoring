@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import pathlib
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import docstore
 from .docstore import DATA_PATH, atomic_write_file  # noqa: F401  (re-exported)
@@ -167,8 +167,8 @@ def _write_reports(items: List[Dict[str, Any]]) -> None:
 Authorizer = Callable[[Dict[str, Any]], None]
 
 
-def delete_report(borehole_id: str, authorize: Optional[Authorizer] = None) -> bool:
-    """Remove the one report matching BoreholeID. Returns True if deleted.
+def delete_report(borehole_id: str, authorize: Optional[Authorizer] = None) -> Optional[Dict[str, Any]]:
+    """Remove the one report matching BoreholeID. Returns the removed row, or None.
 
     ``authorize`` is called with the row while the lock is held (it may raise), so the
     row that was checked is exactly the row that is removed.
@@ -177,12 +177,13 @@ def delete_report(borehole_id: str, authorize: Optional[Authorizer] = None) -> b
         items = _read_checked()
         index = _find_index(items, borehole_id)
         if index is None:
-            return False
+            return None
+        removed = _to_row(items[index])
         if authorize:
-            authorize(_to_row(items[index]))
+            authorize(removed)
         del items[index]
         _write_reports(items)
-        return True
+        return removed
 
 
 def update_report(
@@ -190,23 +191,25 @@ def update_report(
     updates: Dict[str, Any],
     authorize: Optional[Authorizer] = None,
     validate: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> bool:
+) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
     """Update editable fields of the report matching BoreholeID.
 
     ``validate`` receives the merged row before it is written (it may raise).
+    Returns (row before, row after), or None when no report matches.
     """
     safe_updates = {k: v for k, v in (updates or {}).items() if k in EDITABLE_FIELDS}
     with docstore.lock(DOC):
         items = _read_checked()
         index = _find_index(items, borehole_id)
         if index is None:
-            return False
+            return None
+        before = _to_row(items[index])
         if authorize:
-            authorize(_to_row(items[index]))
+            authorize(before)
         merged = dict(items[index])
         merged.update(safe_updates)
         if validate:
             validate(_to_row(merged))
         items[index] = merged
         _write_reports(items)
-        return True
+        return before, _to_row(merged)

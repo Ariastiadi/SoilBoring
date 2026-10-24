@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { deleteReport, downloadAgs, listReports, updateReport } from '../api'
 import { CORE_SIZES, METHOD_OPTIONS, USCS_OPTIONS, coreSizeLabel, withCurrent } from '../options'
+import BoreholeDetail from '../BoreholeDetail'
+
+// The map library is only downloaded when the map is opened.
+const BoreholeMap = lazy(() => import('../BoreholeMap'))
 
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 25]
 const BOREHOLE_COLUMNS = [
@@ -54,7 +58,9 @@ const EDITABLE_FIELDS: Array<{ key: string; label: string; type?: string }> = [
   { key: 'Remarks', label: 'Remarks' },
 ]
 
-export default function DailyReportData() {
+type Viewer = { email: string, role: 'admin' | 'general' }
+
+export default function DailyReportData({ user }: { user: Viewer }) {
   const [reports, setReports] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -74,6 +80,8 @@ export default function DailyReportData() {
   const [editDraft, setEditDraft] = useState<Record<string, string>>({})
   const [editOriginal, setEditOriginal] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [showMap, setShowMap] = useState(false)
 
   // Keeps the current page after an edit or delete; only the first load starts at page 1.
   const loadReports = async () => {
@@ -286,6 +294,13 @@ export default function DailyReportData() {
   }
 
 
+  const canEdit = (row: any) =>
+    user.role === 'admin' || String(row?.SubmittedBy || '').toLowerCase() === user.email.toLowerCase()
+  const opened = openId ? reports.find(r => r.BoreholeID === openId) : null
+  if (opened) {
+    return <BoreholeDetail report={opened} canEdit={canEdit(opened)} onClose={() => setOpenId(null)} />
+  }
+
   return (
     <div>
       <div className="card" style={{ marginBottom: '1rem' }}>
@@ -333,9 +348,18 @@ export default function DailyReportData() {
           >
             Export AGS4
           </button>
+          <button onClick={() => setShowMap(v => !v)}>{showMap ? 'Hide Map' : 'Show Map'}</button>
           <span>{actionStatus}</span>
         </div>
       </div>
+
+      {showMap && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <Suspense fallback={<p>Loading map…</p>}>
+            <BoreholeMap reports={sortedReports} onOpen={setOpenId} />
+          </Suspense>
+        </div>
+      )}
 
       {editTarget && (
         <div className="card" style={{ marginBottom: '1rem' }}>
@@ -464,6 +488,7 @@ export default function DailyReportData() {
                     )
                   })}
                   <td style={{ padding: '.35rem', borderBottom: '1px dashed #1b263f', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => setOpenId(row.BoreholeID)} style={{ marginRight: '.5rem' }}>Open</button>
                     <button onClick={() => startEdit(row)} style={{ marginRight: '.5rem' }}>Edit</button>
                     <button onClick={() => handleDelete(row.BoreholeID)} disabled={busy} style={{ background: 'var(--danger)' }}>Delete</button>
                   </td>

@@ -119,3 +119,45 @@ def test_old_csv_without_new_columns_still_loads(client, admin_headers):
     assert client.get("/api/reports", headers=admin_headers).json()[0]["DrillRig"] == ""
     assert client.put("/api/reports/BH-001", json={"DrillRig": "Rig 7"}, headers=admin_headers).status_code == 200
     assert storage.docstore.read_text(storage.DOC).splitlines()[0] == ",".join(storage.HEADERS)
+
+
+def _depth():
+    from backend.app.details import DetailsIn
+
+    data = DetailsIn.model_validate({
+        "layers": [
+            {"top": 0, "base": 3.5, "uscs": "CH", "description": "Lempung lunak abu-abu"},
+            {"top": 3.5, "base": 12, "uscs": "SM", "description": ""},
+            {"top": 12, "base": 30, "uscs": "XX", "description": "Batuan lapuk"},
+        ],
+        "spt": [
+            {"depth": 2, "seat": 1, "inc1": 2, "inc2": 2},
+            {"depth": 27, "seat": 20, "inc1": 50, "penetration_mm": 80, "remarks": "refusal"},
+        ],
+        "samples": [{"top": 1.5, "base": 2, "type": "U", "ref": "UDS-1"}, {"top": 6, "type": "D"}],
+        "core": [{"top": 25, "base": 28, "tcr": 95, "scr": 80, "rqd": 60}],
+    })
+    return {"BH-01": data.model_dump()}
+
+
+def test_depth_groups_pass_official_checker(tmp_path):
+    rows = _rows()
+    for r in rows:
+        if r["BoreholeID"] == "BH-01":
+            r["CoreSize"] = "NQ"
+    name, text = build_ags("jembatan kali", rows, depth_data=_depth())
+    assert _check(tmp_path, text, name) == {}
+    tables, _ = AGS4.AGS4_to_dataframe(str(tmp_path / name))
+    geol = tables["GEOL"][tables["GEOL"].HEADING == "DATA"]
+    assert list(geol.GEOL_LEG) == ["201", "403", ""]
+    assert list(geol.GEOL_DESC)[1] == "Silty SAND"  # empty description falls back to the legend name
+    ispt = tables["ISPT"][tables["ISPT"].HEADING == "DATA"]
+    assert list(ispt.ISPT_NVAL) == ["4", "50"]
+    assert list(ispt.ISPT_REP) == ["N=4", "50/80mm"]
+    assert list(ispt.ISPT_NPEN) == ["450", "230"]
+    samp = tables["SAMP"][tables["SAMP"].HEADING == "DATA"]
+    assert list(samp.SAMP_REF) == ["UDS-1", "D1"] and len(set(samp.SAMP_ID)) == 2
+    core = tables["CORE"][tables["CORE"].HEADING == "DATA"]
+    assert core.iloc[0].CORE_RQD == "60" and core.iloc[0].CORE_DIAM == "48"
+    abbr = tables["ABBR"][tables["ABBR"].HEADING == "DATA"]
+    assert {"201", "403", "S", "U", "D"} <= set(abbr.ABBR_CODE)

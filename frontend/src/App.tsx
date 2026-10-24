@@ -8,10 +8,14 @@ import AboutSoilBoring from './tabs/AboutSoilBoring'
 import UserAdmin from './tabs/UserAdmin'
 import Login from './Login'
 import ChangePassword from './ChangePassword'
+import Security from './Security'
+import Activity from './tabs/Activity'
+import { discardOutboxItem, flushOutbox, outboxItems, retryOutboxItem, subscribeOutbox, type OutboxItem } from './outbox'
+import { lang, setLang, t } from './i18n'
 import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler, setupFirstAdmin } from './api'
 import type { Session } from './api'
 
-type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users'
+type TabKey = 'report' | 'qa' | 'summary' | 'dashboard' | 'reportData' | 'about' | 'users' | 'activity'
 type AuthState = { token: string; email: string; role: 'admin' | 'general'; expiresAt?: number } | null
 const AUTH_STORAGE_KEY = 'soilboring-auth'
 // AI answers cached in the browser contain data from the logs, so they are cleared when the
@@ -64,7 +68,7 @@ export default function App() {
       setNotice('')
       setAuth(null)
       clearUserData()
-      setAuthNotice('Your session has expired. Please sign in again.')
+      setAuthNotice(t('Your session has expired. Please sign in again.'))
     }
     setUnauthorizedHandler(handler)
     return () => setUnauthorizedHandler(null)
@@ -83,8 +87,8 @@ export default function App() {
     setTab('report')
   }
 
-  const handleLogin = async (email: string, password: string) => {
-    startSession(await loginApi(email, password))
+  const handleLogin = async (email: string, password: string, otp?: string) => {
+    startSession(await loginApi(email, password, otp))
   }
 
   const handleSetup = async (email: string, password: string) => {
@@ -113,19 +117,32 @@ export default function App() {
 
   const isAdmin = auth?.role === 'admin'
   useEffect(() => {
-    if (tab === 'users' && !isAdmin) {
+    if ((tab === 'users' || tab === 'activity') && !isAdmin) {
       setTab('report')
     }
   }, [tab, isAdmin])
 
+  // Offline: logs saved without a connection wait here and are sent when back online.
+  const [online, setOnline] = useState(() => navigator.onLine)
+  const [outbox, setOutbox] = useState<OutboxItem[]>(outboxItems)
+  useEffect(() => {
+    const off = subscribeOutbox(setOutbox)
+    const up = () => { setOnline(true); if (auth) void flushOutbox() }
+    const down = () => setOnline(false)
+    window.addEventListener('online', up)
+    window.addEventListener('offline', down)
+    if (auth && navigator.onLine) void flushOutbox()
+    return () => { off(); window.removeEventListener('online', up); window.removeEventListener('offline', down) }
+  }, [auth])
+
   const tabs: { key: TabKey, label: string }[] = [
-    { key: 'report', label: 'Borehole Log' },
+    { key: 'report', label: t('Borehole Log') },
     { key: 'qa', label: 'Geo AI' },
-    { key: 'summary', label: 'Summaries' },
-    { key: 'dashboard', label: 'Dashboard' },
-    { key: 'reportData', label: 'Borehole Data' },
-    { key: 'about', label: 'About' },
-    ...(isAdmin ? [{ key: 'users' as const, label: 'Users' }] : []),
+    { key: 'summary', label: t('Summaries') },
+    { key: 'dashboard', label: t('Dashboard') },
+    { key: 'reportData', label: t('Borehole Data') },
+    { key: 'about', label: t('About') },
+    ...(isAdmin ? [{ key: 'users' as const, label: t('Users') }, { key: 'activity' as const, label: t('Activity') }] : []),
   ]
 
   if (!auth) {
@@ -146,13 +163,32 @@ export default function App() {
       <div className="actions topbar">
         <span>
           {orgName && <strong style={{ marginRight: '.75rem' }}>{orgName}</strong>}
-          Signed in as <strong>{auth.email}</strong> ({auth.role})
+          {t('Signed in as')} <strong>{auth.email}</strong> ({auth.role})
         </span>
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
-          <button onClick={() => { setShowPasswordForm(v => !v); setNotice('') }}>Change Password</button>
-          <button onClick={handleLogout}>Sign Out</button>
+          <button onClick={() => { setShowPasswordForm(v => !v); setNotice('') }}>{t('Account & security')}</button>
+          <button className="button-secondary" onClick={() => setLang(lang() === 'id' ? 'en' : 'id')} title={t('Language')}>
+            {lang() === 'id' ? 'EN' : 'ID'}
+          </button>
+          <button onClick={handleLogout}>{t('Sign Out')}</button>
         </div>
       </div>
+      {(!online || outbox.length > 0) && (
+        <div className="offline-banner" role="status">
+          {!online && <strong>{t('Offline.')} </strong>}
+          {outbox.length > 0
+            ? t('{n} log(s) saved on this device, waiting to be sent.', { n: outbox.length })
+            : t('New logs are kept on this device and sent when the connection is back.')}
+          {outbox.filter(i => i.error).map(i => (
+            <div key={i.id} style={{ marginTop: '.35rem' }}>
+              {String(i.data.BoreholeID)}: {i.error}{' '}
+              <button onClick={() => retryOutboxItem(i.id)}>{t('Retry')}</button>{' '}
+              <button className="button-danger" onClick={() => { if (window.confirm(t('Discard this unsent log?'))) discardOutboxItem(i.id) }}>{t('Discard')}</button>
+            </div>
+          ))}
+          {online && outbox.some(i => !i.error) && <> <button onClick={() => void flushOutbox()}>{t('Send now')}</button></>}
+        </div>
+      )}
       {showPasswordForm && (
         <ChangePassword
           onClose={() => setShowPasswordForm(false)}
@@ -164,10 +200,11 @@ export default function App() {
               expiresAt: Date.now() + session.expires_in * 1000,
             })
             setShowPasswordForm(false)
-            setNotice('Password changed.')
+            setNotice(t('Password changed.'))
           }}
         />
       )}
+      {showPasswordForm && <Security />}
       {notice && <p role="status" style={{ textAlign: 'center', margin: '.5rem' }}>{notice}</p>}
       <nav>
         {tabs.map(t => (
@@ -185,9 +222,10 @@ export default function App() {
         {tab === 'qa' && <QA />}
         {tab === 'summary' && <Summary />}
         {tab === 'dashboard' && <Dashboard />}
-        {tab === 'reportData' && <DailyReportData />}
+        {tab === 'reportData' && <DailyReportData user={{ email: auth.email, role: auth.role }} />}
         {tab === 'about' && <AboutSoilBoring />}
         {tab === 'users' && isAdmin && <UserAdmin currentUserEmail={auth.email} />}
+        {tab === 'activity' && isAdmin && <Activity />}
       </div>
     </div>
   )

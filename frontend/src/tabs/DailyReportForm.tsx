@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { postReport } from '../api'
+import { submitReport } from '../outbox'
 import { CORE_SIZES, METHOD_OPTIONS as methodOptions, USCS_OPTIONS as uscsOptions, coreSizeLabel } from '../options'
 
 const DRAFT_KEY = 'borehole-form-draft'
@@ -241,8 +241,10 @@ export default function DailyReportForm() {
         LoggingGeologist,
         Remarks,
       }
-      await postReport(payload)
-      setStatus('Saved! Draft cleared.')
+      const result = await submitReport(payload)
+      setStatus(result === 'sent'
+        ? 'Saved! Draft cleared.'
+        : 'No connection: the log is kept on this device and will be sent automatically when you are back online.')
       resetForm()
     } catch (err: any) {
       setStatus(`Error: ${err.message}`)

@@ -262,5 +262,10 @@ def lock(name: str) -> Iterator[None]:
 
 def reset_all_for_tests() -> None:
     """Remove every document (test helper)."""
-    for name in ("reports.csv", "users.json", ".token_secret"):
-        delete(name)
+    if not USE_DATABASE:
+        for path in DATA_PATH.iterdir():
+            if path.is_file():
+                path.unlink()
+        return
+    with _connection() as conn:
+        conn.execute(f"DELETE FROM {TABLE}")

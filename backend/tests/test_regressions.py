@@ -63,7 +63,7 @@ def test_throttle_table_is_bounded(monkeypatch):
     monkeypatch.setattr(auth, "_MAX_TRACKED_KEYS", 50)
     for i in range(200):
         auth._record_failure(f"user{i}@example.com")
-    assert len(auth._failed_logins) <= 50
+    assert auth._tracked_count() <= 50
 
 
 def test_legacy_dict_users_file_strips_emails(client):

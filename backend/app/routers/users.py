@@ -3,7 +3,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from ..auth import MIN_PASSWORD_LENGTH, create_user, delete_user, list_users, require_admin, set_password
+from .. import audit
+from ..auth import MIN_PASSWORD_LENGTH, create_user, delete_user, disable_totp, list_users, require_admin, set_password
 from ..models import Email
 
 
@@ -23,7 +24,9 @@ def get_users(admin=Depends(require_admin)):
 
 @router.post("", status_code=201)
 def add_user(payload: UserCreate, admin=Depends(require_admin)):
-    return create_user(payload.email, payload.password, payload.role)
+    created = create_user(payload.email, payload.password, payload.role)
+    audit.record(admin["email"], "user.created", created["email"], {"role": [None, created["role"]]})
+    return created
 
 
 class PasswordReset(BaseModel):
@@ -34,10 +37,20 @@ class PasswordReset(BaseModel):
 @router.put("/{email:path}/password")
 def reset_password(email: str, payload: PasswordReset, admin=Depends(require_admin)):
     set_password(email, payload.password)
+    audit.record(admin["email"], "user.password_reset", email)
     return {"status": "updated"}
+
+
+@router.delete("/{email:path}/2fa")
+def reset_two_factor(email: str, admin=Depends(require_admin)):
+    """For a user who lost their phone and their recovery codes."""
+    disable_totp(email)
+    audit.record(admin["email"], "user.2fa_reset", email)
+    return {"status": "disabled"}
 
 
 @router.delete("/{email:path}")
 def remove_user(email: str, admin=Depends(require_admin)):
     delete_user(email, acting_email=admin["email"])
+    audit.record(admin["email"], "user.deleted", email)
     return {"status": "deleted"}

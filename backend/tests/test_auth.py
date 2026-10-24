@@ -13,7 +13,7 @@ def test_login_success_and_me(client):
     headers = login_headers(client, email, password)
     me = client.get("/api/auth/me", headers=headers)
     assert me.status_code == 200
-    assert me.json() == {"email": "a@example.com", "role": "admin"}
+    assert me.json() == {"email": "a@example.com", "role": "admin", "totp_enabled": False, "recovery_codes_left": 0}
 
 
 def test_wrong_password_and_unknown_user_look_the_same(client):

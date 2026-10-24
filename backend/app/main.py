@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 
@@ -9,14 +10,16 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from . import config, docstore
+from . import config, docstore, mailer
 from .auth import bootstrap_admin_from_env
 from .ollama_client import ai_server_configured
-from .routers import ai, auth, dashboard, export, reports, summaries, users
+from .routers import ai, auth, boreholes, dashboard, export, reports, summaries, users
 from .storage import AmbiguousReportError, SchemaMismatchError
 
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+# Not in every system's MIME table (slim images); the PWA manifest needs the right type.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Comma-separated list of browser origins allowed to call the API cross-origin.
 # The Docker setup serves UI and API from one origin, so no CORS is needed there.
@@ -74,7 +77,7 @@ app.add_middleware(
 # and its engine from jsDelivr, compiles WebAssembly and runs it in blob: workers.
 _CSP = (
     "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; "
-    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; "
     "connect-src 'self' blob: https://huggingface.co https://*.huggingface.co https://*.hf.co "
     "https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'"
 )
@@ -123,6 +126,7 @@ app.include_router(dashboard.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(export.router)
+app.include_router(boreholes.router)
 
 
 @app.get("/api/health")
@@ -133,7 +137,12 @@ def health():
 @app.get("/api/config")
 def public_config():
     """Non-secret settings the UI needs before sign-in (shown on the login page)."""
-    return {"org_name": config.ORG_NAME, "app_name": config.APP_NAME, "ai_server": ai_server_configured()}
+    return {
+        "org_name": config.ORG_NAME,
+        "app_name": config.APP_NAME,
+        "ai_server": ai_server_configured(),
+        "email_reset": mailer.email_enabled(),
+    }
 
 
 # Single-service deployments (root Dockerfile, e.g. on Render) serve the built UI from

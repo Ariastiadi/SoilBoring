@@ -12,12 +12,16 @@
     "@wllama/wllama": "3.8.1",
     "@wllama/wllama-compat": "3.8.1",
     "dompurify": "^3.4.17",
+    "leaflet": "1.9.4",
     "marked": "^12.0.2",
+    "qrcode": "1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/leaflet": "1.9.20",
     "@types/node": "^22.20.5",
+    "@types/qrcode": "1.5.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^5.2.0",

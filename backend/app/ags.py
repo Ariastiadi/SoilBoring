@@ -13,8 +13,13 @@ What this app records maps to AGS4 like this:
 * HDIA  - borehole diameter, CDIA - casing diameter (when recorded)
 * WSTG  - the groundwater depth (when groundwater was encountered)
 
-The daily log keeps one soil description, USCS class and average SPT N60 per hole, not
-layer-by-layer data, so these go into LOCA_REM instead of inventing GEOL/ISPT layers.
+* GEOL  - strata (top, base, description; GEOL_LEG from the USCS group where it maps)
+* ISPT  - SPT tests (seating and test blows, N, reported result, refusal penetration)
+* SAMP  - samples (top, base, standard AGS4 sample type, reference)
+* CORE  - core runs (TCR, SCR, RQD, core diameter of the wireline size)
+
+The depth groups come from the borehole's depth data (details.py). The daily log's own
+summary (one soil description, USCS class and average SPT N60) stays in LOCA_REM.
 """
 from __future__ import annotations
 
@@ -41,11 +46,38 @@ _KNOWN_METHODS: Dict[str, Tuple[str, str, str]] = {
     "cpt / cptu (sondir)": ("SCP", "SCP", "Static cone penetrometer"),
     "hand auger": ("HA", "HA", "Hand Auger"),
 }
+# USCS group -> AGS4 standard legend code (GEOL_LEG); dual symbols use the first group.
+_USCS_LEGEND: Dict[str, Tuple[str, str]] = {
+    "CL": ("201", "CLAY"), "CH": ("201", "CLAY"), "OH": ("229", "Organic CLAY"),
+    "ML": ("301", "SILT"), "MH": ("301", "SILT"), "OL": ("305", "Organic SILT"),
+    "SW": ("401", "SAND"), "SP": ("401", "SAND"), "SC": ("402", "Clayey SAND"), "SM": ("403", "Silty SAND"),
+    "GW": ("501", "GRAVEL"), "GP": ("501", "GRAVEL"), "GC": ("502", "Clayey GRAVEL"), "GM": ("503", "Silty GRAVEL"),
+    "PT": ("601", "PEAT"),
+}
+_SAMPLE_DESCRIPTIONS = {
+    "U": "Undisturbed sample - open drive",
+    "UT": "Thin wall open drive tube sampler",
+    "TW": "Thin walled push in sample",
+    "P": "Piston sample",
+    "D": "Small disturbed sample",
+    "B": "Bulk disturbed sample",
+    "SPTLS": "Standard penetration test liner sample",
+    "C": "Core sample",
+    "W": "Water sample",
+}
+
+
+def _legend(uscs: str) -> Optional[Tuple[str, str]]:
+    first = re.split(r"[-/ ]", (uscs or "").strip().upper())[0]
+    return _USCS_LEGEND.get(first)
+
+
 _STANDARD_CODES = {
     ("LOCA_TYPE", code) for code in ("W", "RO", "AUGH", "RC", "SCP", "HA")
 } | {("HDPH_TYPE", code) for code in ("W", "RO", "RC", "SCP", "HA")}
 
 _UNIT_DESCRIPTIONS = {
+    "%": "percent",
     "m": "metre",
     "mm": "millimetre",
     "yyyy-mm-dd": "year month day",
@@ -170,8 +202,17 @@ def _summary_remark(row: Dict[str, Any]) -> str:
     return ". ".join(p.rstrip(".") for p in parts)
 
 
-def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[date] = None) -> Tuple[str, str]:
-    """Return (filename, AGS4 text) for every log of ``project``."""
+def build_ags(
+    project: str,
+    reports: List[Dict[str, Any]],
+    *,
+    today: Optional[date] = None,
+    depth_data: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Tuple[str, str]:
+    """Return (filename, AGS4 text) for every log of ``project``.
+
+    ``depth_data`` maps BoreholeID -> {"layers", "spt", "samples", "core"} (details.py).
+    """
     wanted = project.strip().lower()
     rows = [r for r in reports if str(r.get("ProjectName") or "").strip().lower() == wanted]
     if not rows:
@@ -233,8 +274,71 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
         seen[converted.lower()] = original
 
     loca_rows, hdph_rows, hdia_rows, cdia_rows, wstg_rows = [], [], [], [], []
+    geol_rows: List[Dict[str, str]] = []
+    ispt_rows: List[Dict[str, str]] = []
+    samp_rows: List[Dict[str, str]] = []
+    core_rows: List[Dict[str, str]] = []
     for row in rows:
         loca_id = _ascii(row.get("BoreholeID"))
+        depth = (depth_data or {}).get(str(row.get("BoreholeID") or ""), {})
+        for layer in depth.get("layers", []):
+            uscs = _ascii(layer.get("uscs"))
+            legend = _legend(uscs)
+            geol_rows.append({
+                "LOCA_ID": loca_id,
+                "GEOL_TOP": _dp(layer.get("top"), 2),
+                "GEOL_BASE": _dp(layer.get("base"), 2),
+                "GEOL_DESC": _ascii(layer.get("description")) or (legend[1] if legend else ""),
+                "GEOL_LEG": legend[0] if legend else "",
+                "GEOL_REM": f"USCS: {uscs}" if uscs else "",
+            })
+        for test in depth.get("spt", []):
+            seat, inc1 = int(test.get("seat") or 0), int(test.get("inc1") or 0)
+            inc2 = test.get("inc2")
+            n_value = inc1 + int(inc2 or 0)
+            pen = test.get("penetration_mm")
+            test_pen = int(pen) if pen else 300
+            reported = f"{n_value}/{test_pen}mm" if test_pen < 300 else f"N={n_value}"
+            ispt_rows.append({
+                "LOCA_ID": loca_id,
+                "ISPT_TOP": _dp(test.get("depth"), 2),
+                "ISPT_SEAT": str(seat),
+                "ISPT_MAIN": str(n_value),
+                "ISPT_NPEN": str(150 + test_pen),
+                "ISPT_NVAL": str(n_value),
+                "ISPT_REP": reported,
+                "ISPT_TYPE": "S",
+                "ISPT_REM": _ascii(test.get("remarks")),
+            })
+        type_counts: Dict[str, int] = {}
+        for sample in depth.get("samples", []):
+            code = str(sample.get("type") or "").upper()
+            if code not in _SAMPLE_DESCRIPTIONS:
+                continue
+            type_counts[code] = type_counts.get(code, 0) + 1
+            ref = _ascii(sample.get("ref")) or f"{code}{type_counts[code]}"
+            top = _dp(sample.get("top"), 2)
+            samp_rows.append({
+                "LOCA_ID": loca_id,
+                "SAMP_TOP": top,
+                "SAMP_REF": ref,
+                "SAMP_TYPE": code,
+                "SAMP_ID": f"{loca_id}-{ref}-{top}",
+                "SAMP_BASE": _dp(sample.get("base"), 2),
+                "SAMP_REM": _ascii(sample.get("remarks")),
+            })
+        core_size = str(row.get("CoreSize") or "").upper()
+        for run in depth.get("core", []):
+            core_rows.append({
+                "LOCA_ID": loca_id,
+                "CORE_TOP": _dp(run.get("top"), 2),
+                "CORE_BASE": _dp(run.get("base"), 2),
+                "CORE_PREC": _dp(run.get("tcr"), 0),
+                "CORE_SREC": _dp(run.get("scr"), 0),
+                "CORE_RQD": _dp(run.get("rqd"), 0),
+                "CORE_DIAM": _dp(CORE_SIZES[core_size][1], 0) if core_size in CORE_SIZES else "",
+                "CORE_REM": _ascii(run.get("remarks")),
+            })
         loca_type, hdph_type = codes_for(row)
         core = str(row.get("CoreSize") or "").upper()
         final_depth = _dp(row.get("FinalDepth_m"), 2)
@@ -313,6 +417,35 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
             [("LOCA_ID", "", "ID"), ("CDIA_DPTH", "m", "2DP"), ("CDIA_DIAM", "mm", "0DP"), ("CDIA_REM", "", "X")],
             cdia_rows,
         ))
+    if core_rows:
+        data_groups.append((
+            "CORE",
+            [("LOCA_ID", "", "ID"), ("CORE_TOP", "m", "2DP"), ("CORE_BASE", "m", "2DP"), ("CORE_PREC", "%", "0DP"),
+             ("CORE_SREC", "%", "0DP"), ("CORE_RQD", "%", "0DP"), ("CORE_DIAM", "mm", "0DP"), ("CORE_REM", "", "X")],
+            core_rows,
+        ))
+    if geol_rows:
+        data_groups.append((
+            "GEOL",
+            [("LOCA_ID", "", "ID"), ("GEOL_TOP", "m", "2DP"), ("GEOL_BASE", "m", "2DP"), ("GEOL_DESC", "", "X"),
+             ("GEOL_LEG", "", "PA"), ("GEOL_REM", "", "X")],
+            geol_rows,
+        ))
+    if ispt_rows:
+        data_groups.append((
+            "ISPT",
+            [("LOCA_ID", "", "ID"), ("ISPT_TOP", "m", "2DP"), ("ISPT_SEAT", "", "0DP"), ("ISPT_MAIN", "", "0DP"),
+             ("ISPT_NPEN", "mm", "0DP"), ("ISPT_NVAL", "", "0DP"), ("ISPT_REP", "", "X"), ("ISPT_TYPE", "", "PA"),
+             ("ISPT_REM", "", "X")],
+            ispt_rows,
+        ))
+    if samp_rows:
+        data_groups.append((
+            "SAMP",
+            [("LOCA_ID", "", "ID"), ("SAMP_TOP", "m", "2DP"), ("SAMP_REF", "", "X"), ("SAMP_TYPE", "", "PA"),
+             ("SAMP_ID", "", "ID"), ("SAMP_BASE", "m", "2DP"), ("SAMP_REM", "", "X")],
+            samp_rows,
+        ))
     if wstg_rows:
         data_groups.append(("WSTG", [("LOCA_ID", "", "ID"), ("WSTG_DPTH", "m", "2DP"), ("WSTG_REM", "", "X")], wstg_rows))
 
@@ -320,9 +453,15 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
     # the standard dictionary (AGS4 rule 7).
     abbr_rows = []
     used_codes: set[Tuple[str, str]] = set()
-    for group_rows, heading in ((loca_rows, "LOCA_TYPE"), (hdph_rows, "HDPH_TYPE")):
+    for group_rows, heading in (
+        (loca_rows, "LOCA_TYPE"), (hdph_rows, "HDPH_TYPE"), (geol_rows, "GEOL_LEG"),
+        (ispt_rows, "ISPT_TYPE"), (samp_rows, "SAMP_TYPE"),
+    ):
         used_codes.update((heading, r[heading]) for r in group_rows if r.get(heading))
-    descriptions = {}
+    descriptions: Dict[Tuple[str, str], str] = {("ISPT_TYPE", "S"): "Split spoon"}
+    descriptions.update({("SAMP_TYPE", code): desc for code, desc in _SAMPLE_DESCRIPTIONS.items()})
+    descriptions.update({("GEOL_LEG", code): desc for code, desc in _USCS_LEGEND.values()})
+    standard = set(_STANDARD_CODES) | {key for key in descriptions if key[0] != "LOCA_TYPE" and key[0] != "HDPH_TYPE"}
     for loca_code, hdph_code, desc in methods.values():
         descriptions[("LOCA_TYPE", loca_code)] = desc
         descriptions[("HDPH_TYPE", hdph_code)] = desc
@@ -331,7 +470,7 @@ def build_ags(project: str, reports: List[Dict[str, Any]], *, today: Optional[da
             "ABBR_HDNG": heading,
             "ABBR_CODE": code,
             "ABBR_DESC": descriptions.get((heading, code), code),
-            "ABBR_LIST": "AGS4" if (heading, code) in _STANDARD_CODES else producer_name(),
+            "ABBR_LIST": "AGS4" if (heading, code) in standard else producer_name(),
         })
     abbr: Group = (
         "ABBR",

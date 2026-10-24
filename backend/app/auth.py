@@ -119,6 +119,10 @@ _DUMMY_HASH = _hash_password(secrets.token_urlsafe(12))
 # User store
 # --------------------------------------------------------------------------- #
 
+# Two-step verification and recovery codes, kept with the account in users.json.
+_EXTRA_FIELDS = ("totp_secret", "totp_enabled", "totp_pending", "totp_last", "recovery_codes")
+
+
 def _load_users() -> Dict[str, Dict[str, Any]]:
     text = docstore.read_text(USERS_DOC)
     if text is None or not text.strip():
@@ -144,7 +148,11 @@ def _load_users() -> Dict[str, Dict[str, Any]]:
             if not isinstance(email, str) or not email.strip() or not isinstance(password, str) or not password:
                 continue
             email = email.strip()
-            users[email.lower()] = {"email": email, "password": password, "role": _normalize_role(entry, email)}
+            user = {"email": email, "password": password, "role": _normalize_role(entry, email)}
+            for field in _EXTRA_FIELDS:
+                if field in entry:
+                    user[field] = entry[field]
+            users[email.lower()] = user
     return users
 
 
@@ -166,79 +174,99 @@ def _normalize_role(entry: Dict[str, Any], email: str) -> str:
 
 def _save_users(users: Dict[str, Dict[str, Any]]) -> None:
     sorted_items = sorted(users.items(), key=lambda item: item[0])
-    payload = [
-        {"email": item[1]["email"], "password": item[1]["password"], "role": item[1].get("role", "general")}
-        for item in sorted_items
-    ]
+    payload = []
+    for _, user in sorted_items:
+        entry = {"email": user["email"], "password": user["password"], "role": user.get("role", "general")}
+        entry.update({k: user[k] for k in _EXTRA_FIELDS if user.get(k) not in (None, "", [], False)})
+        payload.append(entry)
     docstore.write_text(USERS_DOC, json.dumps(payload, indent=2) + "\n", private=True)
 
 
 # --------------------------------------------------------------------------- #
-# Login throttling (in-memory, per email)
+# Login throttling (per email), stored with the data
 # --------------------------------------------------------------------------- #
+# Kept in the document store (file or database) instead of process memory, so the limit
+# also holds when several app instances run at once (serverless hosts such as Vercel).
 
 MAX_FAILED_LOGINS = 5
 LOCKOUT_WINDOW_SECONDS = 15 * 60
-# Bound memory use even if an attacker cycles through many different emails.
+THROTTLE_DOC = "login_throttle.json"
+# Bound the document even if an attacker cycles through many different emails.
 _MAX_TRACKED_KEYS = 10_000
-_failed_logins: Dict[str, List[float]] = {}
-_throttle_lock = threading.Lock()
 
 
-def _recent_failures(key: str, now: float) -> List[float]:
+def _load_throttle() -> Dict[str, List[float]]:
+    text = docstore.read_text(THROTTLE_DOC)
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): [float(t) for t in v if isinstance(t, (int, float))] for k, v in data.items() if isinstance(v, list)}
+
+
+def _save_throttle(data: Dict[str, List[float]]) -> None:
+    docstore.write_text(THROTTLE_DOC, json.dumps(data, separators=(",", ":")), private=True)
+
+
+def _live(data: Dict[str, List[float]], now: float) -> Dict[str, List[float]]:
     cutoff = now - LOCKOUT_WINDOW_SECONDS
-    attempts = [t for t in _failed_logins.get(key, []) if t > cutoff]
-    if attempts:
-        _failed_logins[key] = attempts
-    else:
-        _failed_logins.pop(key, None)
-    return attempts
-
-
-def _prune_tracked(now: float) -> None:
-    if len(_failed_logins) < _MAX_TRACKED_KEYS:
-        return
-    for key in list(_failed_logins):
-        _recent_failures(key, now)
-    # Still full of live entries: drop the oldest ones.
-    overflow = len(_failed_logins) - _MAX_TRACKED_KEYS // 2
+    live = {k: [t for t in v if t > cutoff] for k, v in data.items()}
+    live = {k: v for k, v in live.items() if v}
+    overflow = len(live) - _MAX_TRACKED_KEYS
     if overflow > 0:
-        oldest = sorted(_failed_logins, key=lambda k: _failed_logins[k][-1])[:overflow]
-        for key in oldest:
-            _failed_logins.pop(key, None)
+        for key in sorted(live, key=lambda k: live[k][-1])[: overflow + _MAX_TRACKED_KEYS // 2]:
+            live.pop(key, None)
+    return live
 
 
 def _check_throttle(key: str) -> None:
     now = time.time()
-    with _throttle_lock:
-        attempts = _recent_failures(key, now)
-        if len(attempts) >= MAX_FAILED_LOGINS:
-            retry_after = int(attempts[0] + LOCKOUT_WINDOW_SECONDS - now) + 1
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many failed sign-in attempts. Try again later.",
-                headers={"Retry-After": str(max(retry_after, 1))},
-            )
+    attempts = _live(_load_throttle(), now).get(key, [])
+    if len(attempts) >= MAX_FAILED_LOGINS:
+        retry_after = int(attempts[0] + LOCKOUT_WINDOW_SECONDS - now) + 1
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed sign-in attempts. Try again later.",
+            headers={"Retry-After": str(max(retry_after, 1))},
+        )
 
 
 def _record_failure(key: str) -> None:
     now = time.time()
-    with _throttle_lock:
-        _prune_tracked(now)
-        _failed_logins.setdefault(key, []).append(now)
+    with docstore.lock(THROTTLE_DOC):
+        data = _live(_load_throttle(), now)
+        data.setdefault(key, []).append(now)
+        _save_throttle(_live(data, now))
 
 
 def _clear_failures(key: str) -> None:
-    with _throttle_lock:
-        _failed_logins.pop(key, None)
+    with docstore.lock(THROTTLE_DOC):
+        data = _load_throttle()
+        if key in data:
+            data.pop(key)
+            _save_throttle(data)
+
+
+def _tracked_count() -> int:
+    return len(_load_throttle())
 
 
 def reset_login_throttle() -> None:
-    with _throttle_lock:
-        _failed_logins.clear()
+    docstore.delete(THROTTLE_DOC)
 
 
-def authenticate_user(email: str, password: str) -> Dict[str, Any]:
+class OTPRequired(HTTPException):
+    """Password was right, but the account needs its authentication code too."""
+
+    def __init__(self) -> None:
+        super().__init__(status_code=status.HTTP_401_UNAUTHORIZED, detail="otp_required")
+
+
+def authenticate_user(email: str, password: str, otp: Optional[str] = None, *, check_otp: bool = True) -> Dict[str, Any]:
     email_key = (email or "").strip().lower()
     password = password or ""
     # Password checks run one at a time under this lock, so "check the lockout" and
@@ -253,8 +281,18 @@ def authenticate_user(email: str, password: str) -> Dict[str, Any]:
         if not user or not valid:
             _record_failure(email_key)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        changed = False
+        if check_otp and user.get("totp_enabled"):
+            if not (otp or "").strip():
+                raise OTPRequired()
+            if not _accept_second_factor(user, otp or ""):
+                _record_failure(email_key)
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
+            changed = True
         if _needs_rehash(user["password"]):
             user["password"] = _hash_password(password)
+            changed = True
+        if changed:
             users[email_key] = user
             _save_users(users)
     _clear_failures(email_key)
@@ -312,6 +350,9 @@ def _validate_token(token: str) -> Dict[str, Any]:
     if not hmac.compare_digest(signature.encode("utf-8", "surrogateescape"), expected.encode("ascii")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token signature")
     payload = _decode_payload(encoded)
+    if payload.get("purpose"):
+        # Password-reset links are signed the same way but are never sessions.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     exp = payload.get("exp")
     if not isinstance(exp, (int, float)) or exp < int(time.time()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
@@ -334,7 +375,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
         fingerprint.encode("utf-8", "surrogateescape"), _credential_fingerprint(user).encode("ascii")
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer valid; sign in again")
-    return {"email": user["email"], "role": user.get("role", "general")}
+    return {"email": user["email"], "role": user.get("role", "general"), "totp_enabled": bool(user.get("totp_enabled"))}
 
 
 def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
@@ -352,7 +393,10 @@ def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str,
 
 def list_users() -> List[Dict[str, str]]:
     users = _load_users()
-    return [{"email": u["email"], "role": u.get("role", "general")} for u in users.values()]
+    return [
+        {"email": u["email"], "role": u.get("role", "general"), "totp_enabled": bool(u.get("totp_enabled"))}
+        for u in users.values()
+    ]
 
 
 def create_user(email: str, password: str, role: str) -> Dict[str, str]:
@@ -410,7 +454,7 @@ def change_own_password(email: str, current_password: str, new_password: str) ->
     if current_password == new_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a password you have not used just now")
     try:
-        authenticate_user(email, current_password)
+        authenticate_user(email, current_password, check_otp=False)
     except HTTPException as exc:
         if exc.status_code == status.HTTP_401_UNAUTHORIZED:
             # 400, not 401: the session is fine, only the typed password is wrong.
@@ -485,3 +529,199 @@ def bootstrap_admin_from_env() -> Optional[str]:
             return None
     logger.info("Created initial admin account for %s", email)
     return email
+
+
+# --------------------------------------------------------------------------- #
+# Two-step verification (TOTP, RFC 6238) and recovery codes
+# --------------------------------------------------------------------------- #
+
+TOTP_STEP = 30
+TOTP_DIGITS = 6
+RECOVERY_CODE_COUNT = 10
+_RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I
+
+
+def _totp_at(secret_b32: str, counter: int) -> str:
+    key = base64.b32decode(secret_b32 + "=" * (-len(secret_b32) % 8), casefold=True)
+    digest = hmac.new(key, counter.to_bytes(8, "big"), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = (int.from_bytes(digest[offset:offset + 4], "big") & 0x7FFFFFFF) % (10 ** TOTP_DIGITS)
+    return f"{value:0{TOTP_DIGITS}d}"
+
+
+def _totp_match(secret_b32: str, code: str, last_step: int = -1, now: Optional[float] = None) -> Optional[int]:
+    """Step number of a valid code (±1 step of clock drift), or None. Used steps are refused."""
+    code = "".join(ch for ch in str(code) if ch.isdigit())
+    if len(code) != TOTP_DIGITS:
+        return None
+    step = int((now if now is not None else time.time()) // TOTP_STEP)
+    for candidate in (step - 1, step, step + 1):
+        if candidate > last_step and hmac.compare_digest(_totp_at(secret_b32, candidate), code):
+            return candidate
+    return None
+
+
+def _hash_recovery(code: str) -> str:
+    cleaned = "".join(ch for ch in code.upper() if ch.isalnum())
+    return hashlib.sha256(("soilboring-recovery:" + cleaned).encode("utf-8")).hexdigest()
+
+
+def _new_recovery_codes() -> List[str]:
+    codes = []
+    for _ in range(RECOVERY_CODE_COUNT):
+        raw = "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(8))
+        codes.append(f"{raw[:4]}-{raw[4:]}")
+    return codes
+
+
+def _use_recovery_code(user: Dict[str, Any], code: str) -> bool:
+    hashed = _hash_recovery(code)
+    stored = list(user.get("recovery_codes") or [])
+    for index, value in enumerate(stored):
+        if hmac.compare_digest(value, hashed):
+            del stored[index]
+            user["recovery_codes"] = stored
+            return True
+    return False
+
+
+def _accept_second_factor(user: Dict[str, Any], code: str) -> bool:
+    """A current authenticator code, or one unused recovery code (then used up)."""
+    secret = user.get("totp_secret")
+    if secret:
+        step = _totp_match(secret, code, int(user.get("totp_last") or -1))
+        if step is not None:
+            user["totp_last"] = step
+            return True
+    return _use_recovery_code(user, code)
+
+
+def _user_or_404(users: Dict[str, Dict[str, Any]], email: str) -> Dict[str, Any]:
+    user = users.get((email or "").strip().lower())
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+def start_totp_setup(email: str, issuer: str) -> Dict[str, str]:
+    """New secret waiting for its first code; the account keeps working as before until then."""
+    secret = base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        user = _user_or_404(users, email)
+        if user.get("totp_enabled"):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Two-step verification is already on")
+        user["totp_pending"] = secret
+        _save_users(users)
+    from urllib.parse import quote
+
+    label = quote(f"{issuer}:{user['email']}")
+    uri = f"otpauth://totp/{label}?secret={secret}&issuer={quote(issuer)}&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_STEP}"
+    return {"secret": secret, "otpauth_uri": uri}
+
+
+def confirm_totp_setup(email: str, code: str) -> List[str]:
+    """Turns two-step verification on; returns fresh recovery codes (shown once)."""
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        user = _user_or_404(users, email)
+        pending = user.get("totp_pending")
+        if not pending:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start the setup first")
+        step = _totp_match(pending, code)
+        if step is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The code is not correct; check the time on your phone")
+        codes = _new_recovery_codes()
+        user.update({
+            "totp_secret": pending,
+            "totp_enabled": True,
+            "totp_last": step,
+            "recovery_codes": [_hash_recovery(c) for c in codes],
+        })
+        user.pop("totp_pending", None)
+        _save_users(users)
+    return codes
+
+
+def disable_totp(email: str) -> None:
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        user = _user_or_404(users, email)
+        for field in ("totp_secret", "totp_enabled", "totp_pending", "totp_last"):
+            user.pop(field, None)
+        _save_users(users)
+
+
+def regenerate_recovery_codes(email: str) -> List[str]:
+    codes = _new_recovery_codes()
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        user = _user_or_404(users, email)
+        user["recovery_codes"] = [_hash_recovery(c) for c in codes]
+        _save_users(users)
+    return codes
+
+
+def recovery_codes_left(email: str) -> int:
+    user = _load_users().get((email or "").strip().lower()) or {}
+    return len(user.get("recovery_codes") or [])
+
+
+def reset_with_recovery_code(email: str, code: str, new_password: str) -> None:
+    """Forgotten password: one recovery code proves the account owner (also turns off nothing else)."""
+    _check_new_password(new_password)
+    email_key = (email or "").strip().lower()
+    with docstore.lock(USERS_DOC):
+        _check_throttle(email_key)
+        users = _load_users()
+        user = users.get(email_key)
+        if not user or not _use_recovery_code(user, code or ""):
+            _record_failure(email_key)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email or recovery code is not correct")
+        user["password"] = _hash_password(new_password)
+        _save_users(users)
+    _clear_failures(email_key)
+
+
+# --------------------------------------------------------------------------- #
+# Password reset by email (only when SMTP is configured)
+# --------------------------------------------------------------------------- #
+
+RESET_TTL = 30 * 60
+
+
+def make_reset_token(email: str) -> Optional[str]:
+    """Signed, 30-minute, single-use link token (it dies once the password changes)."""
+    user = _load_users().get((email or "").strip().lower())
+    if not user:
+        return None
+    payload = {"email": user["email"], "exp": int(time.time()) + RESET_TTL, "fp": _credential_fingerprint(user), "purpose": "reset"}
+    encoded = _encode_payload(payload)
+    return f"{encoded}.{_sign(encoded)}"
+
+
+def reset_with_token(token: str, new_password: str) -> str:
+    _check_new_password(new_password)
+    invalid = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This reset link is invalid or has expired")
+    try:
+        encoded, signature = (token or "").rsplit(".", 1)
+    except ValueError:
+        raise invalid
+    if not hmac.compare_digest(signature.encode("utf-8", "surrogateescape"), _sign(encoded).encode("ascii")):
+        raise invalid
+    try:
+        payload = _decode_payload(encoded)
+    except HTTPException:
+        raise invalid
+    if payload.get("purpose") != "reset" or not isinstance(payload.get("exp"), (int, float)) or payload["exp"] < time.time():
+        raise invalid
+    email_key = str(payload.get("email") or "").strip().lower()
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        user = users.get(email_key)
+        if not user or not hmac.compare_digest(str(payload.get("fp")), _credential_fingerprint(user)):
+            raise invalid
+        user["password"] = _hash_password(new_password)
+        _save_users(users)
+    _clear_failures(email_key)
+    return user["email"]
