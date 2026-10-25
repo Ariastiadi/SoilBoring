@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getActivity, type AuditEvent } from '../api'
 import { describeEvent, formatTime } from '../BoreholeDetail'
 import { t } from '../i18n'
+import { PageHead } from '../ui'
 
 const ACCOUNT_LABELS: Record<string, string> = {
   'account.first_admin': 'First admin created',
@@ -42,30 +43,27 @@ export default function Activity() {
   }, [events, filter])
 
   return (
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>{t('Activity log')}</h3>
-        <div className="actions">
-          <input value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Filter by user, borehole or action')} />
-          <button type="button" onClick={load}>{t('Refresh')}</button>
-        </div>
+    <div>
+      <PageHead title={t('Activity log')} description={t('Who changed what, and when. The newest 5000 changes are kept.')}
+        actions={<button type="button" onClick={load}>{t('Refresh')}</button>} />
+      <div className="toolbar" style={{ marginTop: 0 }}>
+        <input type="search" value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Filter by user, borehole or action')} aria-label={t('Filter by user, borehole or action')} />
       </div>
-      <p style={{ color: 'var(--muted)', fontSize: '.85rem' }}>{t('Who changed what, and when. The newest 5000 changes are kept.')}</p>
       {error && <p className="notice error">{error}</p>}
-      {!events ? <p>{t('Loading…')}</p> : (
-        <div className="table-scroll">
-          <table className="grid-table">
+      {!events ? <p className="muted">{t('Loading…')}</p> : (
+        <div className="table-wrap">
+          <table className="data-table">
             <thead><tr><th>{t('Time')}</th><th>{t('User')}</th><th>{t('Borehole / account')}</th><th>{t('Change')}</th></tr></thead>
             <tbody>
               {shown.map((e, i) => (
                 <tr key={i}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{formatTime(e.at)}</td>
-                  <td>{e.user}</td>
-                  <td>{e.target}</td>
+                  <td className="nowrap muted">{formatTime(e.at)}</td>
+                  <td style={{ overflowWrap: 'anywhere' }}>{e.user}</td>
+                  <td><strong>{e.target}</strong></td>
                   <td>{describe(e)}</td>
                 </tr>
               ))}
-              {!shown.length && <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>{t('Nothing found.')}</td></tr>}
+              {!shown.length && <tr><td colSpan={4} className="muted">{t('Nothing found.')}</td></tr>}
             </tbody>
           </table>
         </div>

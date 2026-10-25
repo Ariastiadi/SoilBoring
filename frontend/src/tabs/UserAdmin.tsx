@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, Fragment, useEffect, useState } from 'react'
 import { createUser, deleteUser, listUsers, resetUserPassword, resetUserTwoFactor, User } from '../api'
 import { t } from '../i18n'
+import { Icon, PageHead } from '../ui'
 
 type Props = {
   currentUserEmail: string
@@ -95,87 +96,91 @@ export default function UserAdmin({ currentUserEmail }: Props) {
     }
   }
 
+  const me = currentUserEmail.toLowerCase()
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>{t('Add User')}</h3>
-        <form onSubmit={onSubmit} className="row">
-          <div>
-            <label htmlFor="new-user-email">{t('Email')}</label>
-            <input id="new-user-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" required />
+    <div>
+      <PageHead title={t('Users')} description={t('Who can sign in. Field users can add logs and change their own; administrators can change everything and manage users.')} />
+      <div className="users-layout">
+        <section>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>{t('Email')}</th><th>{t('Role')}</th><th>{t('Two-step verification')}</th><th><span className="sr-only">{t('Actions')}</span></th></tr></thead>
+              <tbody>
+                {users.length === 0 && <tr><td colSpan={4} className="muted">{t('No users found.')}</td></tr>}
+                {users.map(u => (
+                  <Fragment key={u.email}>
+                    <tr>
+                      <td><strong style={{ overflowWrap: 'anywhere' }}>{u.email}</strong>{u.email.toLowerCase() === me && <div className="bh-sub">{t('You')}</div>}</td>
+                      <td>{u.role === 'admin' ? t('Administrator') : t('Field user')}</td>
+                      <td><span className={`status${u.totp_enabled ? ' ok' : ''}`}>{u.totp_enabled ? t('On') : t('Off')}</span></td>
+                      <td className="nowrap" style={{ textAlign: 'right' }}>
+                        <details className="menu" style={{ display: 'inline-block' }}>
+                          <summary className="button-like" style={{ minHeight: '2rem', padding: '.1rem .55rem' }} aria-label={t('More actions for {id}', { id: u.email })}><Icon name="more" /></summary>
+                          <div className="menu-pop">
+                            {u.email.toLowerCase() !== me && (
+                              <button type="button" onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setResetTarget(u.email); setResetPassword('') }} disabled={busy}>{t('Reset Password')}</button>
+                            )}
+                            {u.totp_enabled && (
+                              <button type="button" disabled={busy} onClick={async e => {
+                                (e.currentTarget.closest('details') as HTMLDetailsElement).open = false
+                                if (!window.confirm(t('Turn off two-step verification for {email}? Use this when they lost their phone and their recovery codes.', { email: u.email }))) return
+                                try {
+                                  await resetUserTwoFactor(u.email)
+                                  setStatus(t('Two-step verification turned off'))
+                                  await loadUsers(true)
+                                } catch (err: any) {
+                                  setStatus(t('Error: {message}', { message: err.message }))
+                                }
+                              }}>{t('Turn off 2FA')}</button>
+                            )}
+                            <button type="button" className="danger-quiet" onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; void onDelete(u.email) }}
+                              disabled={busy || u.email.toLowerCase() === me}
+                              title={u.email.toLowerCase() === me ? t('You cannot remove the account currently in use') : t('Delete user')}>{t('Remove')}</button>
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                    {resetTarget === u.email && (
+                      <tr key={`${u.email}-reset`}>
+                        <td colSpan={4}>
+                          <form onSubmit={onReset} className="actions">
+                            <label htmlFor="reset-password" style={{ margin: 0 }}>{t('New password for {email}', { email: u.email })}</label>
+                            <input id="reset-password" type="password" autoComplete="new-password" minLength={8} value={resetPassword} onChange={e => setResetPassword(e.target.value)} required />
+                            <button type="submit" className="primary" disabled={busy}>{t('Save')}</button>
+                            <button type="button" onClick={() => setResetTarget(null)}>{t('Cancel')}</button>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div>
-            <label htmlFor="new-user-password">{t('Password')}</label>
-            <input id="new-user-password" type="password" autoComplete="new-password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder={t('At least {n} characters', { n: 8 })} required />
-            <label htmlFor="new-user-role">{t('Role')}</label>
-            <select id="new-user-role" value={role} onChange={e => setRole(e.target.value as User['role'])}>
-              <option value="general">{t('General (no user admin)')}</option>
-              <option value="admin">{t('Admin')}</option>
-            </select>
-          </div>
-          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
-            <button type="submit" disabled={busy}>{t('Create')}</button>
-            <span>{status}</span>
-          </div>
-        </form>
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>{t('Existing Users')}</h3>
-        {users.length === 0 ? (
-          <p style={{ color: 'var(--muted)' }}>{t('No users found.')}</p>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '.5rem' }}>
-            {users.map(u => (
-              <li key={u.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', border: '1px solid var(--border)', borderRadius: '.5rem', padding: '.75rem 1rem' }}>
-                <div>
-                  <div><strong>{u.email}</strong></div>
-                  <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>{t('Role: {role}', { role: u.role === 'admin' ? t('Admin') : t('General') })} · {u.totp_enabled ? t('Two-step verification: on') : t('Two-step verification: off')}</div>
-                </div>
-                <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {u.email.toLowerCase() !== currentUserEmail.toLowerCase() && (
-                  <button onClick={() => { setResetTarget(u.email); setResetPassword('') }} disabled={busy}>
-                    {t('Reset Password')}
-                  </button>
-                )}
-                {u.totp_enabled && (
-                  <button
-                    onClick={async () => {
-                      if (!window.confirm(t('Turn off two-step verification for {email}? Use this when they lost their phone and their recovery codes.', { email: u.email }))) return
-                      try {
-                        await resetUserTwoFactor(u.email)
-                        setStatus(t('Two-step verification turned off'))
-                        await loadUsers(true)
-                      } catch (err: any) {
-                        setStatus(t('Error: {message}', { message: err.message }))
-                      }
-                    }}
-                    disabled={busy}
-                  >
-                    {t('Turn off 2FA')}
-                  </button>
-                )}
-                <button
-                  onClick={() => onDelete(u.email)}
-                  disabled={busy || u.email.toLowerCase() === currentUserEmail.toLowerCase()}
-                  style={{ background: 'var(--danger)' }}
-                  title={u.email.toLowerCase() === currentUserEmail.toLowerCase() ? t('You cannot remove the account currently in use') : t('Delete user')}
-                >
-                  {t('Remove')}
-                </button>
-                </div>
-                {resetTarget === u.email && (
-                  <form onSubmit={onReset} style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
-                    <label htmlFor="reset-password" style={{ margin: 0 }}>{t('New password for {email}', { email: u.email })}</label>
-                    <input id="reset-password" type="password" autoComplete="new-password" minLength={8} value={resetPassword} onChange={e => setResetPassword(e.target.value)} required />
-                    <button type="submit" disabled={busy}>{t('Save')}</button>
-                    <button type="button" onClick={() => setResetTarget(null)}>{t('Cancel')}</button>
-                  </form>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+          {status && <p role="status" className="muted small">{status}</p>}
+        </section>
+        <section className="card">
+          <h2>{t('Add User')}</h2>
+          <form onSubmit={onSubmit} style={{ display: 'grid', gap: '.75rem' }}>
+            <div className="field">
+              <label htmlFor="new-user-email">{t('Email')}</label>
+              <input id="new-user-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+            </div>
+            <div className="field">
+              <label htmlFor="new-user-password">{t('Password')}</label>
+              <input id="new-user-password" type="password" autoComplete="new-password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} required />
+              <p className="help">{t('At least {n} characters', { n: 8 })}</p>
+            </div>
+            <div className="field">
+              <label htmlFor="new-user-role">{t('Role')}</label>
+              <select id="new-user-role" value={role} onChange={e => setRole(e.target.value as User['role'])}>
+                <option value="general">{t('Field user')}</option>
+                <option value="admin">{t('Administrator')}</option>
+              </select>
+            </div>
+            <div className="actions"><button type="submit" className="primary" disabled={busy}>{t('Add user')}</button></div>
+          </form>
+        </section>
       </div>
     </div>
   )

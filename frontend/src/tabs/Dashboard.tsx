@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify'
 import { LocalNarrative } from '../LocalAI'
 import { methodLabel } from '../options'
 import { t } from '../i18n'
+import { Breakdown, PageHead, formatDate, prettyDates } from '../ui'
 
 function markdownBlock(text: string) {
   const html = DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
@@ -12,7 +13,7 @@ function markdownBlock(text: string) {
 import { DashboardResponse, getDashboard } from '../api'
 
 // "12.5 m", or "-" when the value was not recorded (never "- m").
-const metres = (value?: number | null) => (value === null || value === undefined ? '-' : `${value} m`)
+const metres = (value?: number | null) => (value === null || value === undefined ? '–' : `${value} m`)
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardResponse | null>(null)
@@ -44,95 +45,64 @@ export default function Dashboard() {
 
   return (
     <div>
-      {status && <p>{status}</p>}
+      <PageHead title={t('Dashboard')} description={periodLabel ? t('Performance Period: {label}', { label: prettyDates(periodLabel).replace('->', '–') }) : undefined} />
+      {status && <p className="muted">{status}</p>}
       {data && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="card">
-            <h3 style={{ marginTop: 0 }}>{t('Executive Summary')}</h3>
-            {periodLabel && (
-              <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '.9rem' }}>
-                {t('Performance Period: {label}', { label: periodLabel })}
-              </p>
-            )}
+          <div className="kpis">
+            <div className="kpi"><h3>{t('Total Boreholes')}</h3><p>{data.total_boreholes}</p></div>
+            <div className="kpi"><h3>{t('Total Meterage (m)')}</h3><p>{data.total_meterage_m ?? '-'}</p></div>
+            <div className="kpi"><h3>{t('Avg Final Depth (m)')}</h3><p>{data.avg_final_depth_m ?? '-'}</p></div>
+            <div className="kpi"><h3>{t('Avg GW Depth (m)')}</h3><p>{data.avg_groundwater_depth_m ?? '-'}</p></div>
+            <div className="kpi"><h3>{t('Active Projects')}</h3><p>{data.active_projects ?? '-'}</p></div>
+            <div className="kpi"><h3>{t('Top Contractor')}</h3><p style={{ fontSize: '1.15rem' }}>{data.top_contractor ?? '-'}</p></div>
+          </div>
+
+          <section className="card">
+            <h2>{t('Executive Summary')}</h2>
             {data.project_list && data.project_list.length > 0 && (
-              <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '.85rem' }}>
-                {t('Projects in view: {list}', { list: data.project_list.join(', ') })}
-              </p>
+              <p className="muted small" style={{ marginTop: 0 }}>{t('Projects in view: {list}', { list: data.project_list.join(', ') })}</p>
             )}
             {narrativeHtml ? (
               <div className="markdown" dangerouslySetInnerHTML={{ __html: narrativeHtml }} />
             ) : data.narrative_prompt ? (
               <LocalNarrative prompt={data.narrative_prompt} render={markdownBlock} />
             ) : (
-              <p style={{ color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>
+              <p className="muted" style={{ whiteSpace: 'pre-wrap' }}>
                 {data.narrative || t('Narrative unavailable. Try reloading once the AI service is online.')}
               </p>
             )}
-          </div>
-
-          <div className="kpis">
-            <div className="kpi">
-              <h3>{t('Total Boreholes')}</h3>
-              <p>{data.total_boreholes}</p>
-            </div>
-            <div className="kpi">
-              <h3>{t('Total Meterage (m)')}</h3>
-              <p>{data.total_meterage_m ?? '-'}</p>
-            </div>
-            <div className="kpi">
-              <h3>{t('Avg Final Depth (m)')}</h3>
-              <p>{data.avg_final_depth_m ?? '-'}</p>
-            </div>
-            <div className="kpi">
-              <h3>{t('Avg GW Depth (m)')}</h3>
-              <p>{data.avg_groundwater_depth_m ?? '-'}</p>
-            </div>
-            <div className="kpi">
-              <h3>{t('Active Projects')}</h3>
-              <p>{data.active_projects ?? '-'}</p>
-            </div>
-            <div className="kpi">
-              <h3>{t('Top Contractor')}</h3>
-              <p>{data.top_contractor ?? '-'}</p>
-            </div>
-          </div>
+          </section>
 
           {(methodBreakdown.length > 0 || uscsBreakdown.length > 0) && (
-            <div className="row">
-              {methodBreakdown.length > 0 && (
-                <div className="card" style={{ flex: 1 }}>
-                  <h4 style={{ marginTop: 0 }}>{t('Method Breakdown')}</h4>
-                  <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                    {methodBreakdown.map(([method, count]) => (
-                      <li key={method}>{methodLabel(method)}: {count}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {uscsBreakdown.length > 0 && (
-                <div className="card" style={{ flex: 1 }}>
-                  <h4 style={{ marginTop: 0 }}>{t('USCS Classes')}</h4>
-                  <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                    {uscsBreakdown.map(([cls, count]) => (
-                      <li key={cls}>{cls}: {count}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+            <div className="account-grid">
+              {methodBreakdown.length > 0 && <Breakdown title={t('Method Breakdown')} entries={methodBreakdown as Array<[string, number]>} label={methodLabel} />}
+              {uscsBreakdown.length > 0 && <Breakdown title={t('USCS Classes')} entries={uscsBreakdown as Array<[string, number]>} />}
             </div>
           )}
 
           {recent.length > 0 && (
-            <div className="card">
-              <h4 style={{ marginTop: 0 }}>{t('Most Recent Activities')}</h4>
-              <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                {recent.map((item, idx) => (
-                  <li key={`${item?.borehole_id ?? 'row'}-${idx}`} style={{ marginBottom: '.35rem' }}>
-                    <strong>{item?.start_date ?? '-'}</strong> - {item?.borehole_id ?? 'BH ?'} {item?.project ? `@ ${item?.project}` : ''} ({item?.site ?? t('Site ?')}) | {t('Depth {depth}, GW {gw}', { depth: metres(item?.final_depth_m), gw: metres(item?.groundwater_depth_m) })}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <section>
+              <h3>{t('Most Recent Activities')}</h3>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr><th>{t('Start Date')}</th><th>{t('Borehole')}</th><th>{t('Project')}</th><th className="num">{t('Depth')}</th><th className="num">{t('Groundwater')}</th></tr>
+                  </thead>
+                  <tbody>
+                    {recent.map((item, idx) => (
+                      <tr key={`${item?.borehole_id ?? 'row'}-${idx}`}>
+                        <td className="nowrap">{formatDate(item?.start_date) || '–'}</td>
+                        <td><strong>{item?.borehole_id ?? '–'}</strong></td>
+                        <td>{[item?.project, item?.site].filter(Boolean).join(', ')}</td>
+                        <td className="num nowrap">{metres(item?.final_depth_m)}</td>
+                        <td className="num nowrap">{metres(item?.groundwater_depth_m)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
         </div>
       )}

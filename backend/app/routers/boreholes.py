@@ -24,6 +24,21 @@ def _require_edit(user: dict, report: dict) -> None:
         raise HTTPException(status_code=403, detail="You can only edit logs you submitted")
 
 
+@router.get("/depth-overview")
+def depth_overview(user=Depends(get_current_user)):
+    """Compact depth data of every borehole, for the strata strips in the borehole list."""
+    out = {}
+    for borehole_id, entry in details.all_details().items():
+        out[borehole_id] = {
+            "layers": [{"top": l["top"], "base": l["base"], "uscs": l.get("uscs", "")} for l in entry["layers"]],
+            "spt": [{"depth": x["depth"], "n": x.get("n")} for x in entry["spt"]],
+            "samples": len(entry["samples"]),
+            "core": len(entry["core"]),
+            "photos": len(entry["photos"]),
+        }
+    return out
+
+
 @router.get("/details/{borehole_id:path}")
 def read_details(borehole_id: str, user=Depends(get_current_user)):
     report = _report_or_404(borehole_id)

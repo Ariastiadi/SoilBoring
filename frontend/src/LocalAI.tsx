@@ -68,7 +68,7 @@ export function LocalAISetup({ ai }: { ai: ReturnType<typeof useLocalAI> }) {
           <select value={model} onChange={e => setModel(e.target.value)} disabled={progress !== undefined}>
             {LOCAL_MODELS.map(m => (
               <option key={m.key} value={m.key}>
-                {m.name} · {formatSize(m.size)}{state.downloaded.includes(m.key) ? ` · ${t('downloaded')}` : ''}
+                {m.name}, {formatSize(m.size)}{state.downloaded.includes(m.key) ? ` (${t('downloaded')})` : ''}
               </option>
             ))}
           </select>
@@ -79,9 +79,12 @@ export function LocalAISetup({ ai }: { ai: ReturnType<typeof useLocalAI> }) {
             <button type="button" onClick={() => cancelDownload(model)}>{t('Cancel')}</button>
           </>
         ) : downloaded ? (
-          <button type="button" onClick={() => void removeModel(model)}>{t('Remove from this browser')}</button>
+          <>
+            <span className="status ok">{t('Ready on this device')}</span>
+            <button type="button" className="quiet" onClick={() => void removeModel(model)}>{t('Remove from this browser')}</button>
+          </>
         ) : (
-          <button type="button" onClick={() => void downloadModel(model)}>
+          <button type="button" className="primary" onClick={() => void downloadModel(model)}>
             {t('Download ({size}, once)', { size: formatSize(info.size + engineSize()) })}
           </button>
         )}
@@ -152,7 +155,7 @@ export function LocalNarrative({ prompt, render }: { prompt: { instruction: stri
         </p>
       ) : (
         <div className="actions" style={{ display: 'flex', gap: '.5rem', alignItems: 'center', marginTop: text ? '.5rem' : 0 }}>
-          <button type="button" onClick={write} disabled={busy}>{text ? t('Write again') : t('Write summary with Qwen (this device)')}</button>
+          <button type="button" className={text ? '' : 'primary'} onClick={write} disabled={busy}>{text ? t('Write again') : t('Write summary with Qwen (this device)')}</button>
           {busy && <button type="button" onClick={() => { abort?.abort(); setBusy(false) }}>{t('Stop')}</button>}
           {busy && <span style={{ color: 'var(--muted)' }}>{ai.state.loading ? t('Loading the model…') : t('Writing…')}</span>}
         </div>

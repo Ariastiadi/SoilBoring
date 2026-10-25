@@ -132,3 +132,14 @@ def test_recreated_id_starts_without_old_depth_data(client, admin_headers):
     details.save_details("BH-R", details.DetailsIn.model_validate({"layers": [{"top": 0, "base": 1}]}), "x@example.com")  # stray leftover
     _log(client, admin_headers, BoreholeID="BH-R")
     assert client.get("/api/details/BH-R", headers=admin_headers).json()["layers"] == []
+
+
+def test_depth_overview_lists_compact_depth_data(client, admin_headers):
+    _log(client, admin_headers, BoreholeID="BH-OV")
+    client.put("/api/details/BH-OV", json={"layers": [{"top": 0, "base": 4, "uscs": "CL"}],
+                                          "spt": [{"depth": 1.5, "seat": 2, "inc1": 3, "inc2": 4}]}, headers=admin_headers)
+    body = client.get("/api/depth-overview", headers=admin_headers).json()
+    assert body["BH-OV"]["layers"] == [{"top": 0, "base": 4, "uscs": "CL"}]
+    assert body["BH-OV"]["spt"] == [{"depth": 1.5, "n": 7}]
+    assert body["BH-OV"]["photos"] == 0
+    assert client.get("/api/depth-overview").status_code == 401

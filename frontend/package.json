@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/barlow": "5.2.8",
+    "@fontsource/barlow-semi-condensed": "5.2.7",
     "@wllama/wllama": "3.8.1",
     "@wllama/wllama-compat": "3.8.1",
     "dompurify": "^3.4.17",

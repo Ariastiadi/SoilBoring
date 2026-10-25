@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify'
 import { LocalNarrative } from '../LocalAI'
 import { methodLabel } from '../options'
 import { locale, t } from '../i18n'
+import { Breakdown, DateInput, PageHead, prettyDates } from '../ui'
 
 function markdownBlock(text: string) {
   const html = DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
@@ -15,6 +16,7 @@ export default function Summary() {
   const [data, setData] = useState<SummaryResponse | null>(null)
   const [status, setStatus] = useState('')
   const [activePeriod, setActivePeriod] = useState<'weekly' | 'monthly' | null>(null)
+  const [mode, setMode] = useState<'weekly' | 'monthly'>('weekly')
   const [weeklyFrom, setWeeklyFrom] = useState('')
   const [weeklyTo, setWeeklyTo] = useState('')
   const [monthlyMonth, setMonthlyMonth] = useState(() => (new Date().getMonth() + 1).toString())
@@ -104,45 +106,55 @@ export default function Summary() {
 
   return (
     <div>
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ marginTop: 0 }}>{t('Summary Parameters')}</h3>
-        <div className="row">
-          <div>
-            <h4>{t('Weekly (Date Range)')}</h4>
-            <label htmlFor="summary-from">{t('From')}</label>
-            <input id="summary-from" type="date" value={weeklyFrom} onChange={e => setWeeklyFrom(e.target.value)} />
-            <label htmlFor="summary-to">{t('To')}</label>
-            <input id="summary-to" type="date" value={weeklyTo} onChange={e => setWeeklyTo(e.target.value)} />
-            <button style={{ marginTop: '.5rem' }} onClick={() => fetchSummary('weekly')} disabled={loading} className={activePeriod === 'weekly' ? 'active' : ''}>{t('Generate Weekly Summary')}</button>
-          </div>
-          <div>
-            <h4>{t('Monthly (Month & Year)')}</h4>
-            <label htmlFor="summary-month">{t('Month')}</label>
-            <select id="summary-month" value={monthlyMonth} onChange={e => setMonthlyMonth(e.target.value)}>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                <option key={m} value={String(m)}>
-                  {new Date(0, m - 1).toLocaleString(locale(), { month: 'long' })}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="summary-year">{t('Year')}</label>
-            <input id="summary-year" type="number" value={monthlyYear} onChange={e => setMonthlyYear(e.target.value)} min={2000} max={2100} />
-            <button style={{ marginTop: '.5rem' }} onClick={() => fetchSummary('monthly')} disabled={loading} className={activePeriod === 'monthly' ? 'active' : ''}>{t('Generate Monthly Summary')}</button>
-          </div>
+      <PageHead title={t('Summaries')} description={t('A written summary of the drilling in one week or one month, with the figures behind it.')} />
+      <section className="card" style={{ marginBottom: '1rem' }}>
+        <div className="segmented" role="group" aria-label={t('Period')} style={{ marginBottom: '.9rem' }}>
+          <button type="button" aria-pressed={mode === 'weekly'} onClick={() => setMode('weekly')}>{t('Weekly (Date Range)')}</button>
+          <button type="button" aria-pressed={mode === 'monthly'} onClick={() => setMode('monthly')}>{t('Monthly (Month & Year)')}</button>
         </div>
-        <div className="actions" style={{ marginTop: '.5rem', gap: '.5rem', flexWrap: 'wrap' }}>
-          <button onClick={copy} disabled={!data?.text}>{t('Copy Detail')}</button>
-          <span>{status}</span>
+        <div className="actions" style={{ alignItems: 'flex-end', gap: '.75rem' }}>
+          {mode === 'weekly' ? (
+            <>
+              <div className="field">
+                <label htmlFor="summary-from">{t('From')}</label>
+                <DateInput id="summary-from" value={weeklyFrom} onChange={setWeeklyFrom} />
+              </div>
+              <div className="field">
+                <label htmlFor="summary-to">{t('To')}</label>
+                <DateInput id="summary-to" value={weeklyTo} onChange={setWeeklyTo} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="summary-month">{t('Month')}</label>
+                <select id="summary-month" value={monthlyMonth} onChange={e => setMonthlyMonth(e.target.value)}>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                    <option key={m} value={String(m)}>{new Date(0, m - 1).toLocaleString(locale(), { month: 'long' })}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="summary-year">{t('Year')}</label>
+                <input id="summary-year" type="text" inputMode="numeric" style={{ width: '6rem' }} value={monthlyYear} onChange={e => setMonthlyYear(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+              </div>
+            </>
+          )}
+          <button type="button" className="primary" onClick={() => fetchSummary(mode)} disabled={loading}>
+            {mode === 'weekly' ? t('Generate Weekly Summary') : t('Generate Monthly Summary')}
+          </button>
+          {data?.text && <button type="button" onClick={copy}>{t('Copy Detail')}</button>}
+          <span className="muted small" role="status">{status}</span>
         </div>
-      </div>
+      </section>
 
       {data && (
         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>{t('Executive Summary ({period})', { period: data.period === 'weekly' ? t('weekly') : t('monthly') })}</h3>
+            <h2>{t('Executive Summary ({period})', { period: data.period === 'weekly' ? t('weekly') : t('monthly') })}</h2>
             {data.period_label && (
               <p style={{ margin: 0, color: 'var(--muted)', fontSize: '.9rem' }}>
-                {t('Period: {label}', { label: data.period_label })}
+                {t('Period: {label}', { label: prettyDates(data.period_label) })}
               </p>
             )}
             {stats?.projects && stats.projects.length > 0 && (
@@ -173,33 +185,15 @@ export default function Summary() {
           )}
 
           {(methodEntries.length > 0 || uscsEntries.length > 0) && (
-            <div className="row">
-              {methodEntries.length > 0 && (
-                <div className="card" style={{ flex: 1 }}>
-                  <h4 style={{ marginTop: 0 }}>{t('Method Mix')}</h4>
-                  <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                    {methodEntries.map(([method, count]) => (
-                      <li key={method}>{methodLabel(method)}: {count}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {uscsEntries.length > 0 && (
-                <div className="card" style={{ flex: 1 }}>
-                  <h4 style={{ marginTop: 0 }}>{t('USCS Distribution')}</h4>
-                  <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                    {uscsEntries.map(([uscs, count]) => (
-                      <li key={uscs}>{uscs}: {count}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+            <div className="account-grid">
+              {methodEntries.length > 0 && <Breakdown title={t('Method Mix')} entries={methodEntries as Array<[string, number]>} label={methodLabel} />}
+              {uscsEntries.length > 0 && <Breakdown title={t('USCS Distribution')} entries={uscsEntries as Array<[string, number]>} />}
             </div>
           )}
 
           {data.highlights && data.highlights.length > 0 && (
             <div className="card">
-              <h4 style={{ marginTop: 0 }}>{t('Operational Highlights')}</h4>
+              <h3>{t('Operational Highlights')}</h3>
               <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                 {data.highlights.map((line, idx) => (
                   <li key={`${line}-${idx}`} style={{ marginBottom: '.35rem' }}>{line}</li>
@@ -209,10 +203,10 @@ export default function Summary() {
           )}
 
           <div className="card">
-            <h4 style={{ marginTop: 0 }}>{t('Detailed Breakdown')}</h4>
+            <h3>{t('Detailed Breakdown')}</h3>
               {data.period_range && (
                 <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: '.85rem' }}>
-                  {t('Coverage: {from} -> {to}', { from: data.period_range.from || '-', to: data.period_range.to || '-' })}
+                  {t('Coverage: {from} -> {to}', { from: prettyDates(data.period_range.from) || '–', to: prettyDates(data.period_range.to) || '–' })}
                 </p>
               )}
             {detailHtml ? (

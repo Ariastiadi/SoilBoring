@@ -369,6 +369,17 @@ export type AuditEvent = { at: string; user: string; action: string; target: str
 
 const enc = (id: string) => encodeURIComponent(id)
 
+export type DepthOverview = Record<string, {
+  layers: Array<{ top: number; base: number; uscs: string }>
+  spt: Array<{ depth: number; n: number | null }>
+  samples: number; core: number; photos: number
+}>
+
+export async function getDepthOverview() {
+  const r = await fetch(`${BASE}/api/depth-overview`, { headers: buildHeaders() });
+  return parseJson<DepthOverview>(r, t("Failed to load depth data"));
+}
+
 export async function getDetails(boreholeId: string) {
   const r = await fetch(`${BASE}/api/details/${enc(boreholeId)}`, { headers: buildHeaders() });
   return parseJson<Details>(r, t("Failed to load depth data"));

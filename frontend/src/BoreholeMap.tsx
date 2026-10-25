@@ -5,10 +5,12 @@ import { t } from './i18n'
 
 type Row = Record<string, any>
 
-const COLORS = ['#0369a1', '#b45309', '#047857', '#7c3aed', '#be123c', '#0f766e', '#4d7c0f', '#a21caf']
+const COLORS = ['#1f5f8b', '#a15c07', '#2e7d4f', '#6d4fa3', '#b42318', '#0f766e', '#4d7c0f', '#8a3c8f']
 
 /** Borehole locations on OpenStreetMap; click a point to open that borehole. */
-export default function BoreholeMap({ reports, onOpen }: { reports: Row[], onOpen: (id: string) => void }) {
+export default function BoreholeMap({ reports, onOpen, colorFor, caption = true }: {
+  reports: Row[], onOpen: (id: string) => void, colorFor?: (row: Row) => string, caption?: boolean
+}) {
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
   const layer = useRef<L.LayerGroup | null>(null)
@@ -53,21 +55,23 @@ export default function BoreholeMap({ reports, onOpen }: { reports: Row[], onOpe
       const tip = document.createElement('span')
       tip.textContent = String(r.BoreholeID)
       L.circleMarker([lat, lon], {
-        radius: 7, weight: 2, color: '#fff', fillOpacity: 0.9,
-        fillColor: COLORS[projects.indexOf(r.ProjectName) % COLORS.length],
+        radius: 7, weight: 2, color: '#23282d', fillOpacity: 0.95,
+        fillColor: colorFor ? colorFor(r) : COLORS[projects.indexOf(r.ProjectName) % COLORS.length],
       }).bindPopup(popup).bindTooltip(tip).addTo(layer.current!)
     })
     if (points.length === 1) map.current.setView(points[0], 15)
     else if (points.length > 1) map.current.fitBounds(L.latLngBounds(points), { padding: [30, 30], maxZoom: 16 })
-  }, [reports, onOpen])
+  }, [reports, onOpen, colorFor])
 
   const withCoords = reports.filter(r => Number.isFinite(parseFloat(r.Latitude)) && Number.isFinite(parseFloat(r.Longitude))).length
   return (
     <div>
       <div ref={box} className="map-box" />
-      <p style={{ color: 'var(--muted)', fontSize: '.85rem', margin: '.5rem 0 0' }}>
-        {t('{n} of {total} boreholes have coordinates. Colours show projects.', { n: withCoords, total: reports.length })}
-      </p>
+      {caption && (
+        <p style={{ color: 'var(--muted)', fontSize: '.85rem', margin: '.5rem 0 0' }}>
+          {t('{n} of {total} boreholes have coordinates. Colours show projects.', { n: withCoords, total: reports.length })}
+        </p>
+      )}
     </div>
   )
 }

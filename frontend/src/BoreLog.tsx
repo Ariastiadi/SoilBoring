@@ -3,61 +3,9 @@ import { createPortal } from 'react-dom'
 import type { Details } from './api'
 import { coreSizeLabel, methodLabel } from './options'
 import { t } from './i18n'
+import { PatternDefs, USCS_NAMES, patternOf } from './soil'
 
 type Row = Record<string, string | undefined>
-
-// Graphic log patterns per USCS group (first symbol of dual symbols such as SP-SM).
-type Pattern = 'clay' | 'silt' | 'sand' | 'gravel' | 'organic' | 'peat' | 'unknown'
-
-function patternOf(uscs: string): Pattern {
-  const first = (uscs || '').toUpperCase().split(/[-/ ]/)[0]
-  if (first === 'PT') return 'peat'
-  if (first === 'OL' || first === 'OH') return 'organic'
-  if (first.startsWith('C')) return 'clay'
-  if (first.startsWith('M')) return 'silt'
-  if (first.startsWith('S')) return 'sand'
-  if (first.startsWith('G')) return 'gravel'
-  return 'unknown'
-}
-
-// Shown when a layer has no written description.
-const USCS_NAMES: Record<Pattern, string> = {
-  clay: 'Clay', silt: 'Silt', sand: 'Sand', gravel: 'Gravel', organic: 'Organic soil', peat: 'Peat', unknown: '',
-}
-
-const FILL: Record<Pattern, string> = {
-  clay: '#d9c7a7', silt: '#e6d9b8', sand: '#f3e3a1', gravel: '#e8c98f', organic: '#b9b39a', peat: '#8d7b62', unknown: '#dddddd',
-}
-
-function PatternDefs() {
-  return (
-    <defs>
-      <pattern id="p-clay" width="12" height="6" patternUnits="userSpaceOnUse">
-        <rect width="12" height="6" fill={FILL.clay} /><line x1="0" y1="3" x2="12" y2="3" stroke="#6b5a3c" strokeWidth="0.8" />
-      </pattern>
-      <pattern id="p-silt" width="12" height="6" patternUnits="userSpaceOnUse">
-        <rect width="12" height="6" fill={FILL.silt} /><line x1="1" y1="3" x2="6" y2="3" stroke="#6b5a3c" strokeWidth="0.8" />
-        <circle cx="9" cy="3" r="0.7" fill="#6b5a3c" />
-      </pattern>
-      <pattern id="p-sand" width="8" height="8" patternUnits="userSpaceOnUse">
-        <rect width="8" height="8" fill={FILL.sand} /><circle cx="2" cy="2" r="0.8" fill="#7a6430" /><circle cx="6" cy="6" r="0.8" fill="#7a6430" />
-      </pattern>
-      <pattern id="p-gravel" width="14" height="12" patternUnits="userSpaceOnUse">
-        <rect width="14" height="12" fill={FILL.gravel} /><circle cx="4" cy="4" r="2.4" fill="none" stroke="#6b4f20" strokeWidth="0.8" />
-        <circle cx="11" cy="9" r="2" fill="none" stroke="#6b4f20" strokeWidth="0.8" />
-      </pattern>
-      <pattern id="p-organic" width="12" height="8" patternUnits="userSpaceOnUse">
-        <rect width="12" height="8" fill={FILL.organic} /><path d="M1 4 q2 -2 4 0 t4 0" fill="none" stroke="#3f3a2a" strokeWidth="0.8" />
-      </pattern>
-      <pattern id="p-peat" width="8" height="8" patternUnits="userSpaceOnUse">
-        <rect width="8" height="8" fill={FILL.peat} /><line x1="0" y1="8" x2="8" y2="0" stroke="#3b2f20" strokeWidth="0.9" />
-      </pattern>
-      <pattern id="p-unknown" width="8" height="8" patternUnits="userSpaceOnUse">
-        <rect width="8" height="8" fill={FILL.unknown} /><path d="M0 0 L8 8 M8 0 L0 8" stroke="#777" strokeWidth="0.5" />
-      </pattern>
-    </defs>
-  )
-}
 
 const num = (v: unknown) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''))
@@ -273,8 +221,8 @@ export default function BoreLog({ report, details, onClose }: { report: Row, det
   return createPortal(
     <div className="borelog-root">
       <div className="borelog-toolbar no-print">
-        <button onClick={() => window.print()}>{t('Print / save as PDF')}</button>
-        <button onClick={onClose}>{t('Close')}</button>
+        <button type="button" className="primary" onClick={() => window.print()}>{t('Print / save as PDF')}</button>
+        <button type="button" onClick={onClose}>{t('Close')}</button>
         <span>{t('In the print window choose "Save as PDF" and paper size A4.')}</span>
       </div>
       {pages.map((range, i) => (

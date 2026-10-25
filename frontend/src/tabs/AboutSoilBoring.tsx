@@ -16,26 +16,24 @@ const STANDARDS: Standard[] = [
   { topic: 'Logging of core drilling', topicId: 'Pencatatan (logging) hasil bor inti', sni: 'SNI 2436:2008', astm: '-' },
 ]
 
-const th = { textAlign: 'left' as const, padding: '.35rem', borderBottom: '1px solid var(--border)' }
-const td = { padding: '.35rem', borderBottom: '1px dashed var(--border)' }
 
 function StandardsTable({ id }: { id: boolean }) {
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '480px' }}>
+      <table className="data-table" style={{ minWidth: '480px' }}>
         <thead>
           <tr>
-            <th style={th}>{id ? 'Topik' : 'Topic'}</th>
-            <th style={th}>SNI</th>
-            <th style={th}>ASTM</th>
+            <th>{id ? 'Topik' : 'Topic'}</th>
+            <th>SNI</th>
+            <th>ASTM</th>
           </tr>
         </thead>
         <tbody>
           {STANDARDS.map(s => (
             <tr key={s.topic}>
-              <td style={td}>{id ? s.topicId : s.topic}</td>
-              <td style={td}>{s.sni}</td>
-              <td style={td}>{id ? s.astmId ?? s.astm : s.astm}</td>
+              <td>{id ? s.topicId : s.topic}</td>
+              <td>{s.sni}</td>
+              <td>{id ? s.astmId ?? s.astm : s.astm}</td>
             </tr>
           ))}
         </tbody>
@@ -46,15 +44,15 @@ function StandardsTable({ id }: { id: boolean }) {
 
 function Indonesian() {
   return (
-    <div className="card" style={{ lineHeight: 1.6 }}>
-      <h2 style={{ marginTop: 0 }}>Mengapa Pengeboran Tanah Penting</h2>
+    <article className="prose">
+      <h1>Mengapa Pengeboran Tanah Penting</h1>
       <p>
         Pengeboran tanah (soil boring) dan pengujian in-situ adalah gambaran pertama tentang kondisi di bawah
         permukaan sebuah lokasi. Hasilnya menentukan apakah tanah mampu memikul struktur yang direncanakan, jenis
         fondasi yang dipakai, dan risiko apa saja yang harus diperhitungkan dalam biaya sebelum konstruksi dimulai.
       </p>
 
-      <h3>Tujuan Utama</h3>
+      <h2>Tujuan Utama</h2>
       <ol>
         <li>
           <strong>Menentukan karakteristik tanah:</strong> jenis tanah (lempung, lanau, pasir, kerikil), konsistensi
@@ -78,7 +76,7 @@ function Indonesian() {
         </li>
       </ol>
 
-      <h3>Metode Lapangan dalam Aplikasi Ini</h3>
+      <h2>Metode Lapangan dalam Aplikasi Ini</h2>
       <ul>
         <li>
           <strong>Bor cuci (wash boring) / bor putar cuci (rotary wash) + SPT:</strong> pengeboran lubang terbuka
@@ -98,14 +96,14 @@ function Indonesian() {
         </li>
       </ul>
 
-      <h3>Standar Acuan</h3>
+      <h2>Standar Acuan</h2>
       <p style={{ marginTop: 0 }}>
         Pekerjaan lapangan dan klasifikasi umumnya dilakukan mengacu pada Standar Nasional Indonesia (SNI) atau
         padanannya dalam ASTM:
       </p>
       <StandardsTable id />
 
-      <h3>Manfaat Aplikasi Ini</h3>
+      <h2>Manfaat Aplikasi Ini</h2>
       <ul>
         <li>
           Satu tempat untuk semua log bor: lokasi, metode pengeboran, kedalaman, muka air tanah, kelas USCS, dan
@@ -118,21 +116,21 @@ function Indonesian() {
           geoteknik seperti gINT, HoleBASE, atau OpenGround.
         </li>
       </ul>
-    </div>
+    </article>
   )
 }
 
 function English() {
   return (
-    <div className="card" style={{ lineHeight: 1.6 }}>
-      <h2 style={{ marginTop: 0 }}>Why Soil Boring Matters</h2>
+    <article className="prose">
+      <h1>Why Soil Boring Matters</h1>
       <p>
         Soil boring and in-situ testing are the first look at what lies under a site. The results decide
         whether the ground can carry the planned structure, which foundation to use, and which risks have to be
         priced in before construction starts.
       </p>
 
-      <h3>Key Objectives</h3>
+      <h2>Key Objectives</h2>
       <ol>
         <li>
           <strong>Determine soil characteristics:</strong> soil type (clay, silt, sand, gravel), consistency or
@@ -156,7 +154,7 @@ function English() {
         </li>
       </ol>
 
-      <h3>Field Methods in This App</h3>
+      <h2>Field Methods in This App</h2>
       <ul>
         <li><strong>Wash boring / rotary wash + SPT:</strong> open-hole drilling with SPT at set intervals; the log keeps the average N60.</li>
         <li><strong>Coring + SPT:</strong> rotary core drilling for stiff soil and rock, with SPT in the soil sections.</li>
@@ -164,11 +162,11 @@ function English() {
         <li><strong>CPT / CPTu (sondir):</strong> cone penetration soundings; record the final penetration depth as the final depth.</li>
       </ul>
 
-      <h3>Reference Standards</h3>
+      <h2>Reference Standards</h2>
       <p style={{ marginTop: 0 }}>Field work and classification are normally carried out to the Indonesian national standard (SNI) or its ASTM counterpart:</p>
       <StandardsTable id={false} />
 
-      <h3>How This App Helps</h3>
+      <h2>How This App Helps</h2>
       <ul>
         <li>One place for every borehole log: location, drilling method, depths, groundwater, USCS class and SPT N60.</li>
         <li>Dashboards and weekly/monthly summaries, with optional AI-written briefings for project stakeholders.</li>
@@ -178,7 +176,7 @@ function English() {
           such as gINT, HoleBASE or OpenGround.
         </li>
       </ul>
-    </div>
+    </article>
   )
 }
 

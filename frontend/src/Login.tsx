@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { getPublicConfig, getSetupStatus, requestResetEmail, resetWithCode, resetWithToken } from './api'
 import { lang, setLang, t } from './i18n'
+import { BrandMark } from './ui'
+import { FILL, GRAIN_WIDTH, type Pattern } from './soil'
 
 type Props = {
   onLogin: (email: string, password: string, otp?: string) => Promise<void>
   onSetup: (email: string, password: string) => Promise<void>
   title: string
+  orgName?: string
+  notice?: string
 }
 
 type Mode = 'login' | 'otp' | 'setup' | 'forgot' | 'reset-link'
@@ -16,9 +20,40 @@ function resetTokenFromUrl(): string {
   return hash.startsWith('#reset=') ? decodeURIComponent(hash.slice(7)) : ''
 }
 
-const fieldStyle = { display: 'flex', flexDirection: 'column' as const, gap: '.25rem' }
+const fieldStyle = { display: 'flex', flexDirection: 'column' as const, gap: '.3rem' }
 
-export default function Login({ onLogin, onSetup, title }: Props) {
+// A cross-section of five boreholes: each column's width follows grain size.
+const SECTION: Pattern[][] = [
+  ['silt', 'clay', 'clay', 'sand', 'sand', 'gravel'],
+  ['silt', 'clay', 'sand', 'sand', 'gravel', 'gravel'],
+  ['clay', 'clay', 'clay', 'silt', 'sand', 'gravel'],
+  ['silt', 'clay', 'sand', 'silt', 'sand', 'gravel'],
+  ['clay', 'silt', 'sand', 'sand', 'sand', 'gravel'],
+]
+
+function CrossSection() {
+  const colW = 70, gap = 30, layerH = 34, top = 30
+  return (
+    <svg className="strata-art" viewBox="0 0 520 260" aria-hidden="true" focusable="false">
+      <path d="M0 34 Q 130 18 260 30 T 520 26" fill="none" stroke="#23282d" strokeWidth="1.5" />
+      <path d="M0 112 L520 104" stroke="#1f5f8b" strokeWidth="1.2" strokeDasharray="6 4" />
+      {SECTION.map((col, i) => {
+        const x = 20 + i * (colW + gap)
+        return (
+          <g key={i}>
+            <line x1={x + colW / 2} x2={x + colW / 2} y1={top - 22} y2={top} stroke="#23282d" strokeWidth="2" />
+            {col.map((p, j) => (
+              <rect key={j} x={x} y={top + j * layerH} width={colW * GRAIN_WIDTH[p]} height={layerH}
+                fill={FILL[p]} stroke="#23282d" strokeWidth="1" />
+            ))}
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+export default function Login({ onLogin, onSetup, title, orgName, notice }: Props) {
   const [mode, setMode] = useState<Mode>(() => (resetTokenFromUrl() ? 'reset-link' : 'login'))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -126,25 +161,40 @@ export default function Login({ onLogin, onSetup, title }: Props) {
   const needsNewPassword = mode === 'setup' || mode === 'forgot' || mode === 'reset-link'
 
   return (
-    <div className="card" style={{ maxWidth: '480px', margin: '3rem auto', padding: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '.5rem' }}>
-        <h2 style={{ marginTop: 0 }}>{title}</h2>
-        <button type="button" className="button-secondary" style={{ padding: '.2rem .5rem' }}
-          onClick={() => setLang(lang() === 'id' ? 'en' : 'id')}>{lang() === 'id' ? 'EN' : 'ID'}</button>
+    <div className="auth">
+      <div className="auth-art">
+        <div>
+          <div className="brand" style={{ padding: 0, marginBottom: '2rem' }}>
+            <BrandMark />
+            <span className="brand-name">SoilBoring{orgName && <span className="brand-org">{orgName}</span>}</span>
+          </div>
+          <h1>{t('Daily borehole logs, from the rig to the report.')}</h1>
+          <p>{t('Record boreholes, strata, SPT, samples and core photos. Works without signal, exports AGS4 and prints the bore log sheet.')}</p>
+          <CrossSection />
+        </div>
       </div>
-      <p style={{ color: 'var(--muted)', marginBottom: '1.5rem' }}>{intro[mode]}</p>
+      <div className="auth-form">
+        <div style={{ maxWidth: 380, width: '100%', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '.5rem' }}>
+            <h2 style={{ margin: 0 }}>{button[mode]}</h2>
+            <button type="button" className="quiet small" onClick={() => setLang(lang() === 'id' ? 'en' : 'id')}>
+              {lang() === 'id' ? 'English' : 'Bahasa Indonesia'}
+            </button>
+          </div>
+          <p className="muted" style={{ margin: '.4rem 0 1.25rem' }}>{intro[mode]}</p>
+          {notice && <p className="notice warn" role="alert">{notice}</p>}
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
         {needsEmail && (
           <label style={fieldStyle}>
             {t('Email')}
             <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              placeholder={mode === 'setup' ? 'admin@example.com' : 'operator@example.com'} autoComplete="username" required />
+              placeholder={t('name@company.com')} autoComplete="username" required />
           </label>
         )}
         {mode === 'login' && (
           <label style={fieldStyle}>
             {t('Password')}
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('Password')} autoComplete="current-password" required />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />
           </label>
         )}
         {mode === 'otp' && (
@@ -163,7 +213,7 @@ export default function Login({ onLogin, onSetup, title }: Props) {
         {mode === 'forgot' && (
           <label style={fieldStyle}>
             {t('Authenticator code (only if two-step verification is on)')}
-            <input value={resetOtp} onChange={e => setResetOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} placeholder="123456" />
+            <input value={resetOtp} onChange={e => setResetOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} />
           </label>
         )}
         {needsNewPassword && (
@@ -179,16 +229,18 @@ export default function Login({ onLogin, onSetup, title }: Props) {
             </label>
           </>
         )}
-        <button type="submit" disabled={busy}>{button[mode]}</button>
-        {status && <span style={{ color: 'var(--muted)' }}>{status}</span>}
-        {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
+        <button type="submit" className="primary" disabled={busy}>{button[mode]}</button>
+        {status && <p className="muted small" role="status" style={{ margin: 0 }}>{status}</p>}
+        {error && <p className="notice error" role="alert" style={{ margin: 0 }}>{error}</p>}
       </form>
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem', fontSize: '.9rem' }}>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem', fontSize: '.92rem' }}>
         {mode === 'login' && <a href="#" onClick={e => { e.preventDefault(); switchMode('forgot') }}>{t('Forgot password?')}</a>}
         {mode === 'forgot' && emailReset && <a href="#" onClick={e => { e.preventDefault(); void sendLink() }}>{t('Email me a reset link instead')}</a>}
         {(mode === 'forgot' || mode === 'otp' || mode === 'reset-link') && (
           <a href="#" onClick={e => { e.preventDefault(); if (mode === 'reset-link') history.replaceState(null, '', window.location.pathname); switchMode('login') }}>{t('Back to sign in')}</a>
         )}
+      </div>
+        </div>
       </div>
     </div>
   )

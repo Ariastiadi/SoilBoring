@@ -5,6 +5,7 @@ import { chatLocal, promptBudgetChars, type ChatMessage } from '../localai'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { lang, t } from '../i18n'
+import { PageHead } from '../ui'
 
 // Must stay within the backend limits (20 turns, 4000 characters each, 2000-character question).
 const MAX_HISTORY_MESSAGES = 16
@@ -230,81 +231,70 @@ export default function QA() {
   }
 
   return (
-    <div>
+    <div style={{ maxWidth: 900 }}>
+      <PageHead title="Geo AI" description={t('Ask about the borehole logs in plain language. Answers are based on the data in this app; open the evidence under each answer to check it.')} />
       {serverAI && (
-        <div className="actions" style={{ marginBottom: '.75rem', gap: '1rem', display: 'flex', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '.35rem', margin: 0 }}>
-            <input type="radio" name="qa-engine" checked={engine === 'server'} onChange={() => setEngine('server')} disabled={pending} />
-            {t('Server AI')}
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '.35rem', margin: 0 }}>
-            <input type="radio" name="qa-engine" checked={engine === 'device'} onChange={() => setEngine('device')} disabled={pending} />
-            {t('Qwen on this device (free, offline)')}
-          </label>
+        <div className="segmented" role="group" aria-label={t('AI engine')} style={{ marginBottom: '1rem' }}>
+          <button type="button" aria-pressed={engine === 'server'} onClick={() => setEngine('server')} disabled={pending}>{t('Server AI')}</button>
+          <button type="button" aria-pressed={engine === 'device'} onClick={() => setEngine('device')} disabled={pending}>{t('Qwen on this device (free, offline)')}</button>
         </div>
       )}
       {engine === 'device' && <LocalAISetup ai={ai} />}
-      <div className="row">
-        <div>
+      <div className="card">
+        <div className="field">
           <label htmlFor="qa-question">{t('Question')}</label>
-          <textarea id="qa-question" value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)} placeholder={t('Ask about soil boring progress, groundwater, or lab data...')} />
+          <textarea id="qa-question" rows={3} value={question} maxLength={MAX_QUESTION_CHARS} onChange={e => setQuestion(e.target.value)}
+            placeholder={t('e.g. Which boreholes reached N > 50, and at what depth?')}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void onAsk() }} />
         </div>
-        <div>
-          <label htmlFor="qa-context">{t('Optional Context')}</label>
-          <textarea id="qa-context" value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder={t('Paste related report text or notes (optional)')} />
+        <details style={{ marginTop: '.6rem' }}>
+          <summary className="small" style={{ cursor: 'pointer', color: 'var(--steel)' }}>{t('Add context (optional)')}</summary>
+          <div className="field" style={{ marginTop: '.5rem' }}>
+            <label htmlFor="qa-context">{t('Optional Context')}</label>
+            <textarea id="qa-context" value={context} maxLength={MAX_CONTEXT_CHARS} onChange={e => setContext(e.target.value)} placeholder={t('Paste related report text or notes (optional)')} />
+          </div>
+        </details>
+        <div className="actions" style={{ marginTop: '.75rem' }}>
+          <button type="button" className="primary" onClick={onAsk} disabled={pending || !question.trim() || (engine === 'device' && !ai.ready)}>{t('Ask')}</button>
+          {pending && engine === 'device' && (
+            <button type="button" onClick={() => { stoppedRef.current = true; abortRef.current?.abort() }}>{t('Stop')}</button>
+          )}
+          <span className="muted small" role="status">{status}</span>
+          <span style={{ flex: 1 }} />
+          {history.length > 0 && (
+            <button type="button" className="quiet" onClick={() => {
+              generation.current += 1
+              abortRef.current?.abort()
+              setLive(null)
+              setPending(false)
+              setHistory([])
+              saveHistory([])
+              setStatus(t('Cleared'))
+            }}>{t('Clear Conversation')}</button>
+          )}
         </div>
-      </div>
-      <div className="actions" style={{ marginTop: '.75rem', gap: '.5rem', display: 'flex', alignItems: 'center' }}>
-        <button onClick={onAsk} disabled={pending || !question.trim() || (engine === 'device' && !ai.ready)}>{t('Ask')}</button>
-        {pending && engine === 'device' && (
-          <button onClick={() => { stoppedRef.current = true; abortRef.current?.abort() }}>{t('Stop')}</button>
-        )}
-        <button
-          onClick={() => {
-            generation.current += 1
-            abortRef.current?.abort()
-            setLive(null)
-            setPending(false)
-            setHistory([])
-            saveHistory([])
-            setStatus(t('Cleared'))
-          }}
-          disabled={history.length === 0 && !pending}
-        >
-          {t('Clear Conversation')}
-        </button>
-        <span>{status}</span>
       </div>
       {live && (
-        <div className="card" style={{ marginTop: '1rem' }}>
-          <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>Q{history.length + 1}: {live.q}</div>
-          {live.a ? <RenderedAnswer answer={live.a} /> : <p style={{ color: 'var(--muted)' }}>{ai.state.loading ? t('Loading the model…') : t('Reading the data…')}</p>}
-        </div>
+        <article className="qa-item">
+          <p className="qa-q">{live.q}</p>
+          {live.a ? <RenderedAnswer answer={live.a} /> : <p className="muted">{ai.state.loading ? t('Loading the model…') : t('Reading the data…')}</p>}
+        </article>
       )}
-      {history.length > 0 && (
-        <div style={{ marginTop: '1rem' }}>
-          {[...history].reverse().map((h, idx) => {
-            const qNumber = history.length - idx
-            return (
-            <div key={h.ts} className="card" style={{ marginBottom: '.75rem' }}>
-              <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>Q{qNumber}: {h.q}</div>
-              <RenderedAnswer answer={h.a} />
-              <div className="actions" style={{ marginTop: '.5rem' }}>
-                <button onClick={() => copyAnswer(h.a)}>{t('Copy Answer')}</button>
-              </div>
-              {h.evidence && (
-                <div className="card" style={{ marginTop: '.5rem' }}>
-                  <details>
-                    <summary style={{ cursor: 'pointer' }}>{t('Show Evidence (grounded from CSV)')}</summary>
-                    <EvidenceTable csv={h.evidence} />
-                  </details>
-                </div>
-              )}
-            </div>
-            )
-          })}
-        </div>
-      )}
+      {[...history].reverse().map(h => (
+        <article key={h.ts} className="qa-item">
+          <p className="qa-q">{h.q}</p>
+          <RenderedAnswer answer={h.a} />
+          <div className="actions" style={{ marginTop: '.5rem' }}>
+            <button type="button" className="small" onClick={() => copyAnswer(h.a)}>{t('Copy Answer')}</button>
+          </div>
+          {h.evidence && (
+            <details style={{ marginTop: '.5rem' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--steel)' }} className="small">{t('Show Evidence (grounded from CSV)')}</summary>
+              <EvidenceTable csv={h.evidence} />
+            </details>
+          )}
+        </article>
+      ))}
     </div>
   )
 }
@@ -314,13 +304,5 @@ function RenderedAnswer({ answer }: { answer: string }) {
     const raw = marked.parse(answer ?? '', { breaks: true }) as string
     return DOMPurify.sanitize(raw)
   }, [answer])
-
-  return (
-    <div className="card" style={{ marginTop: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <label style={{ margin: 0 }}>{t('Answer')}</label>
-      </div>
-      <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
-    </div>
-  )
+  return <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
 }

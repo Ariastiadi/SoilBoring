@@ -7,9 +7,12 @@ import BoreLog from './BoreLog'
 import { USCS_OPTIONS } from './options'
 import { locale, t } from './i18n'
 import { setUnsaved } from './unsaved'
+import { Profile } from './Profile'
+import { Icon, formatDate } from './ui'
+import { methodLabel } from './options'
 
 type Row = Record<string, string | undefined>
-type Section = 'layers' | 'spt' | 'samples' | 'core' | 'photos' | 'history'
+type Section = 'profile' | 'layers' | 'spt' | 'samples' | 'core' | 'photos' | 'history'
 
 // Editing keeps every cell as text; numbers are parsed when saving.
 type Cell = Record<string, string>
@@ -163,13 +166,13 @@ function EditableTable({ kind, rows, setRows, canEdit, columns }: {
                 </td>
               )}
               {canEdit && (
-                <td><button type="button" className="button-danger" aria-label={t('Remove row')} onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button></td>
+                <td><button type="button" className="quiet danger-quiet small" aria-label={t('Remove row')} onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button></td>
               )}
             </tr>
           ))}
         </tbody>
       </table>
-      {canEdit && <button type="button" className="button-secondary" style={{ marginTop: '.5rem' }} onClick={add}>+ {t('Add row')}</button>}
+      {canEdit && <button type="button" style={{ marginTop: '.6rem' }} onClick={add}><Icon name="plus" />{t('Add row')}</button>}
     </div>
   )
 }
@@ -265,7 +268,7 @@ function Photos({ boreholeId, photos, canEdit, onChanged }: { boreholeId: string
             <div><label>{t('Depth (m, optional)')}<Field value={depth} onChange={setDepth} /></label></div>
           </div>
           <div className="actions" style={{ alignItems: 'center' }}>
-            <button type="button" onClick={onUpload} disabled={busy}>{t('Upload')}</button>
+            <button type="button" className="primary" onClick={onUpload} disabled={busy}>{t('Upload')}</button>
             <span>{status}</span>
           </div>
         </div>
@@ -278,9 +281,9 @@ function Photos({ boreholeId, photos, canEdit, onChanged }: { boreholeId: string
                 ? <button type="button" className="photo-open" onClick={() => setZoom(urls[p.id])} aria-label={t('Enlarge photo')}><img src={urls[p.id]} alt={p.caption} /></button>
                 : <div style={{ height: 140 }} />}
               <figcaption>
-                {p.caption}{p.depth !== null ? ` · ${p.depth} m` : ''}
+                <span>{p.caption}{p.depth !== null && <span className="muted">, {p.depth} m</span>}</span>
                 {canEdit && (
-                  <button type="button" className="button-danger" style={{ float: 'right', padding: '.1rem .45rem' }} aria-label={t('Delete this photo?')}
+                  <button type="button" className="quiet danger-quiet small" aria-label={t('Delete this photo?')}
                     onClick={async () => {
                       if (!window.confirm(t('Delete this photo?'))) return
                       try { await deletePhoto(p.id); onChanged() } catch (e: any) { setStatus(e.message) }
@@ -315,9 +318,12 @@ export function describeEvent(e: AuditEvent): string {
   return `${label} (${parts.join('; ')})`
 }
 
+/** dd/mm/yyyy hh:mm in local time, the same in every language. */
 export function formatTime(iso: string): string {
   const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(locale())
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 function History({ boreholeId }: { boreholeId: string }) {
@@ -330,13 +336,20 @@ function History({ boreholeId }: { boreholeId: string }) {
   if (!events) return <p>{t('Loading…')}</p>
   if (!events.length) return <p style={{ color: 'var(--muted)' }}>{t('No changes recorded yet.')}</p>
   return (
-    <ul style={{ paddingLeft: '1.1rem' }}>
-      {events.map((e, i) => (
-        <li key={i} style={{ marginBottom: '.35rem' }}>
-          <span style={{ color: 'var(--muted)' }}>{formatTime(e.at)}</span> · <strong>{e.user}</strong> · {describeEvent(e)}
-        </li>
-      ))}
-    </ul>
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead><tr><th>{t('Time')}</th><th>{t('User')}</th><th>{t('Change')}</th></tr></thead>
+        <tbody>
+          {events.map((e, i) => (
+            <tr key={i}>
+              <td className="nowrap muted">{formatTime(e.at)}</td>
+              <td>{e.user}</td>
+              <td>{describeEvent(e)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -344,7 +357,7 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
   const id = report.BoreholeID || ''
   const [details, setDetails] = useState<Details | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [section, setSection] = useState<Section>('layers')
+  const [section, setSection] = useState<Section>('profile')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -399,6 +412,7 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
   }
 
   const sections: Array<[Section, string, number | null]> = [
+    ['profile', t('Profile'), null],
     ['layers', t('Strata'), draft?.layers.length ?? null],
     ['spt', 'SPT', draft?.spt.length ?? null],
     ['samples', t('Samples'), draft?.samples.length ?? null],
@@ -406,105 +420,133 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
     ['photos', t('Photos'), details?.photos.length ?? null],
     ['history', t('History'), null],
   ]
+  const editing = ['layers', 'spt', 'samples', 'core'].includes(section)
+  const num = (v?: string) => { const x = parseFloat(String(v ?? '')); return Number.isFinite(x) ? x : null }
+  const gw = report.GroundwaterEncountered === 'False' || report.GroundwaterEncountered === 'false' ? null : num(report.GroundwaterDepth_m)
+  const profileData = parsed && !checks.errors.length ? parsed : details
 
   return (
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>{t('Borehole')} {id}</h2>
-          <div style={{ color: 'var(--muted)', fontSize: '.9rem' }}>
-            {report.ProjectName} · {report.SiteName} · {t('final depth')} {report.FinalDepth_m || '–'} m
-          </div>
+    <div>
+      <button type="button" className="quiet back" onClick={close}><Icon name="back" />{t('Boreholes')}</button>
+      <header className="detail-head">
+        <div style={{ minWidth: 0 }}>
+          <h1>{id}</h1>
+          <ul className="facts">
+            {report.ProjectName && <li><strong>{report.ProjectName}</strong>{report.SiteName ? `, ${report.SiteName}` : ''}</li>}
+            <li>{formatDate(report.StartDate)}{report.EndDate && report.EndDate !== report.StartDate ? ` – ${formatDate(report.EndDate)}` : ''}</li>
+            <li>{t('Final depth')} <strong>{report.FinalDepth_m || '–'} m</strong>{report.TargetDepth_m ? ` (${t('target {d} m', { d: report.TargetDepth_m })})` : ''}</li>
+            {report.DrillingMethod && <li>{methodLabel(report.DrillingMethod)}</li>}
+            {gw !== null && <li>{t('Groundwater {d} m', { d: gw })}</li>}
+          </ul>
         </div>
-        <div className="actions" style={{ flexWrap: 'wrap' }}>
+        <div className="actions">
           <button type="button" onClick={() => setPrinting(true)} disabled={!details}>{t('Bore log (print / PDF)')}</button>
-          <button type="button" className="button-secondary" onClick={close}>{t('Back to list')}</button>
         </div>
-      </div>
+      </header>
       {error && <p className="notice error">{error}</p>}
-      <div className="subtabs" role="tablist">
-        {sections.map(([key, label, count]) => (
-          <button key={key} type="button" role="tab" aria-selected={section === key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>
-            {label}{count !== null ? ` (${count})` : ''}
-          </button>
-        ))}
-      </div>
-      {!draft || !details ? <p>{t('Loading…')}</p> : (
-        <>
-          {section === 'layers' && (
-            <EditableTable kind="layers" rows={draft.layers} setRows={rows => setDraft({ ...draft, layers: rows })} canEdit={canEdit}
-              columns={[
-                { key: 'top', label: t('From (m)'), width: '6rem' },
-                { key: 'base', label: t('To (m)'), width: '6rem' },
-                { key: 'uscs', label: 'USCS', type: 'uscs', width: '6rem' },
-                { key: 'description', label: t('Soil / rock description'), type: 'long' },
-              ]} />
-          )}
-          {section === 'spt' && (
+      <div className="detail-layout">
+        <nav className="detail-nav subtabs-nav" role="tablist" aria-label={t('Borehole sections')}>
+          {sections.map(([key, label, count]) => (
+            <button key={key} type="button" role="tab" aria-selected={section === key}
+              className={`nav-item${section === key ? ' active' : ''}`} onClick={() => setSection(key)}>
+              {label}{count !== null && <span className="count">{count}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="detail-body">
+          {!draft || !details ? <p>{t('Loading…')}</p> : (
             <>
-              <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginTop: 0 }}>
-                {t('Blows per 150 mm: seating, then the two test increments. N = test increments. For refusal (e.g. 50 blows) enter the test penetration reached in mm.')}
-              </p>
-              <EditableTable kind="spt" rows={draft.spt} setRows={rows => setDraft({ ...draft, spt: rows })} canEdit={canEdit}
-                columns={[
-                  { key: 'depth', label: t('Depth (m)'), width: '6rem' },
-                  { key: 'seat', label: t('Seating'), width: '5rem' },
-                  { key: 'inc1', label: t('Test 1'), width: '5rem' },
-                  { key: 'inc2', label: t('Test 2'), width: '5rem' },
-                  { key: 'penetration_mm', label: t('Refusal at (mm)'), width: '6.5rem' },
-                  { key: 'remarks', label: t('Remarks'), type: 'text' },
-                ]} />
-            </>
-          )}
-          {section === 'samples' && (
-            <EditableTable kind="samples" rows={draft.samples} setRows={rows => setDraft({ ...draft, samples: rows })} canEdit={canEdit}
-              columns={[
-                { key: 'top', label: t('From (m)'), width: '6rem' },
-                { key: 'base', label: t('To (m)'), width: '6rem' },
-                { key: 'type', label: t('Type'), type: 'sampletype', width: '14rem' },
-                { key: 'ref', label: t('Ref.'), type: 'text', width: '6rem' },
-                { key: 'remarks', label: t('Remarks'), type: 'text' },
-              ]} />
-          )}
-          {section === 'core' && (
-            <EditableTable kind="core" rows={draft.core} setRows={rows => setDraft({ ...draft, core: rows })} canEdit={canEdit}
-              columns={[
-                { key: 'top', label: t('From (m)'), width: '6rem' },
-                { key: 'base', label: t('To (m)'), width: '6rem' },
-                { key: 'tcr', label: 'TCR %', width: '5rem' },
-                { key: 'scr', label: 'SCR %', width: '5rem' },
-                { key: 'rqd', label: 'RQD %', width: '5rem' },
-                { key: 'remarks', label: t('Remarks'), type: 'text' },
-              ]} />
-          )}
-          {section === 'photos' && <Photos boreholeId={id} photos={details.photos} canEdit={canEdit} onChanged={() => { getDetails(id).then(setDetails).catch(e => setError(e.message)) }} />}
-          {section === 'history' && <History boreholeId={id} />}
+              {section === 'profile' && profileData && !profileData.layers.length && !profileData.spt.length && (
+                <div className="card">
+                  <h2>{t('No depth data yet')}</h2>
+                  <p className="muted">{canEdit
+                    ? t('Enter the soil layers and SPT results; the profile is drawn from them as you type.')
+                    : t('The person who submitted this log has not entered depth data yet.')}</p>
+                  {canEdit && (
+                    <div className="actions">
+                      <button type="button" className="primary" onClick={() => setSection('layers')}>{t('Enter strata')}</button>
+                      <button type="button" onClick={() => setSection('spt')}>{t('Enter SPT')}</button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {section === 'profile' && profileData && (profileData.layers.length > 0 || profileData.spt.length > 0) && (
+                <>
+                  <p className="muted" style={{ marginTop: 0 }}>{t('Soil layers to depth scale with SPT N alongside. Enter the data under Strata and SPT.')}</p>
+                  <Profile layers={profileData.layers} spt={profileData.spt.map(x => ({ depth: x.depth, n: x.inc1 + (x.inc2 ?? 0), penetration_mm: x.penetration_mm }))}
+                    finalDepth={num(report.FinalDepth_m)} groundwater={gw}
+                    samples={profileData.samples.map(x => ({ top: x.top, type: x.type, ref: x.ref }))} />
+                </>
+              )}
+              {section === 'layers' && (
+                <EditableTable kind="layers" rows={draft.layers} setRows={rows => setDraft({ ...draft, layers: rows })} canEdit={canEdit}
+                  columns={[
+                    { key: 'top', label: t('From (m)'), width: '6rem' },
+                    { key: 'base', label: t('To (m)'), width: '6rem' },
+                    { key: 'uscs', label: 'USCS', type: 'uscs', width: '6rem' },
+                    { key: 'description', label: t('Soil / rock description'), type: 'long' },
+                  ]} />
+              )}
+              {section === 'spt' && (
+                <>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    {t('Blows per 150 mm: seating, then the two test increments. N = test increments. For refusal (e.g. 50 blows) enter the test penetration reached in mm.')}
+                  </p>
+                  <EditableTable kind="spt" rows={draft.spt} setRows={rows => setDraft({ ...draft, spt: rows })} canEdit={canEdit}
+                    columns={[
+                      { key: 'depth', label: t('Depth (m)'), width: '6rem' },
+                      { key: 'seat', label: t('Seating'), width: '5rem' },
+                      { key: 'inc1', label: t('Test 1'), width: '5rem' },
+                      { key: 'inc2', label: t('Test 2'), width: '5rem' },
+                      { key: 'penetration_mm', label: t('Refusal at (mm)'), width: '6.5rem' },
+                      { key: 'remarks', label: t('Remarks'), type: 'text' },
+                    ]} />
+                </>
+              )}
+              {section === 'samples' && (
+                <EditableTable kind="samples" rows={draft.samples} setRows={rows => setDraft({ ...draft, samples: rows })} canEdit={canEdit}
+                  columns={[
+                    { key: 'top', label: t('From (m)'), width: '6rem' },
+                    { key: 'base', label: t('To (m)'), width: '6rem' },
+                    { key: 'type', label: t('Type'), type: 'sampletype', width: '14rem' },
+                    { key: 'ref', label: t('Ref.'), type: 'text', width: '6rem' },
+                    { key: 'remarks', label: t('Remarks'), type: 'text' },
+                  ]} />
+              )}
+              {section === 'core' && (
+                <EditableTable kind="core" rows={draft.core} setRows={rows => setDraft({ ...draft, core: rows })} canEdit={canEdit}
+                  columns={[
+                    { key: 'top', label: t('From (m)'), width: '6rem' },
+                    { key: 'base', label: t('To (m)'), width: '6rem' },
+                    { key: 'tcr', label: 'TCR %', width: '5rem' },
+                    { key: 'scr', label: 'SCR %', width: '5rem' },
+                    { key: 'rqd', label: 'RQD %', width: '5rem' },
+                    { key: 'remarks', label: t('Remarks'), type: 'text' },
+                  ]} />
+              )}
+              {section === 'photos' && <Photos boreholeId={id} photos={details.photos} canEdit={canEdit} onChanged={() => { getDetails(id).then(setDetails).catch(e => setError(e.message)) }} />}
+              {section === 'history' && <History boreholeId={id} />}
 
-          {['layers', 'spt', 'samples', 'core'].includes(section) && (
-            <>
-              {issues.length > 0 && (
+              {editing && issues.length > 0 && (
                 <div className="notice warn">
                   <ul style={{ margin: 0, paddingLeft: '1.1rem' }}>{issues.map((p, i) => <li key={i}>{p}</li>)}</ul>
                 </div>
               )}
-              {canEdit ? (
-                <div className="actions" style={{ marginTop: '.75rem', alignItems: 'center' }}>
-                  <button type="button" onClick={save} disabled={saving || !dirty}>{t('Save depth data')}</button>
-                  {dirty && <span style={{ color: 'var(--muted)' }}>{t('Unsaved changes')}</span>}
-                  <span>{status}</span>
-                </div>
-              ) : (
-                <p style={{ color: 'var(--muted)' }}>{t('Only the person who submitted this log, or an admin, can change it.')}</p>
+              {editing && !canEdit && <p className="muted">{t('Only the person who submitted this log, or an admin, can change it.')}</p>}
+              {(editing || section === 'profile') && details.updated_at && (
+                <p className="muted small">{t('Last saved {when} by {who}', { when: formatTime(details.updated_at), who: details.updated_by || '–' })}</p>
               )}
-              {details.updated_at && (
-                <p style={{ color: 'var(--muted)', fontSize: '.8rem' }}>
-                  {t('Last saved {when} by {who}', { when: formatTime(details.updated_at), who: details.updated_by || '–' })}
-                </p>
+              {canEdit && (dirty || (editing && status)) && (
+                <div className="save-bar" role="region" aria-label={t('Save depth data')}>
+                  <span className="grow">{dirty ? <span className="status warn">{t('Unsaved changes')}</span> : null} <span role="status">{status}</span></span>
+                  {dirty && <button type="button" className="quiet" onClick={() => { if (window.confirm(t('Discard your changes to the depth data?'))) { setDraft(toDraft(details)); setStatus('') } }}>{t('Discard changes')}</button>}
+                  <button type="button" className="primary" onClick={save} disabled={saving || !dirty}>{t('Save depth data')}</button>
+                </div>
               )}
             </>
           )}
-        </>
-      )}
+        </div>
+      </div>
       {printing && details && draft && parsed && (
         <BoreLog report={report} details={checks.errors.length ? details : ({ ...details, ...parsed } as Details)}
           onClose={() => setPrinting(false)} />

@@ -19,7 +19,7 @@ function CodesBox({ codes, onDone }: { codes: string[], onDone: () => void }) {
       <div className="actions" style={{ marginTop: '.75rem', flexWrap: 'wrap' }}>
         <button type="button" onClick={() => navigator.clipboard?.writeText(text)}>{t('Copy')}</button>
         <button type="button" onClick={download}>{t('Download .txt')}</button>
-        <button type="button" className="button-secondary" onClick={onDone}>{t('I saved them')}</button>
+        <button type="button" className="primary" onClick={onDone}>{t('I saved them')}</button>
       </div>
     </div>
   )
@@ -87,12 +87,12 @@ export default function Security() {
 
   if (!me) return <p>{status || t('Loading…')}</p>
   return (
-    <div className="card" style={{ maxWidth: 560, margin: '1rem auto', display: 'grid', gap: '.75rem' }}>
-      <h3 style={{ margin: 0 }}>{t('Two-step verification')}</h3>
+    <section className="card" style={{ display: 'grid', gap: '.75rem' }}>
+      <h2 style={{ margin: 0 }}>{t('Two-step verification')}</h2>
       {codes && <CodesBox codes={codes} onDone={() => setCodes(null)} />}
       {me.totp_enabled ? (
         <>
-          <p style={{ margin: 0 }}>✅ {t('On. Signing in needs your password and a 6-digit code from your authenticator app.')}</p>
+          <p style={{ margin: 0 }}><span className="status ok">{t('On')}</span> {t('Signing in needs your password and a 6-digit code from your authenticator app.')}</p>
           <form onSubmit={turnOff} className="actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label style={{ display: 'grid', gap: '.25rem' }}>{t('Password')}
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />
@@ -100,7 +100,7 @@ export default function Security() {
             <label style={{ display: 'grid', gap: '.25rem' }}>{t('6-digit code from the app')}
               <input value={offCode} onChange={e => setOffCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} required />
             </label>
-            <button type="submit" className="button-danger" disabled={busy}>{t('Turn off')}</button>
+            <button type="submit" className="danger-quiet" disabled={busy}>{t('Turn off')}</button>
           </form>
         </>
       ) : setup ? (
@@ -111,16 +111,16 @@ export default function Security() {
           <label style={{ display: 'grid', gap: '.25rem' }}>{t('2. Type the 6-digit code the app shows')}
             <input value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} required />
           </label>
-          <div className="actions"><button type="submit" disabled={busy}>{t('Turn on')}</button><button type="button" className="button-secondary" onClick={() => setSetup(null)}>{t('Cancel')}</button></div>
+          <div className="actions"><button type="submit" className="primary" disabled={busy}>{t('Turn on')}</button><button type="button" onClick={() => setSetup(null)}>{t('Cancel')}</button></div>
         </form>
       ) : (
         <>
-          <p style={{ margin: 0 }}>{t('Off. Turn it on so a stolen password alone cannot open your account.')}</p>
-          <div className="actions"><button type="button" onClick={begin} disabled={busy}>{t('Set up two-step verification')}</button></div>
+          <p style={{ margin: 0 }}><span className="status">{t('Off')}</span> {t('Turn it on so a stolen password alone cannot open your account.')}</p>
+          <div className="actions"><button type="button" className="primary" onClick={begin} disabled={busy}>{t('Set up two-step verification')}</button></div>
         </>
       )}
-      <hr style={{ border: 0, borderTop: '1px solid var(--border)', width: '100%' }} />
-      <h3 style={{ margin: 0 }}>{t('Recovery codes')}</h3>
+      <hr style={{ border: 0, borderTop: '1px solid var(--line)', width: '100%', margin: '.25rem 0' }} />
+      <h2 style={{ margin: 0 }}>{t('Recovery codes')}</h2>
       <p style={{ margin: 0 }}>
         {t('Recovery codes let you set a new password yourself when you forget it.')} {t('Codes left: {n}', { n: me.recovery_codes_left })}
       </p>
@@ -131,6 +131,6 @@ export default function Security() {
         <button type="submit" disabled={busy}>{me.recovery_codes_left ? t('Create new codes (old ones stop working)') : t('Create recovery codes')}</button>
       </form>
       {status && <p role="status" style={{ margin: 0 }}>{status}</p>}
-    </div>
+    </section>
   )
 }

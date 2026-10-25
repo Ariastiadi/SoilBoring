@@ -1,68 +1,24 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
-import { deleteReport, downloadAgs, listReports, updateReport } from '../api'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { deleteReport, downloadAgs, getDepthOverview, listReports, updateReport, type DepthOverview } from '../api'
 import { CORE_SIZES, METHOD_OPTIONS, USCS_OPTIONS, coreSizeLabel, methodLabel, withCurrent } from '../options'
+import { discardOutboxItem, retryOutboxItem, type OutboxItem } from '../outbox'
 import { t } from '../i18n'
 import BoreholeDetail from '../BoreholeDetail'
+import { StrataStrip } from '../Profile'
+import { DateInput, Icon, PageHead, formatDate, todayIso } from '../ui'
 
 // The map library is only downloaded when the map is opened.
 const BoreholeMap = lazy(() => import('../BoreholeMap'))
 
-const PAGE_SIZE_OPTIONS = [5, 10, 15, 25]
-const BOREHOLE_COLUMNS = [
-  'BoreholeID',
-  'ProjectName',
-  'SiteName',
-  'StartDate',
-  'EndDate',
-  'DrillingMethod',
-  'DrillRig',
-  'CoreSize',
-  'BoreholeDiameter_mm',
-  'TargetDepth_m',
-  'FinalDepth_m',
-  'GroundwaterDepth_m',
-  'GroundwaterEncountered',
-  'USCS_Class',
-  'Avg_SPT_N60',
-  'Contractor',
-  'LoggingGeologist',
-  'Latitude',
-  'Longitude',
-  'GroundElevation_mRL',
-  'CasingInstalled_mm',
-  'SoilDescription',
-  'Remarks',
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+// Every stored column, in this order, for the CSV export.
+const CSV_COLUMNS = [
+  'BoreholeID', 'ProjectName', 'SiteName', 'StartDate', 'EndDate', 'DrillingMethod', 'DrillRig', 'CoreSize',
+  'BoreholeDiameter_mm', 'TargetDepth_m', 'FinalDepth_m', 'GroundwaterDepth_m', 'GroundwaterEncountered',
+  'USCS_Class', 'Avg_SPT_N60', 'Contractor', 'LoggingGeologist', 'Latitude', 'Longitude', 'GroundElevation_mRL',
+  'CasingInstalled_mm', 'SoilDescription', 'Remarks', 'SubmittedBy',
 ]
-
-// Readable column headings; the data keys (used for sorting, filtering and the CSV) stay unchanged.
-const COLUMN_LABELS: Record<string, string> = {
-  BoreholeID: t('Borehole ID'),
-  ProjectName: t('Project'),
-  SiteName: t('Site / Zone'),
-  StartDate: t('Start Date'),
-  EndDate: t('End Date'),
-  DrillingMethod: t('Drilling Method'),
-  DrillRig: t('Drill Rig / Plant'),
-  CoreSize: t('Core Size'),
-  BoreholeDiameter_mm: t('Borehole Diameter (mm)'),
-  TargetDepth_m: t('Target Depth (m)'),
-  FinalDepth_m: t('Final Depth (m)'),
-  GroundwaterDepth_m: t('Groundwater Depth (m)'),
-  GroundwaterEncountered: t('Groundwater Encountered'),
-  USCS_Class: t('USCS Class'),
-  Avg_SPT_N60: t('Avg SPT N60'),
-  Contractor: t('Contractor'),
-  LoggingGeologist: t('Logging Geologist'),
-  Latitude: t('Latitude'),
-  Longitude: t('Longitude'),
-  GroundElevation_mRL: t('Ground Elevation (mRL)'),
-  CasingInstalled_mm: t('Casing Installed (mm)'),
-  SoilDescription: t('Soil Description'),
-  Remarks: t('Remarks'),
-  SubmittedBy: t('Submitted By'),
-}
-
-const columnLabel = (key: string) => COLUMN_LABELS[key] ?? key
 
 // Quotes a CSV cell and neutralises spreadsheet formulas (=, +, -, @) so a malicious
 // log entry cannot execute when the export is opened in Excel/Sheets.
@@ -90,12 +46,42 @@ const EDITABLE_FIELDS: Array<{ key: string; label: string; type?: string }> = [
 ]
 
 type Viewer = { email: string, role: 'admin' | 'general' }
+type Row = Record<string, any>
+export type BoreStatus = 'drilling' | 'complete' | 'partial' | 'none'
+type StatusFilter = 'all' | 'drilling' | 'todo' | 'complete'
 
-export default function DailyReportData({ user }: { user: Viewer }) {
-  const [reports, setReports] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
+const num = (v: unknown) => {
+  const n = parseFloat(String(v ?? ''))
+  return Number.isFinite(n) ? n : null
+}
+
+export function statusOf(row: Row, overview: DepthOverview, today = todayIso()): BoreStatus {
+  if (row.EndDate && String(row.EndDate) >= today) return 'drilling'
+  const o = overview[row.BoreholeID]
+  if (!o || (!o.layers.length && !o.spt.length)) return 'none'
+  const final = num(row.FinalDepth_m)
+  const deepest = Math.max(0, ...o.layers.map(l => l.base))
+  if (o.layers.length && o.spt.length && (final === null || deepest >= final - 0.5)) return 'complete'
+  return 'partial'
+}
+
+const STATUS_LABEL: Record<BoreStatus, string> = {
+  drilling: 'Drilling in progress',
+  complete: 'Depth data complete',
+  partial: 'Depth data incomplete',
+  none: 'No depth data yet',
+}
+const STATUS_CLASS: Record<BoreStatus, string> = { drilling: 'active', complete: 'ok', partial: 'warn', none: '' }
+const STATUS_COLOR: Record<BoreStatus, string> = { drilling: '#1f5f8b', complete: '#2e7d4f', partial: '#d08a12', none: '#9aa0a5' }
+
+type SortKey = 'BoreholeID' | 'StartDate' | 'FinalDepth_m' | 'Avg_SPT_N60'
+
+export default function Boreholes({ user, outbox = [], onNew }: { user: Viewer, outbox?: OutboxItem[], onNew?: () => void }) {
+  const [reports, setReports] = useState<Row[]>([])
+  const [overview, setOverview] = useState<DepthOverview>({})
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
+  const [pageSize, setPageSize] = useState(25)
   const [page, setPage] = useState(0)
   const [search, setSearch] = useState('')
   const [projectFilter, setProjectFilter] = useState('')
@@ -104,7 +90,9 @@ export default function DailyReportData({ user }: { user: Viewer }) {
   const [uscsFilter, setUscsFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [sortKey, setSortKey] = useState<string | null>('StartDate')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [moreFilters, setMoreFilters] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('StartDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [actionStatus, setActionStatus] = useState('')
   const [editTarget, setEditTarget] = useState<string | null>(null)
@@ -112,15 +100,16 @@ export default function DailyReportData({ user }: { user: Viewer }) {
   const [editOriginal, setEditOriginal] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [showMap, setShowMap] = useState(false)
+  const [showMap, setShowMap] = useState(() => {
+    try { return localStorage.getItem('soilboring-show-map') === '1' } catch { return false }
+  })
 
-  // Keeps the current page after an edit or delete; only the first load starts at page 1.
   const loadReports = async () => {
-    setLoading(true)
     setError('')
     try {
-      const data = await listReports()
+      const [data, ov] = await Promise.all([listReports(), getDepthOverview().catch(() => ({}))])
       setReports(Array.isArray(data) ? data : [])
+      setOverview(ov)
     } catch (err: any) {
       setError(err.message || t('Failed to load reports'))
     } finally {
@@ -128,23 +117,25 @@ export default function DailyReportData({ user }: { user: Viewer }) {
     }
   }
 
-  useEffect(() => {
-    void loadReports()
-  }, [])
+  useEffect(() => { void loadReports() }, [])
+  // A log sent from the outbox appears in the list without a manual refresh.
+  useEffect(() => { if (!loading) void loadReports() }, [outbox.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const toggleMap = () => {
+    setShowMap(v => {
+      try { localStorage.setItem('soilboring-show-map', v ? '0' : '1') } catch { /* ignore */ }
+      return !v
+    })
+  }
 
-  const columns = useMemo(() => {
-    if (!reports.length) return []
-    const keySet = new Set<string>()
-    reports.forEach(r => Object.keys(r || {}).forEach(k => keySet.add(k)))
-    const pickOrder = (order: string[]) => order.filter(k => keySet.has(k))
-    const borehole = pickOrder(BOREHOLE_COLUMNS)
-    const extra = pickOrder(['SubmittedBy'])
-    if (borehole.length) return [...borehole, ...extra]
-    return Array.from(keySet)
-  }, [reports])
+  const today = todayIso()
+  const statuses = useMemo(() => {
+    const out: Record<string, BoreStatus> = {}
+    reports.forEach(r => { out[r.BoreholeID] = statusOf(r, overview, today) })
+    return out
+  }, [reports, overview, today])
 
-  const filteredReports = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     const term = search.trim().toLowerCase()
     return reports.filter(r => {
       if (!r) return false
@@ -155,84 +146,69 @@ export default function DailyReportData({ user }: { user: Viewer }) {
       if (dateFrom && r.StartDate && r.StartDate < dateFrom) return false
       if (dateTo && r.EndDate && r.EndDate > dateTo) return false
       if (!term) return true
-      const joined = Object.values(r)
-        .map(v => (v ?? '').toString().toLowerCase())
-        .join(' ')
-      return joined.includes(term)
+      return Object.values(r).map(v => (v ?? '').toString().toLowerCase()).join(' ').includes(term)
     })
   }, [reports, search, projectFilter, siteFilter, methodFilter, uscsFilter, dateFrom, dateTo])
 
-  const sortedReports = useMemo(() => {
-    if (!sortKey) return filteredReports
-    const sorted = [...filteredReports].sort((a: any, b: any) => {
-      const left = String(a?.[sortKey] ?? '').trim()
-      const right = String(b?.[sortKey] ?? '').trim()
-      // Empty cells always go last; Number('') would otherwise count them as 0.
+  const counts = useMemo(() => {
+    const c = { all: baseFiltered.length, drilling: 0, todo: 0, complete: 0 }
+    baseFiltered.forEach(r => {
+      const s = statuses[r.BoreholeID]
+      if (s === 'drilling') c.drilling++
+      else if (s === 'complete') c.complete++
+      else c.todo++
+    })
+    return c
+  }, [baseFiltered, statuses])
+
+  const filtered = useMemo(() => baseFiltered.filter(r => {
+    const s = statuses[r.BoreholeID]
+    if (statusFilter === 'drilling') return s === 'drilling'
+    if (statusFilter === 'complete') return s === 'complete'
+    if (statusFilter === 'todo') return s === 'partial' || s === 'none'
+    return true
+  }), [baseFiltered, statuses, statusFilter])
+
+  const sorted = useMemo(() => {
+    const value = (r: Row) => String(r?.[sortKey] ?? '').trim()
+    const list = [...filtered].sort((a, b) => {
+      const left = value(a), right = value(b)
       if (!left || !right) return left === right ? 0 : left ? -1 : 1
-      const ln = Number(left)
-      const rn = Number(right)
+      const ln = Number(left), rn = Number(right)
       if (Number.isFinite(ln) && Number.isFinite(rn)) return ln - rn
       return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
     })
-    if (sortDir === 'asc') return sorted
+    if (sortDir === 'asc') return list
     // Reverse only the filled cells so empty ones stay at the bottom in both directions.
-    const filled = sorted.filter((r: any) => String(r?.[sortKey] ?? '').trim() !== '')
-    const empty = sorted.filter((r: any) => String(r?.[sortKey] ?? '').trim() === '')
-    return [...filled.reverse(), ...empty]
-  }, [filteredReports, sortKey, sortDir])
+    return [...list.filter(r => value(r)).reverse(), ...list.filter(r => !value(r))]
+  }, [filtered, sortKey, sortDir])
 
-  // A new search, filter or sort order starts again at the first page.
-  useEffect(() => {
-    setPage(0)
-  }, [search, projectFilter, siteFilter, methodFilter, uscsFilter, dateFrom, dateTo, sortKey, sortDir])
+  useEffect(() => { setPage(0) }, [search, projectFilter, siteFilter, methodFilter, uscsFilter, dateFrom, dateTo, sortKey, sortDir, statusFilter])
 
-  const totalPages = sortedReports.length ? Math.ceil(sortedReports.length / pageSize) : 0
-  const safePage = totalPages ? Math.min(page, totalPages - 1) : 0
-  const startIdx = sortedReports.length ? safePage * pageSize : 0
-  const endIdx = sortedReports.length ? Math.min(sortedReports.length, startIdx + pageSize) : 0
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const safePage = Math.min(page, totalPages - 1)
+  const pageRows = sorted.slice(safePage * pageSize, safePage * pageSize + pageSize)
 
-  const pageRows = useMemo(() => {
-    if (!sortedReports.length) return []
-    return sortedReports.slice(startIdx, endIdx)
-  }, [sortedReports, startIdx, endIdx])
-
-  const handlePageSize = (value: number) => {
-    setPageSize(value)
-    setPage(0)
-  }
-
-  // Keep the stored page inside the (filtered) result, e.g. after deleting the last row of a page.
-  useEffect(() => {
-    if (page !== safePage) setPage(safePage)
-  }, [page, safePage])
-
-  const nextDisabled = !sortedReports.length || safePage + 1 >= totalPages
-  const prevDisabled = safePage === 0
-
-  const uniqueValues = useMemo(() => {
-    const getUnique = (key: string) => Array.from(new Set(reports.map(r => r?.[key]).filter(Boolean))).sort()
-    return {
-      projects: getUnique('ProjectName'),
-      sites: getUnique('SiteName'),
-      methods: getUnique('DrillingMethod'),
-      uscs: getUnique('USCS_Class'),
-    }
+  const unique = useMemo(() => {
+    const get = (key: string) => Array.from(new Set(reports.map(r => r?.[key]).filter(Boolean))).sort() as string[]
+    return { projects: get('ProjectName'), sites: get('SiteName'), methods: get('DrillingMethod'), uscs: get('USCS_Class') }
   }, [reports])
 
-  const toggleSort = (col: string) => {
-    if (sortKey === col) {
-      setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortKey(col)
-      setSortDir('asc')
-    }
+  const extraFilters = [siteFilter, methodFilter, uscsFilter, dateFrom, dateTo].filter(Boolean).length
+  const anyFilter = Boolean(search || projectFilter || extraFilters || statusFilter !== 'all')
+  const clearFilters = () => {
+    setSearch(''); setProjectFilter(''); setSiteFilter(''); setMethodFilter(''); setUscsFilter('')
+    setDateFrom(''); setDateTo(''); setStatusFilter('all')
   }
 
-  const closeEdit = () => {
-    setEditTarget(null)
-    setEditDraft({})
-    setEditOriginal({})
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir(key === 'BoreholeID' ? 'asc' : 'desc') }
   }
+  const sortMark = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? '▲' : '▼') : '')
+  const ariaSort = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none')
+
+  const closeEdit = () => { setEditTarget(null); setEditDraft({}); setEditOriginal({}) }
 
   const handleDelete = async (boreholeId: string) => {
     if (!boreholeId || busy) return
@@ -242,7 +218,7 @@ export default function DailyReportData({ user }: { user: Viewer }) {
     try {
       await deleteReport(boreholeId)
       if (editTarget === boreholeId) closeEdit()
-      setActionStatus(t('Deleted'))
+      setActionStatus(t('Borehole {id} deleted.', { id: boreholeId }))
       await loadReports()
     } catch (err: any) {
       setActionStatus(t('Error: {message}', { message: err.message }))
@@ -251,17 +227,15 @@ export default function DailyReportData({ user }: { user: Viewer }) {
     }
   }
 
-  const startEdit = (row: any) => {
+  const startEdit = (row: Row) => {
     if (!row?.BoreholeID) return
     setEditTarget(row.BoreholeID)
     const draft: Record<string, string> = {}
-    EDITABLE_FIELDS.forEach(({ key }) => {
-      draft[key] = row[key] === null || row[key] === undefined ? '' : String(row[key])
-    })
+    EDITABLE_FIELDS.forEach(({ key }) => { draft[key] = row[key] === null || row[key] === undefined ? '' : String(row[key]) })
     setEditDraft(draft)
     setEditOriginal(draft)
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    setActionStatus(t('Editing {id}', { id: row.BoreholeID }))
+    setActionStatus('')
   }
 
   const saveEdit = async (e: React.FormEvent) => {
@@ -269,19 +243,13 @@ export default function DailyReportData({ user }: { user: Viewer }) {
     if (!editTarget || busy) return
     // Send only what was changed, so untouched (possibly legacy-formatted) values are never rewritten.
     const changes: Record<string, string> = {}
-    Object.entries(editDraft).forEach(([key, value]) => {
-      if (value !== editOriginal[key]) changes[key] = value
-    })
-    if (!Object.keys(changes).length) {
-      setActionStatus(t('No changes to save'))
-      closeEdit()
-      return
-    }
+    Object.entries(editDraft).forEach(([key, value]) => { if (value !== editOriginal[key]) changes[key] = value })
+    if (!Object.keys(changes).length) { closeEdit(); return }
     setBusy(true)
     setActionStatus(t('Saving changes...'))
     try {
       await updateReport(editTarget, changes)
-      setActionStatus(t('Saved'))
+      setActionStatus(t('Borehole {id} saved.', { id: editTarget }))
       closeEdit()
       await loadReports()
     } catch (err: any) {
@@ -307,13 +275,12 @@ export default function DailyReportData({ user }: { user: Viewer }) {
   }
 
   const exportCsv = () => {
-    if (!columns.length || !sortedReports.length) return
-    const header = columns.map(csvCell).join(',')
-    const rows = sortedReports.map(row => columns.map(col => csvCell(row?.[col])).join(','))
+    if (!sorted.length) return
+    const header = CSV_COLUMNS.map(csvCell).join(',')
+    const rows = sorted.map(row => CSV_COLUMNS.map(col => csvCell(row?.[col])).join(','))
     // BOM so Excel opens UTF-8 text (e.g. Indonesian place names) correctly.
-    const content = '\uFEFF' + [header, ...rows].join('\r\n')
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
+    const content = '﻿' + [header, ...rows].join('\r\n')
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8;' }))
     const link = document.createElement('a')
     link.href = url
     link.download = 'borehole-logs.csv'
@@ -324,215 +291,310 @@ export default function DailyReportData({ user }: { user: Viewer }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
+  const colorFor = useCallback((r: Row) => STATUS_COLOR[statuses[r.BoreholeID] || 'none'], [statuses])
 
-  const canEdit = (row: any) =>
+  const canEdit = (row: Row) =>
     user.role === 'admin' || String(row?.SubmittedBy || '').toLowerCase() === user.email.toLowerCase()
   const opened = openId ? reports.find(r => r.BoreholeID === openId) : null
   if (opened) {
-    return <BoreholeDetail report={opened} canEdit={canEdit(opened)} onClose={() => setOpenId(null)} />
+    return <BoreholeDetail report={opened} canEdit={canEdit(opened)} onClose={() => { setOpenId(null); void loadReports() }} />
   }
+
+  const projects = new Set(reports.map(r => r.ProjectName).filter(Boolean)).size
+  const metres = reports.reduce((sum, r) => sum + (num(r.FinalDepth_m) || 0), 0)
+  const todo = Object.values(statuses).filter(s => s === 'partial' || s === 'none').length
+
+  const summary = reports.length ? (
+    <>
+      {t('{n} boreholes in {p} projects, {m} m drilled in total.', { n: reports.length, p: projects, m: Number(metres.toFixed(1)) })}{' '}
+      {todo > 0 ? t('{n} still need depth data.', { n: todo }) : t('All have depth data.')}
+    </>
+  ) : t('No borehole logs have been submitted yet.')
+
+  const exportMenu = (
+    <details className="menu">
+      <summary className="button-like"><Icon name="download" />{t('Export')}</summary>
+      <div className="menu-pop">
+        <button type="button" onClick={exportCsv} disabled={!sorted.length}>{t('CSV (rows shown)')}</button>
+        <button type="button" onClick={exportAgs} disabled={!projectFilter || busy}>{t('AGS4 for the chosen project')}</button>
+        {!projectFilter && <p className="hint">{t('Choose a project in the Project filter first')}</p>}
+      </div>
+    </details>
+  )
+
+  const queued = outbox.map(item => {
+    const d = item.data as Row
+    return (
+      <tr key={`q-${item.id}`} className="queued-row" style={{ cursor: 'default' }}>
+        <td className="c-strip"><StrataStrip layers={[]} depth={num(d.FinalDepth_m)} title={t('Not sent yet')} /></td>
+        <td className="c-id"><div className="bh-id">{String(d.BoreholeID || '')}</div><div className="bh-sub">{[d.ProjectName, d.SiteName].filter(Boolean).join(', ')}</div></td>
+        <td className="c-dates nowrap">{formatDate(String(d.StartDate || ''))}</td>
+        <td className="c-depth num">{d.FinalDepth_m ? `${d.FinalDepth_m} m` : '–'}</td>
+        <td className="c-n num">{String(d.Avg_SPT_N60 || '–')}</td>
+        <td className="c-uscs">{String(d.USCS_Class || '')}</td>
+        <td className="c-status">
+          {item.error
+            ? <span className="status" style={{ color: 'var(--danger)', whiteSpace: 'normal' }}>{t('Refused: {why}', { why: item.error })}</span>
+            : <span className="status queued">{t('Waiting to be sent')}</span>}
+        </td>
+        <td className="c-act nowrap">
+          {item.error && (
+            <>
+              <button type="button" className="small" onClick={() => retryOutboxItem(item.id)}>{t('Retry')}</button>{' '}
+              <button type="button" className="small danger-quiet" onClick={() => { if (window.confirm(t('Discard this unsent log?'))) discardOutboxItem(item.id) }}>{t('Discard')}</button>
+            </>
+          )}
+        </td>
+      </tr>
+    )
+  })
 
   return (
     <div>
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ marginTop: 0 }}>{t('Find & Filter')}</h3>
-        <div className="row">
-          <div>
-            <label htmlFor="filter-search">{t('Search')}</label>
-            <input id="filter-search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Search any field...')} />
-            <label htmlFor="filter-project">{t('Project')}</label>
-            <select id="filter-project" value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
-              <option value="">{t('All')}</option>
-              {uniqueValues.projects.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <label htmlFor="filter-site">{t('Site')}</label>
-            <select id="filter-site" value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
-              <option value="">{t('All')}</option>
-              {uniqueValues.sites.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="filter-method">{t('Method')}</label>
-            <select id="filter-method" value={methodFilter} onChange={e => setMethodFilter(e.target.value)}>
-              <option value="">{t('All')}</option>
-              {uniqueValues.methods.map(m => <option key={m} value={m}>{methodLabel(m)}</option>)}
-            </select>
-            <label htmlFor="filter-uscs">USCS</label>
-            <select id="filter-uscs" value={uscsFilter} onChange={e => setUscsFilter(e.target.value)}>
-              <option value="">{t('All')}</option>
-              {uniqueValues.uscs.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
-            <label>{t('Date range (Start -> End)')}</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem' }}>
-              <input type="date" aria-label={t('Start date from')} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-              <input type="date" aria-label={t('End date to')} value={dateTo} onChange={e => setDateTo(e.target.value)} />
-            </div>
-          </div>
-        </div>
-        <div className="actions" style={{ marginTop: '.5rem', flexWrap: 'wrap', gap: '.5rem' }}>
-          <button onClick={() => { setSearch(''); setProjectFilter(''); setSiteFilter(''); setMethodFilter(''); setUscsFilter(''); setDateFrom(''); setDateTo(''); }}>{t('Clear Filters')}</button>
-          <button onClick={exportCsv} disabled={!sortedReports.length}>{t('Export CSV')}</button>
-          <button
-            onClick={exportAgs}
-            disabled={!projectFilter || busy}
-            title={projectFilter ? t('AGS4 file with every log of {project}', { project: projectFilter }) : t('Choose a project in the Project filter first')}
-          >
-            {t('Export AGS4')}
-          </button>
-          <button onClick={() => setShowMap(v => !v)}>{showMap ? t('Hide Map') : t('Show Map')}</button>
-          <span>{actionStatus}</span>
-        </div>
-      </div>
-
-      {showMap && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <Suspense fallback={<p>{t('Loading map…')}</p>}>
-            <BoreholeMap reports={sortedReports} onOpen={setOpenId} />
-          </Suspense>
-        </div>
-      )}
+      <PageHead
+        title={t('Boreholes')}
+        description={summary}
+        actions={<>
+          <button type="button" onClick={toggleMap} aria-pressed={showMap}><Icon name={showMap ? 'list' : 'map'} />{showMap ? t('Hide map') : t('Show map')}</button>
+          {exportMenu}
+          {onNew && <button type="button" className="primary" onClick={onNew}><Icon name="plus" />{t('New log')}</button>}
+        </>}
+      />
 
       {editTarget && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ marginTop: 0 }}>{t('Edit Borehole {id}', { id: editTarget })}</h3>
-          <form onSubmit={saveEdit} className="row">
-            {EDITABLE_FIELDS.map(field => (
-              <div key={field.key}>
-                <label htmlFor={`edit-${field.key}`}>{field.label}</label>
-                {field.key === 'USCS_Class' ? (
-                  <select id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
-                    <option value="">{t('Select')}</option>
-                    {withCurrent(USCS_OPTIONS, editOriginal[field.key]).map(code => (
-                      <option key={code} value={code}>{code}</option>
-                    ))}
-                  </select>
-                ) : field.key === 'DrillingMethod' ? (
-                  <select id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
-                    <option value="">{t('Select')}</option>
-                    {withCurrent(METHOD_OPTIONS, editOriginal[field.key]).map(m => (
-                      <option key={m} value={m}>{methodLabel(m)}</option>
-                    ))}
-                  </select>
-                ) : field.key === 'CoreSize' ? (
-                  <select id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}>
-                    <option value="">{t('Not cored')}</option>
-                    {CORE_SIZES.map(s => <option key={s.code} value={s.code}>{coreSizeLabel(s.code)}</option>)}
-                  </select>
-                ) : field.key === 'Remarks' ? (
-                  <textarea id={`edit-${field.key}`} value={editDraft[field.key] ?? ''} onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))} />
-                ) : (
-                  <input
-                    id={`edit-${field.key}`}
-                    type={field.type || 'text'}
-                    step={field.type === 'number' ? 'any' : undefined}
-                    value={editDraft[field.key] ?? ''}
-                    onChange={e => setEditDraft(prev => ({ ...prev, [field.key]: e.target.value }))}
-                  />
-                )}
-              </div>
-            ))}
-            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="submit" disabled={busy}>{t('Save')}</button>
+        <section className="card" style={{ marginBottom: '1rem' }} aria-label={t('Edit Borehole {id}', { id: editTarget })}>
+          <h2>{t('Edit Borehole {id}', { id: editTarget })}</h2>
+          <form onSubmit={saveEdit}>
+            <div className="fields">
+              {EDITABLE_FIELDS.map(field => {
+                const id = `edit-${field.key}`
+                const set = (v: string) => setEditDraft(prev => ({ ...prev, [field.key]: v }))
+                const value = editDraft[field.key] ?? ''
+                return (
+                  <div key={field.key} className={`field${field.key === 'Remarks' ? ' wide' : ''}`}>
+                    <label htmlFor={id}>{field.label}</label>
+                    {field.key === 'USCS_Class' ? (
+                      <select id={id} value={value} onChange={e => set(e.target.value)}>
+                        <option value="">{t('Select')}</option>
+                        {withCurrent(USCS_OPTIONS, editOriginal[field.key]).map(code => <option key={code} value={code}>{code}</option>)}
+                      </select>
+                    ) : field.key === 'DrillingMethod' ? (
+                      <select id={id} value={value} onChange={e => set(e.target.value)}>
+                        <option value="">{t('Select')}</option>
+                        {withCurrent(METHOD_OPTIONS, editOriginal[field.key]).map(m => <option key={m} value={m}>{methodLabel(m)}</option>)}
+                      </select>
+                    ) : field.key === 'CoreSize' ? (
+                      <select id={id} value={value} onChange={e => set(e.target.value)}>
+                        <option value="">{t('Not cored')}</option>
+                        {CORE_SIZES.map(s => <option key={s.code} value={s.code}>{coreSizeLabel(s.code)}</option>)}
+                      </select>
+                    ) : field.key === 'Remarks' ? (
+                      <textarea id={id} value={value} onChange={e => set(e.target.value)} />
+                    ) : field.type === 'date' ? (
+                      <DateInput id={id} value={value} onChange={set} />
+                    ) : (
+                      <input id={id} type="text" inputMode={field.type === 'number' ? 'decimal' : undefined} value={value}
+                        onChange={e => set(field.type === 'number' ? e.target.value.replace(/,/g, '.') : e.target.value)} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="actions" style={{ marginTop: '1rem' }}>
+              <button type="submit" className="primary" disabled={busy}>{t('Save changes')}</button>
               <button type="button" onClick={closeEdit}>{t('Cancel')}</button>
             </div>
           </form>
-        </div>
+        </section>
       )}
 
-      <div className="actions" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '.35rem', margin: 0 }}>
-          {t('Rows per page')}
-          <select value={pageSize} onChange={e => handlePageSize(Number(e.target.value))}>
-            {PAGE_SIZE_OPTIONS.map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
-        </label>
-        <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={prevDisabled}>{t('Previous')}</button>
-        <button
-          onClick={() => setPage(Math.min(Math.max(0, totalPages - 1), safePage + 1))}
-          disabled={nextDisabled}
-        >
-          {t('Next')}
-        </button>
-        <span>
-          {sortedReports.length
-            ? t('Showing {from}-{to} of {total} records', { from: startIdx + 1, to: endIdx, total: sortedReports.length })
-            : t('No records available')}
-        </span>
+      <div className="segmented" role="group" aria-label={t('Show boreholes')}>
+        {([
+          ['all', t('All'), counts.all],
+          ['drilling', t('Drilling now'), counts.drilling],
+          ['todo', t('Needs depth data'), counts.todo],
+          ['complete', t('Complete'), counts.complete],
+        ] as Array<[StatusFilter, string, number]>).map(([key, label, n]) => (
+          <button key={key} type="button" aria-pressed={statusFilter === key} onClick={() => setStatusFilter(key)}>
+            {label} <span className="count">{n}</span>
+          </button>
+        ))}
       </div>
 
-      {loading && <p style={{ marginTop: '1rem' }}>{t('Loading reports...')}</p>}
-      {error && <p style={{ marginTop: '1rem', color: 'var(--danger)' }}>{error}</p>}
+      <div className="toolbar">
+        <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Search borehole, project, contractor…')} aria-label={t('Search')} />
+        <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} aria-label={t('Project')}>
+          <option value="">{t('All projects')}</option>
+          {unique.projects.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button type="button" onClick={() => setMoreFilters(v => !v)} aria-expanded={moreFilters}>
+          <Icon name="filter" />{extraFilters ? t('Filters ({n})', { n: extraFilters }) : t('More filters')}
+        </button>
+        {anyFilter && <button type="button" className="quiet" onClick={clearFilters}>{t('Clear filters')}</button>}
+        {actionStatus && <span role="status" className="muted small">{actionStatus}</span>}
+      </div>
 
-      {!loading && !error && reports.length === 0 && (
-        <div className="card" style={{ marginTop: '1rem' }}>
-          <p>{t('No borehole logs have been submitted yet.')}</p>
+      {moreFilters && (
+        <div className="more-filters">
+          <div className="field">
+            <label htmlFor="filter-site">{t('Site')}</label>
+            <select id="filter-site" value={siteFilter} onChange={e => setSiteFilter(e.target.value)}>
+              <option value="">{t('All')}</option>
+              {unique.sites.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="filter-method">{t('Method')}</label>
+            <select id="filter-method" value={methodFilter} onChange={e => setMethodFilter(e.target.value)}>
+              <option value="">{t('All')}</option>
+              {unique.methods.map(m => <option key={m} value={m}>{methodLabel(m)}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="filter-uscs">USCS</label>
+            <select id="filter-uscs" value={uscsFilter} onChange={e => setUscsFilter(e.target.value)}>
+              <option value="">{t('All')}</option>
+              {unique.uscs.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="filter-from">{t('Started from')}</label>
+            <DateInput id="filter-from" value={dateFrom} onChange={setDateFrom} />
+          </div>
+          <div className="field">
+            <label htmlFor="filter-to">{t('Finished by')}</label>
+            <DateInput id="filter-to" value={dateTo} onChange={setDateTo} />
+          </div>
         </div>
       )}
 
-      {!loading && !error && reports.length > 0 && (
-        <div style={{ overflowX: 'auto', overflowY: 'auto', marginTop: '1rem', maxHeight: '70vh' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
-            <thead>
-              <tr>
-                {columns.map(col => (
-                  <th
-                    key={col}
-                    style={{
-                      textAlign: 'left',
-                      borderBottom: '1px solid #24304a',
-                      padding: '.4rem',
-                      whiteSpace: 'nowrap',
-                      position: 'sticky',
-                      top: 0,
-                      background: 'var(--surface, #111827)',
-                      zIndex: 1,
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => toggleSort(col)}
-                    title={t('Sort by {column}', { column: columnLabel(col) })}
-                  >
-                    {columnLabel(col)}{sortKey === col ? (sortDir === 'asc' ? ` [${t('asc')}]` : ` [${t('desc')}]`) : ''}
-                  </th>
-                ))}
-                <th style={{ position: 'sticky', top: 0, background: 'var(--surface, #111827)', padding: '.4rem' }}>{t('Actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.map((row, idx) => (
-                <tr key={`${row.BoreholeID || idx}-${idx}`}>
-                  {columns.map(col => {
-                    const value = row?.[col]
-                    let display: string
-                    if (value === null || value === undefined || value === '') {
-                      display = ''
-                    } else if (typeof value === 'object') {
-                      display = JSON.stringify(value)
-                    } else if (col === 'DrillingMethod') {
-                      display = methodLabel(String(value))
-                    } else if (col === 'GroundwaterEncountered' && /^(true|false)$/i.test(String(value))) {
-                      display = String(value).toLowerCase() === 'true' ? t('Yes') : t('No')
-                    } else {
-                      display = String(value)
-                    }
-                    return (
-                      <td key={col} style={{ padding: '.35rem', borderBottom: '1px dashed #1b263f', fontSize: '.9rem' }}>
-                        {display}
-                      </td>
-                    )
-                  })}
-                  <td style={{ padding: '.35rem', borderBottom: '1px dashed #1b263f', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => setOpenId(row.BoreholeID)} style={{ marginRight: '.5rem' }}>{t('Open')}</button>
-                    <button onClick={() => startEdit(row)} style={{ marginRight: '.5rem' }}>{t('Edit')}</button>
-                    <button onClick={() => handleDelete(row.BoreholeID)} disabled={busy} style={{ background: 'var(--danger)' }}>{t('Delete')}</button>
-                  </td>
-                </tr>
+      {error && <p className="notice error">{error}</p>}
+
+      <div className={`split${showMap ? '' : ' no-map'}`}>
+        <div style={{ minWidth: 0 }}>
+          {loading ? <p className="muted">{t('Loading reports...')}</p> : (sorted.length === 0 && outbox.length === 0) ? (
+            <div className="card">
+              {reports.length === 0 ? (
+                <>
+                  <h2>{t('No boreholes yet')}</h2>
+                  <p className="muted">{t('Start with the first borehole log. Depth data, photos and the bore log sheet are added afterwards.')}</p>
+                  {onNew && <button type="button" className="primary" onClick={onNew}>{t('New log')}</button>}
+                </>
+              ) : (
+                <>
+                  <p style={{ marginTop: 0 }}>{t('No borehole matches these filters.')}</p>
+                  <button type="button" onClick={clearFilters}>{t('Clear filters')}</button>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="table-wrap">
+                <table className={`bh-table${showMap ? ' compact' : ''}`}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 52 }}><span className="sr-only">{t('Soil column')}</span></th>
+                      <th aria-sort={ariaSort('BoreholeID')}><button type="button" onClick={() => toggleSort('BoreholeID')}>{t('Borehole')} {sortMark('BoreholeID')}</button></th>
+                      <th aria-sort={ariaSort('StartDate')}><button type="button" onClick={() => toggleSort('StartDate')}>{t('Dates')} {sortMark('StartDate')}</button></th>
+                      <th className="num" aria-sort={ariaSort('FinalDepth_m')}><button type="button" onClick={() => toggleSort('FinalDepth_m')}>{t('Depth')} {sortMark('FinalDepth_m')}</button></th>
+                      <th className="num" aria-sort={ariaSort('Avg_SPT_N60')}><button type="button" onClick={() => toggleSort('Avg_SPT_N60')}>{t('Avg N')} {sortMark('Avg_SPT_N60')}</button></th>
+                      <th>USCS</th>
+                      <th>{t('Status')}</th>
+                      <th><span className="sr-only">{t('Actions')}</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {safePage === 0 && queued}
+                    {pageRows.map(row => {
+                      const id = String(row.BoreholeID)
+                      const st = statuses[id] || 'none'
+                      const ov = overview[id]
+                      const final = num(row.FinalDepth_m)
+                      const target = num(row.TargetDepth_m)
+                      const open = () => setOpenId(id)
+                      return (
+                        <tr key={id} onClick={open}>
+                          <td className="c-strip"><StrataStrip layers={ov?.layers || []} depth={final} title={t(STATUS_LABEL[st])} /></td>
+                          <td className="c-id">
+                            <button type="button" className="quiet" style={{ padding: 0, minHeight: 0, color: 'inherit' }} onClick={e => { e.stopPropagation(); open() }}>
+                              <span className="bh-id">{id}</span>
+                            </button>
+                            <div className="bh-sub">{[row.ProjectName, row.SiteName].filter(Boolean).join(', ')}</div>
+                          </td>
+                          <td className="c-dates nowrap">
+                            {formatDate(row.StartDate)}
+                            {row.EndDate && row.EndDate !== row.StartDate && <div className="bh-sub">{t('to {date}', { date: formatDate(row.EndDate) })}</div>}
+                          </td>
+                          <td className="c-depth num nowrap">
+                            {final !== null ? `${final} m` : '–'}
+                            {target !== null && <div className="bh-sub">{t('target {d} m', { d: target })}</div>}
+                          </td>
+                          <td className="c-n num">{row.Avg_SPT_N60 || '–'}</td>
+                          <td className="c-uscs">{row.USCS_Class || '–'}</td>
+                          <td className="c-status">
+                            <span className={`status ${STATUS_CLASS[st]}`}>{t(STATUS_LABEL[st])}</span>
+                            {ov && (ov.photos > 0 || ov.samples > 0) && (
+                              <div className="bh-sub">{[
+                                ov.samples ? t('{n} samples', { n: ov.samples }) : '',
+                                ov.photos ? t('{n} photos', { n: ov.photos }) : '',
+                              ].filter(Boolean).join(', ')}</div>
+                            )}
+                          </td>
+                          <td className="c-act" onClick={e => e.stopPropagation()}>
+                            {canEdit(row) && (
+                              <details className="menu">
+                                <summary className="button-like" style={{ minHeight: '2rem', padding: '.1rem .55rem' }} aria-label={t('More actions for {id}', { id })}>
+                                  <Icon name="more" />
+                                </summary>
+                                <div className="menu-pop">
+                                  <button type="button" onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; open() }}>{t('Open')}</button>
+                                  <button type="button" onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; startEdit(row) }}>{t('Edit log details')}</button>
+                                  <button type="button" className="danger-quiet" disabled={busy} onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; void handleDelete(id) }}>{t('Delete')}</button>
+                                </div>
+                              </details>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="pager">
+                <span>
+                  {sorted.length
+                    ? t('Showing {from}-{to} of {total} records', { from: safePage * pageSize + 1, to: Math.min(sorted.length, (safePage + 1) * pageSize), total: sorted.length })
+                    : ''}
+                </span>
+                <div className="actions">
+                  <label className="nowrap" style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                    {t('Rows per page')}
+                    <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}>
+                      {PAGE_SIZE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" className="small" onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage === 0}>{t('Previous')}</button>
+                  <button type="button" className="small" onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} disabled={safePage + 1 >= totalPages}>{t('Next')}</button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        {showMap && (
+          <div className="map-col">
+            <Suspense fallback={<div className="map-box" />}>
+              <BoreholeMap reports={sorted} onOpen={setOpenId} colorFor={colorFor} caption={false} />
+            </Suspense>
+            <div className="map-legend">
+              {(['drilling', 'partial', 'none', 'complete'] as BoreStatus[]).map(s => (
+                <span key={s} className="small" style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+                  <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill={STATUS_COLOR[s]} stroke="#23282d" /></svg>{t(STATUS_LABEL[s])}
+                </span>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
