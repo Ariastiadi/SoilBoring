@@ -76,7 +76,7 @@ const STATUS_COLOR: Record<BoreStatus, string> = { drilling: '#1f5f8b', complete
 
 type SortKey = 'BoreholeID' | 'StartDate' | 'FinalDepth_m' | 'Avg_SPT_N60'
 
-export default function Boreholes({ user, outbox = [], onNew }: { user: Viewer, outbox?: OutboxItem[], onNew?: () => void }) {
+export default function Boreholes({ user, outbox = [], onNew, openBorehole }: { user: Viewer, outbox?: OutboxItem[], onNew?: () => void, openBorehole?: string }) {
   const [reports, setReports] = useState<Row[]>([])
   const [overview, setOverview] = useState<DepthOverview>({})
   const [loading, setLoading] = useState(true)
@@ -99,7 +99,7 @@ export default function Boreholes({ user, outbox = [], onNew }: { user: Viewer, 
   const [editDraft, setEditDraft] = useState<Record<string, string>>({})
   const [editOriginal, setEditOriginal] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [openId, setOpenId] = useState<string | null>(openBorehole || null)
   const [showMap, setShowMap] = useState(() => {
     try { return localStorage.getItem('soilboring-show-map') === '1' } catch { return false }
   })
@@ -294,7 +294,7 @@ export default function Boreholes({ user, outbox = [], onNew }: { user: Viewer, 
   const colorFor = useCallback((r: Row) => STATUS_COLOR[statuses[r.BoreholeID] || 'none'], [statuses])
 
   const canEdit = (row: Row) =>
-    user.role === 'admin' || String(row?.SubmittedBy || '').toLowerCase() === user.email.toLowerCase()
+    user.role === 'admin' || user.role === 'manager' || String(row?.SubmittedBy || '').toLowerCase() === user.email.toLowerCase()
   const opened = openId ? reports.find(r => r.BoreholeID === openId) : null
   if (opened) {
     return <BoreholeDetail report={opened} canEdit={canEdit(opened)} onClose={() => { setOpenId(null); void loadReports() }} />

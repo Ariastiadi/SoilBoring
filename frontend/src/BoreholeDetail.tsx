@@ -10,6 +10,25 @@ import { setUnsaved } from './unsaved'
 import { Profile } from './Profile'
 import { Icon, formatDate } from './ui'
 import { methodLabel } from './options'
+import { useNav } from './nav'
+import { useSchemas } from './records'
+
+/** Saved samples can be sent to the laboratory: opens a new lab test filled in. */
+function SendToLab({ boreholeId, samples }: { boreholeId: string, samples: Details['samples'] }) {
+  const { go } = useNav()
+  const schemas = useSchemas()
+  if (!schemas?.lab_tests?.can_create) return null
+  return (
+    <div className="notice" style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem', alignItems: 'center' }}>
+      <span style={{ marginRight: '.25rem' }}>{t('Send a sample to the laboratory:')}</span>
+      {samples.map((x, i) => (
+        <button key={i} type="button" className="small" onClick={() => go('lab', { newWith: { borehole_id: boreholeId, sample_ref: x.ref || `${x.type}-${i + 1}`, depth_top: x.top, depth_base: x.base ?? '' } })}>
+          {x.ref || x.type} ({x.top} m)
+        </button>
+      ))}
+    </div>
+  )
+}
 
 type Row = Record<string, string | undefined>
 type Section = 'profile' | 'layers' | 'spt' | 'samples' | 'core' | 'photos' | 'history'
@@ -502,6 +521,9 @@ export default function BoreholeDetail({ report, canEdit, onClose }: { report: R
                       { key: 'remarks', label: t('Remarks'), type: 'text' },
                     ]} />
                 </>
+              )}
+              {section === 'samples' && details.samples.length > 0 && (
+                <SendToLab boreholeId={id} samples={details.samples} />
               )}
               {section === 'samples' && (
                 <EditableTable kind="samples" rows={draft.samples} setRows={rows => setDraft({ ...draft, samples: rows })} canEdit={canEdit}

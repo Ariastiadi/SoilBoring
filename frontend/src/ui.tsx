@@ -113,6 +113,15 @@ const PATHS: Record<string, string> = {
   download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   filter: 'M4 5h16l-6 7v6l-4 2v-8z',
   close: 'M6 6l12 12M18 6L6 18',
+  folder: 'M3 6h6l2 2h10v11H3z',
+  building: 'M4 21V4h11v17M15 9h5v12M8 8h3M8 12h3M8 16h3M3 21h18',
+  tag: 'M3 12V4h8l10 10-8 8zM7.5 8.5h.01',
+  contract: 'M6 3h9l4 4v14H6zM9 13h7M9 17h4M14 3v5h5',
+  cone: 'M12 3v12M8 15h8l-4 6zM9 7h6M9 11h6',
+  flask: 'M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M7.5 14h9',
+  calc: 'M5 3h14v18H5zM8 7h8M8 11h2M12 11h2M16 11v6M8 15h2M12 15h2M8 18h6',
+  invoice: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z',
 }
 
 export function Icon({ name, size = 18 }: { name: keyof typeof PATHS | string, size?: number }) {
@@ -163,3 +172,7 @@ export function Breakdown({ title, entries, label = (k: string) => k }: {
 
 /** Rewrites every yyyy-mm-dd inside a text as dd/mm/yyyy. */
 export const prettyDates = (text?: string | null) => (text || '').replace(/\d{4}-\d{2}-\d{2}/g, m => formatDate(m)).replace(/(\d{2}\/\d{2}\/\d{4}) (to|s\.d\.) (\d{2}\/\d{2}\/\d{4})/g, '$1 – $3')
+
+export const ROLE_LABELS: Record<string, string> = {
+  admin: 'Administrator', manager: 'Project leader / commercial', general: 'Field user', lab: 'Laboratory', finance: 'Finance',
+}

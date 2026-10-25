@@ -50,8 +50,8 @@ function loadDraft(): Values {
   }
 }
 
-export default function DailyReportForm({ onDone }: { onDone?: () => void }) {
-  const [v, setV] = useState<Values>(loadDraft)
+export default function DailyReportForm({ onDone, defaults }: { onDone?: () => void, defaults?: Record<string, string> }) {
+  const [v, setV] = useState<Values>(() => ({ ...loadDraft(), ...(defaults || {}) }))
   const [errors, setErrors] = useState<string[]>([])
   const [status, setStatus] = useState('')
   const [saved, setSaved] = useState<{ id: string, queued: boolean } | null>(null)

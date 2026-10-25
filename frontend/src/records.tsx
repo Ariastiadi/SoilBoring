@@ -7,7 +7,7 @@ import {
   deleteRecord, downloadFile, listRecords, saveRecord, uploadFile, userDirectory,
   type EntityDef, type FieldDef, type FileMeta, type Rec, type Schemas,
 } from './api'
-import { locale, t } from './i18n'
+import { lang, locale, t, translateServer } from './i18n'
 import { DateInput, Icon, PageHead, formatDate } from './ui'
 
 export const SchemaContext = createContext<Schemas | null>(null)
@@ -75,6 +75,14 @@ export function RefName({ entity, id }: { entity: string, id?: string }) {
   return <>{row ? String(row[title] ?? row.name ?? id) : '…'}</>
 }
 
+/** "New client" / "Klien baru"; keeps acronyms such as CPT as they are. */
+export function newTitle(entity: EntityDef): string {
+  const w = t(entity.label_one)
+  const what = lang() === 'en' && /^[A-Z][a-z]/.test(w) ? w[0].toLowerCase() + w.slice(1) : w
+  const s = t('New {what}', { what })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
 export function display(f: FieldDef, value: unknown): ReactNode {
   if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) return '–'
   switch (f.type) {
@@ -88,7 +96,7 @@ export function display(f: FieldDef, value: unknown): ReactNode {
     case 'ref': return <RefName entity={f.ref || ''} id={String(value)} />
     case 'files': return `${(value as unknown[]).length} ${t('files')}`
     case 'items': return `${(value as unknown[]).length} ${t('rows')}`
-    default: return String(value)
+    default: return f.readonly ? translateServer(String(value)) : String(value)
   }
 }
 
@@ -240,12 +248,15 @@ function ItemsEditor({ f, rows, onChange }: { f: FieldDef, rows: Array<Record<st
                 {editable.map(s => (
                   <td key={s.name}>
                     {s.type === 'ref' && s.ref === 'rates' ? (
-                      <select value={r.rate_id || ''} onChange={e => pick(i, e.target.value)} aria-label={t(s.label)}>
+                      <select value={r.rate_id || ''} onChange={e => pick(i, e.target.value)} aria-label={`${t(s.label)} ${i + 1}`}>
                         <option value="">–</option>
                         {(rates || []).map(rt => <option key={rt.id} value={rt.id}>{rt.code} {rt.description}</option>)}
                       </select>
                     ) : (
-                      <FieldInput f={s} value={r[s.name]} record={r} onChange={v => set(i, s.name, v)} />
+                      <>
+                        <label className="sr-only" htmlFor={`it-${f.name}-${i}-${s.name}`}>{t(s.label)} {i + 1}</label>
+                        <FieldInput f={s} id={`it-${f.name}-${i}-${s.name}`} value={r[s.name]} record={r} onChange={v => set(i, s.name, v)} />
+                      </>
                     )}
                   </td>
                 ))}
@@ -416,8 +427,8 @@ export function RecordFields({ entity, record, hide = [] }: { entity: EntityDef,
       ))}
       {items.map(f => (
         <section key={f.name} style={{ marginTop: '1rem' }}>
-          <h3>{t(f.label)}</h3>
-          <div className="table-wrap">
+          <h3>{t(f.label)}{(record[f.name] as any[]).length > 12 && <span className="muted small"> · {(record[f.name] as any[]).length} {t('rows')}</span>}</h3>
+          <div className="table-wrap" style={(record[f.name] as any[]).length > 12 ? { maxHeight: '26rem', overflowY: 'auto' } : undefined}>
             <table className="data-table">
               <thead><tr>{(f.fields || []).filter(s => s.type !== 'ref').map(s => <th key={s.name} className={['number', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{t(s.label)}</th>)}</tr></thead>
               <tbody>
@@ -446,8 +457,13 @@ export function RecordFields({ entity, record, hide = [] }: { entity: EntityDef,
 
 export type DetailExtra = (record: Rec, reload: () => void) => ReactNode
 
-export function RecordsPage({ entityName, description, defaults, filter, extra, columns, back, title, hideInForm }: {
+export function RecordsPage({ entityName, description, defaults, filter, extra, columns, back, title, hideInForm, openId, startNew, renderForm, actions, toolbar }: {
+  toolbar?: ReactNode
   entityName: string
+  openId?: string
+  startNew?: Record<string, any> | null
+  renderForm?: (props: { record: Rec | null, defaults?: Record<string, any>, onSaved: (r: Rec) => void, onCancel: () => void }) => ReactNode
+  actions?: (record: Rec) => ReactNode
   description?: string
   defaults?: Record<string, any>
   filter?: (r: Rec) => boolean
@@ -462,7 +478,8 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
   const [rows, setRows] = useState<Rec[] | null>(null)
   const [error, setError] = useState('')
   const [open, setOpen] = useState<Rec | null>(null)
-  const [mode, setMode] = useState<'list' | 'view' | 'edit' | 'new'>('list')
+  const [mode, setMode] = useState<'list' | 'view' | 'edit' | 'new'>(startNew ? 'new' : 'list')
+  const [newDefaults, setNewDefaults] = useState<Record<string, any> | undefined>(startNew ? { ...defaults, ...startNew } : defaults)
   const [search, setSearch] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -471,6 +488,11 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
     listRecords(entityName).then(setRows).catch(e => setError(e.message))
   }
   useEffect(load, [entityName])
+  useEffect(() => {
+    if (!openId || !rows) return
+    const found = rows.find(r => r.id === openId)
+    if (found) { setOpen(found); setMode('view') }
+  }, [openId, rows])
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -489,10 +511,16 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
   if (mode === 'new' || (mode === 'edit' && open)) {
     return (
       <div>
-        <PageHead back={listBack} title={mode === 'new' ? t('New {what}', { what: t(entity.label_one).toLowerCase() }) : t('Edit {what}', { what: String(open?.[entity.title] ?? '') })} />
-        <RecordForm entity={entity} record={mode === 'edit' ? open : null} defaults={defaults} hide={hideInForm}
-          onCancel={() => setMode(open ? 'view' : 'list')}
-          onSaved={r => { setOpen(r); setMode('view'); setNotice(t('Saved.')); load() }} />
+        <PageHead back={listBack} title={mode === 'new' ? newTitle(entity) : t('Edit {what}', { what: String(open?.[entity.title] ?? '') })} />
+        {renderForm ? renderForm({
+          record: mode === 'edit' ? open : null, defaults: newDefaults,
+          onCancel: () => setMode(open ? 'view' : 'list'),
+          onSaved: r => { invalidate(entityName); setOpen(r); setMode('view'); setNotice(t('Saved.')); load() },
+        }) : (
+          <RecordForm entity={entity} record={mode === 'edit' ? open : null} defaults={newDefaults} hide={hideInForm}
+            onCancel={() => setMode(open ? 'view' : 'list')}
+            onSaved={r => { setOpen(r); setMode('view'); setNotice(t('Saved.')); load() }} />
+        )}
       </div>
     )
   }
@@ -515,9 +543,12 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
       <div>
         <PageHead back={listBack} title={String(open[entity.title] ?? t(entity.label_one))}
           description={t(entity.label_one)}
-          actions={open._can_edit && <>
-            <button type="button" className="quiet danger-quiet" onClick={remove}>{t('Delete')}</button>
-            <button type="button" className="primary" onClick={() => { setMode('edit'); setNotice('') }}>{t('Edit')}</button>
+          actions={<>
+            {actions?.(open)}
+            {open._can_edit && <>
+              <button type="button" className="quiet danger-quiet" onClick={remove}>{t('Delete')}</button>
+              <button type="button" className="primary" onClick={() => { setMode('edit'); setNotice('') }}>{t('Edit')}</button>
+            </>}
           </>} />
         {notice && <p className="notice ok" role="status">{notice}</p>}
         {error && <p className="notice error">{error}</p>}
@@ -530,16 +561,17 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
   return (
     <div>
       <PageHead back={backButton} title={heading} description={description}
-        actions={entity.can_create && <button type="button" className="primary" onClick={() => { setMode('new'); setNotice('') }}><Icon name="plus" />{t('New {what}', { what: t(entity.label_one).toLowerCase() })}</button>} />
+        actions={entity.can_create && <button type="button" className="primary" onClick={() => { setNewDefaults(defaults); setMode('new'); setNotice('') }}><Icon name="plus" />{newTitle(entity)}</button>} />
       {notice && <p className="notice ok" role="status">{notice}</p>}
       {error && <p className="notice error">{error}</p>}
-      <div className="toolbar" style={{ marginTop: 0 }}>
+      {toolbar}
+      <div className="toolbar">
         <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Search')} aria-label={t('Search')} />
       </div>
       {!rows ? <p className="muted">{t('Loading…')}</p> : !shown.length ? (
         <div className="card">
           <p style={{ marginTop: 0 }}>{rows.length ? t('Nothing found.') : t('Nothing here yet.')}</p>
-          {!rows.length && entity.can_create && <button type="button" className="primary" onClick={() => setMode('new')}>{t('New {what}', { what: t(entity.label_one).toLowerCase() })}</button>}
+          {!rows.length && entity.can_create && <button type="button" className="primary" onClick={() => setMode('new')}>{newTitle(entity)}</button>}
         </div>
       ) : (
         <RecordTable entity={entity} rows={shown} cols={cols} onOpen={r => { setOpen(r); setMode('view'); setNotice('') }} />

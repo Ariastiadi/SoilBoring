@@ -1,7 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
 import { createUser, deleteUser, listUsers, resetUserPassword, resetUserTwoFactor, User } from '../api'
 import { t } from '../i18n'
-import { Icon, PageHead } from '../ui'
+import { Icon, PageHead, ROLE_LABELS } from '../ui'
 
 type Props = {
   currentUserEmail: string
@@ -99,7 +99,7 @@ export default function UserAdmin({ currentUserEmail }: Props) {
   const me = currentUserEmail.toLowerCase()
   return (
     <div>
-      <PageHead title={t('Users')} description={t('Who can sign in. Field users can add logs and change their own; administrators can change everything and manage users.')} />
+      <PageHead title={t('Users')} description={t('Who can sign in. Field users add logs and change their own; the laboratory records test results; project leaders run projects, quotations, contracts and reports; finance handles invoices; administrators can do everything and manage users.')} />
       <div className="users-layout">
         <section>
           <div className="table-wrap">
@@ -111,7 +111,7 @@ export default function UserAdmin({ currentUserEmail }: Props) {
                   <Fragment key={u.email}>
                     <tr>
                       <td><strong style={{ overflowWrap: 'anywhere' }}>{u.email}</strong>{u.email.toLowerCase() === me && <div className="bh-sub">{t('You')}</div>}</td>
-                      <td>{u.role === 'admin' ? t('Administrator') : t('Field user')}</td>
+                      <td>{t(ROLE_LABELS[u.role] || u.role)}</td>
                       <td><span className={`status${u.totp_enabled ? ' ok' : ''}`}>{u.totp_enabled ? t('On') : t('Off')}</span></td>
                       <td className="nowrap" style={{ textAlign: 'right' }}>
                         <details className="menu" style={{ display: 'inline-block' }}>
@@ -174,8 +174,7 @@ export default function UserAdmin({ currentUserEmail }: Props) {
             <div className="field">
               <label htmlFor="new-user-role">{t('Role')}</label>
               <select id="new-user-role" value={role} onChange={e => setRole(e.target.value as User['role'])}>
-                <option value="general">{t('Field user')}</option>
-                <option value="admin">{t('Administrator')}</option>
+                {['general', 'lab', 'manager', 'finance', 'admin'].map(r => <option key={r} value={r}>{t(ROLE_LABELS[r])}</option>)}
               </select>
             </div>
             <div className="actions"><button type="submit" className="primary" disabled={busy}>{t('Add user')}</button></div>

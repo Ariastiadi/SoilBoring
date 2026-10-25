@@ -1,6 +1,6 @@
 ## Soil Boring Ops – Geotechnical Field Log
 
-Borehole logging for geotechnical field work: logs, strata, SPT, samples, core runs and photos, a printable bore log, AGS4 export, offline use in the field and an AI assistant that runs in the browser. The steps below guide everyone from first-time users to experienced engineers.
+Borehole logging for geotechnical field work: logs, strata, SPT, samples, core runs and photos, a printable bore log, AGS4 export, offline use in the field and an AI assistant that runs in the browser. Around the field log it runs the whole job of a soil investigation company: clients, projects, quotations, contracts, CPT (sondir), geophysics/geology/survey work, laboratory tests, engineering analyses, the report with recommendations for the client, and invoices. The steps below guide everyone from first-time users to experienced engineers.
 
 - **Backend:** Python + FastAPI (Uvicorn)
 - **Frontend:** React + Vite (TypeScript), Bahasa Indonesia by default with an English option
@@ -20,6 +20,18 @@ Borehole logging for geotechnical field work: logs, strata, SPT, samples, core r
 **On a phone:** bottom navigation; each borehole becomes a compact entry.
 
 <img src="docs/assets/en-phone.png" alt="Borehole list on a phone" width="320">
+
+**Project hub:** one project from tender to final report, with its boreholes, CPT, lab tests, analyses, report, quotation, contract and invoices.
+
+![Project hub](docs/assets/en-project-hub.png)
+
+**Pile capacity from SPT:** allowable capacity for each pile length, from the borehole's strata and SPT.
+
+![Pile capacity analysis](docs/assets/en-analysis-pile.png)
+
+**Invoice (print / PDF):** VAT, PPh 23 withheld by the client, amount in words and the bank account.
+
+![Invoice](docs/assets/en-invoice-print.png)
 
 ---
 
@@ -113,10 +125,15 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 - Passwords are stored as salted PBKDF2-HMAC-SHA256 (600k iterations). Entries from older versions (`sha256$...` or plain text in a hand-edited file) still work and are upgraded automatically on the next successful login.
 - Minimum password length is 8. After 5 failed sign-ins for an email, further attempts are blocked for 15 minutes.
 - Everyone can change their own password under **Account & security** (bottom of the side menu; on phones under *More*). Admins can set a new password for another user with **Reset Password** in the Users tab.
-- **admin**: manages users and can edit/delete any log. **general**: can create logs and can edit/delete only the logs they submitted.
+- Roles:
+  - **admin**: everything, including users, company settings and the activity log.
+  - **manager** (project leader / commercial): projects, clients, quotations, contracts, reports, analyses; can edit any log.
+  - **general** (field): creates logs, CPT and other field work and edits only their own; sees projects without the contract value.
+  - **lab**: laboratory tests and their results.
+  - **finance**: invoices and payments, price list, quotations and contracts.
 - An admin cannot remove their own account, and the last admin can never be removed.
 - Tokens are signed with `AUTH_TOKEN_SECRET` and expire per `AUTH_TOKEN_TTL`. Changing or resetting a password, or removing the account, ends every other session of that user.
-- In a hand-edited `users.json`, each entry needs `"role": "admin"` or `"role": "general"`. A missing or unknown role is treated as `general` (a warning is logged), never as admin.
+- In a hand-edited `users.json`, each entry needs a `"role"` of `admin`, `manager`, `general`, `lab` or `finance`. A missing or unknown role is treated as `general` (a warning is logged), never as admin.
 - Emails only need the form `name@domain`, so intranet addresses such as `ops@site.local` work.
 
 ---
@@ -146,16 +163,30 @@ Rules enforced by the API:
 
 ### Features at a Glance
 
-The side menu (bottom bar on phones) has three groups:
+The side menu (bottom bar on phones, the rest under *More*) is grouped the way a soil investigation job runs. Each role sees only its own groups.
+
+- **Commercial operations**
+  - **Projects:** status from tender → contract → ongoing → reporting → completed, project leader, services and contract value. A project's page (the hub) gathers its boreholes (logs whose *Project* is the project name), CPT, other field work, lab tests, analyses, reports, quotations, contracts and invoices, each with an *Add* button that fills in the project.
+  - **Clients:** contractors, state-owned companies (BUMN), private owners and government agencies.
+  - **Quotations:** items picked from the price list or pasted from Excel; discount, VAT 11% and total calculated; numbered QUO-YYYY-NNN; printable with the company letterhead and the amount in words.
+  - **Contracts:** contract number, value (incl. VAT), dates, signatories, payment terms in % and the signed documents. Each term shows its invoice, or a *Create invoice* button.
+- **Field work:** **Boreholes** and **New log** (below), **CPT / sondir** (readings of qc, fs and u2 pasted from Excel, plotted with the friction ratio), and **Other field work** for geophysics (seismic refraction, MASW, resistivity, GPR, downhole), geology (outcrops, mapping, structure, test pits) and geodesy & mapping (topography, benchmarks, stake-out, drone).
+- **Laboratory:** samples sent from a borehole's sample list, with status (received, testing, done) and results per test: moisture content, Atterberg limits (PI calculated), grain size (fines calculated), unit weight, specific gravity, direct shear, triaxial, unconfined compression and consolidation.
+- **Engineering:**
+  - **Engineering analyses:** shallow foundation bearing capacity (Vesic/De Beer/Hansen factors), pile capacity from SPT (Decourt) with a capacity-versus-length chart, consolidation settlement (2:1 stress spread) and liquefaction (Idriss & Boulanger 2014). *Use field and lab data* fills the inputs from the borehole's strata, SPT, groundwater and lab results. All results are preliminary and say so.
+  - **Client reports:** the soil investigation report: summary, scope, every borehole, CPT, field activity, lab result and analysis of the project, recommendations and the prepared / reviewed / approved signatures, printed as one document.
+- **Finance:** **Invoices** (from a contract term or free items; VAT, PPh 23 withholding, payments, outstanding and overdue status; printable) and the **Price list**.
 
 - **Field work**
   - **Boreholes** (start page): every log with a one-line overview ("12 boreholes in 3 projects, 300 m drilled in total. 4 still need depth data."), a status filter (*Drilling now*, *Needs depth data*, *Complete*), search, project and more filters, a mini soil column per borehole, a map beside the list coloured by status, and the **Export** menu (CSV of the rows shown, AGS4 per project). Click a row to open the borehole; the *…* menu edits or deletes the log.
   - **New log:** the borehole log form in sections (borehole and location, dates and team, drilling, soil and groundwater, notes) with a checklist of required fields next to the submit button. Dates are typed as dd/mm/yyyy (or picked from a calendar), "Use my location" fills the coordinates, and the draft is kept on the device while typing.
-- **Analysis**
+- **Data & AI**
   - **Geo AI:** questions in plain language, answered from the logs, with the data rows used shown as evidence.
   - **Summaries:** weekly (date range) or monthly summary with figures, highlights and a written narrative.
   - **Dashboard:** key figures, method and USCS bars, recent boreholes and a short narrative.
-- **Administration** (admins): **Users** and the **Activity** log.
+- **Administration** (admins): **Users**, the **Activity** log and **Company settings** (name, address, NPWP, bank account and signatory printed on quotations, invoices and reports).
+- Attachments (contracts, lab sheets, field data) are PDF, JPEG, PNG, CSV, TXT, ZIP, XLSX or DOCX up to 5 MB each and are stored with the data, so on the free Neon plan they share its 0.5 GB.
+- Business API: `GET /api/schemas` (record definitions and what the signed-in role may open), `GET/POST /api/records/{entity}`, `GET/PUT/DELETE /api/records/{entity}/{id}` (send `expected_updated_at` with `PUT` to detect conflicting edits; a record still referenced elsewhere cannot be deleted), `POST /api/analyses/run`, `POST /api/files`, `GET /api/files/{id}`. Entities: `clients`, `projects`, `rates`, `quotes`, `contracts`, `cpt`, `field_activities`, `lab_tests`, `analyses`, `project_reports`, `invoices`, `settings`.
 - **About:** primer on soil boring with the Indonesian standards (SNI) used in practice.
 - **Language:** Bahasa Indonesia (default) or English, switched at the bottom of the side menu. Messages from the server, summary texts and dates (dd/mm/yyyy) follow the chosen language.
 
@@ -240,13 +271,19 @@ backend/
     ags.py             # AGS4 export
     config.py          # ORG_NAME, APP_TIMEZONE
     docstore.py        # file or Postgres (DATABASE_URL) storage
-    routers/           # auth, users, reports, boreholes, ai, summaries, dashboard, export
+    entities.py        # definitions of the business records (served at /api/schemas)
+    records.py         # validation, totals, numbering, references, files, permissions
+    engineering.py     # bearing capacity, pile capacity, settlement, liquefaction
+    analysis_runner.py # runs an analysis from borehole and lab data
+    routers/           # auth, users, reports, boreholes, ai, summaries, dashboard, export, records
   tests/               # pytest suite
 frontend/
   src/
     App.tsx            # side menu / bottom bar, pages
     tabs/              # Boreholes (DailyReportData), New log (DailyReportForm), Geo AI, Summaries,
-                       #   Dashboard, Users, Activity, About
+                       #   Dashboard, Users, Activity, About, Business (projects ... invoices), Analyses
+    records.tsx        # forms, lists and views built from /api/schemas
+    nav.ts             # page keys and links between pages
     BoreholeDetail.tsx # depth data, photos, history of one borehole
     Profile.tsx        # graphic log + SPT plot, mini soil columns
     BoreLog.tsx        # printable A4 bore log

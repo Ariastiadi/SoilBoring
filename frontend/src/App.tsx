@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import DailyReportForm from './tabs/DailyReportForm'
 import QA from './tabs/QA'
 import Summary from './tabs/Summary'
@@ -15,9 +15,30 @@ import { confirmLeave } from './unsaved'
 import { lang, setLang, t } from './i18n'
 import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler, setupFirstAdmin } from './api'
 import type { Role, Session } from './api'
-import { BrandMark, Icon, PageHead } from './ui'
+import { BrandMark, Icon, PageHead, ROLE_LABELS } from './ui'
+import { NavContext, type Intent, type TabKey } from './nav'
+import { SchemaContext, invalidate } from './records'
+import { getSchemas, type Schemas } from './api'
+import type { Intent as PageIntent } from './nav'
 
-type TabKey = 'boreholes' | 'new' | 'qa' | 'summary' | 'dashboard' | 'about' | 'users' | 'activity' | 'account'
+// Business modules load when first opened, so the field log starts fast on a phone.
+const business = () => import('./tabs/Business')
+type PageProps = { intent?: PageIntent }
+const fromBusiness = (name: 'CptPage' | 'ClientsPage' | 'ContractsPage' | 'FieldWorkPage' | 'InvoicesPage' | 'LabPage' | 'ProjectsPage' | 'QuotesPage' | 'RatesPage' | 'ReportsPage' | 'SettingsPage') =>
+  lazy(() => business().then(m => ({ default: m[name] as (p: PageProps) => JSX.Element })))
+const ProjectsPage = fromBusiness('ProjectsPage')
+const ClientsPage = fromBusiness('ClientsPage')
+const QuotesPage = fromBusiness('QuotesPage')
+const ContractsPage = fromBusiness('ContractsPage')
+const CptPage = fromBusiness('CptPage')
+const FieldWorkPage = fromBusiness('FieldWorkPage')
+const LabPage = fromBusiness('LabPage')
+const ReportsPage = fromBusiness('ReportsPage')
+const InvoicesPage = fromBusiness('InvoicesPage')
+const RatesPage = fromBusiness('RatesPage')
+const SettingsPage = fromBusiness('SettingsPage')
+const AnalysesPage = lazy(() => import('./tabs/Analyses'))
+
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
 const AUTH_STORAGE_KEY = 'soilboring-auth'
@@ -30,7 +51,7 @@ function clearUserData() {
   USER_DATA_KEYS.forEach(key => window.localStorage.removeItem(key))
 }
 
-type NavItem = { key: TabKey, label: string, icon: string }
+type NavItem = { key: TabKey, label: string, icon: string, entity?: string }
 
 export default function App() {
   const [tab, setTab] = useState<TabKey>('boreholes')
@@ -64,6 +85,9 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState('')
   const [notice, setNotice] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
+  const [intent, setIntent] = useState<Intent | undefined>(undefined)
+  const [navCount, setNavCount] = useState(0)
+  const [schemas, setSchemas] = useState<Schemas | null>(null)
 
   useEffect(() => {
     setAuthToken(auth?.token ?? null)
@@ -132,6 +156,12 @@ export default function App() {
 
   const isAdmin = auth?.role === 'admin'
   useEffect(() => {
+    if (!auth) { setSchemas(null); invalidate(); return }
+    let active = true
+    getSchemas().then(sc => { if (active) setSchemas(sc) }).catch(() => {})
+    return () => { active = false }
+  }, [auth?.token, auth?.role]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     if ((tab === 'users' || tab === 'activity') && !isAdmin) {
       setTab('boreholes')
     }
@@ -168,19 +198,39 @@ export default function App() {
     return <Login onLogin={handleLogin} onSetup={handleSetup} title={appTitle(orgName)} orgName={orgName} notice={authNotice} />
   }
 
-  const go = (key: TabKey) => {
+  const go = (key: TabKey, next?: Intent) => {
     setMoreOpen(false)
-    if (key !== tab && confirmLeave()) {
+    if (confirmLeave()) {
       setTab(key)
+      setIntent(next)
+      setNavCount(n => n + 1)
       setNotice('')
       window.scrollTo(0, 0)
     }
   }
+  const can = (entity?: string) => !entity || !schemas || !!schemas[entity]?.can_read
   const switchLanguage = () => { if (confirmLeave()) setLang(lang() === 'id' ? 'en' : 'id') }
 
+  const comop: NavItem[] = [
+    { key: 'projects', label: t('Projects'), icon: 'folder', entity: 'projects' },
+    { key: 'clients', label: t('Clients'), icon: 'building', entity: 'clients' },
+    { key: 'quotes', label: t('Quotations'), icon: 'tag', entity: 'quotes' },
+    { key: 'contracts', label: t('Contracts'), icon: 'contract', entity: 'contracts' },
+  ]
   const field: NavItem[] = [
     { key: 'boreholes', label: t('Boreholes'), icon: 'boreholes' },
     { key: 'new', label: t('New log'), icon: 'plus' },
+    { key: 'cpt', label: t('CPT / sondir'), icon: 'cone', entity: 'cpt' },
+    { key: 'fieldwork', label: t('Other field work'), icon: 'map', entity: 'field_activities' },
+  ]
+  const lab: NavItem[] = [{ key: 'lab', label: t('Laboratory tests'), icon: 'flask', entity: 'lab_tests' }]
+  const engineering: NavItem[] = [
+    { key: 'analyses', label: t('Engineering analyses'), icon: 'calc', entity: 'analyses' },
+    { key: 'reports', label: t('Client reports'), icon: 'summary', entity: 'project_reports' },
+  ]
+  const finance: NavItem[] = [
+    { key: 'invoices', label: t('Invoices'), icon: 'invoice', entity: 'invoices' },
+    { key: 'rates', label: t('Price list'), icon: 'tag', entity: 'rates' },
   ]
   const analysis: NavItem[] = [
     { key: 'qa', label: 'Geo AI', icon: 'ai' },
@@ -190,13 +240,26 @@ export default function App() {
   const admin: NavItem[] = isAdmin ? [
     { key: 'users', label: t('Users'), icon: 'users' },
     { key: 'activity', label: t('Activity'), icon: 'activity' },
+    { key: 'settings', label: t('Company settings'), icon: 'settings' },
   ] : []
+  const groups: Array<[string, NavItem[]]> = [
+    ['Commercial operations', comop], ['Field work', field], ['Laboratory', lab], ['Engineering', engineering],
+    ['Finance', finance], ['Data & AI', analysis], ['Administration', admin],
+  ]
   const about: NavItem = { key: 'about', label: t('About'), icon: 'info' }
+  const PAGES: Partial<Record<TabKey, (i?: Intent) => JSX.Element>> = {
+    projects: i => <ProjectsPage intent={i} />, clients: i => <ClientsPage intent={i} />, quotes: i => <QuotesPage intent={i} />,
+    contracts: i => <ContractsPage intent={i} />, cpt: i => <CptPage intent={i} />, fieldwork: i => <FieldWorkPage intent={i} />,
+    lab: i => <LabPage intent={i} />, analyses: i => <AnalysesPage intent={i} />, reports: i => <ReportsPage intent={i} />,
+    invoices: i => <InvoicesPage intent={i} />, rates: i => <RatesPage intent={i} />, settings: () => <SettingsPage />,
+  }
+  const loading = <p className="muted">{t('Loading…')}</p>
+  const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)
   const waiting = outbox.filter(i => !i.error).length
 
   const navButton = (item: NavItem) => (
     <button key={item.key} type="button" className={`nav-item${tab === item.key ? ' active' : ''}`}
-      aria-current={tab === item.key ? 'page' : undefined} onClick={() => go(item.key)}>
+      aria-current={tab === item.key ? 'page' : undefined} onClick={() => go(item.key, undefined)}>
       <Icon name={item.icon} />{item.label}
       {item.key === 'boreholes' && outbox.length > 0 && <span className="count">{t('{n} waiting', { n: outbox.length })}</span>}
     </button>
@@ -216,27 +279,24 @@ export default function App() {
       <span className="brand-name">SoilBoring{orgName && <span className="brand-org">{orgName}</span>}</span>
     </div>
   )
-  const who = <div className="who"><strong>{auth.email}</strong>{auth.role === 'admin' ? t('Administrator') : t('Field user')}</div>
+  const who = <div className="who"><strong>{auth.email}</strong>{t(ROLE_LABELS[auth.role] || auth.role)}</div>
 
   return (
+    <NavContext.Provider value={{ go, role: auth.role, email: auth.email }}>
+    <SchemaContext.Provider value={schemas}>
     <div className="shell">
       <aside className="sidebar" aria-label={t('Main menu')}>
         {brand}
         <nav>
-          <div className="nav-group" style={{ marginTop: 0 }}>
-            <div className="nav-group-title">{t('Field work')}</div>
-            {field.map(navButton)}
-          </div>
-          <div className="nav-group">
-            <div className="nav-group-title">{t('Analysis')}</div>
-            {analysis.map(navButton)}
-          </div>
-          {admin.length > 0 && (
-            <div className="nav-group">
-              <div className="nav-group-title">{t('Administration')}</div>
-              {admin.map(navButton)}
-            </div>
-          )}
+          {groups.map(([title, items]) => {
+            const shown = items.filter(i => can(i.entity))
+            return shown.length > 0 && (
+              <div className="nav-group" key={title}>
+                <div className="nav-group-title">{t(title)}</div>
+                {shown.map(navButton)}
+              </div>
+            )
+          })}
           <div className="nav-group">{navButton(about)}</div>
         </nav>
         <div className="sidebar-foot">
@@ -265,8 +325,9 @@ export default function App() {
           )}
           {notice && <p className="notice ok" role="status">{notice}</p>}
 
-          {tab === 'boreholes' && <Boreholes user={{ email: auth.email, role: auth.role }} outbox={outbox} onNew={() => go('new')} />}
-          {tab === 'new' && <DailyReportForm onDone={() => go('boreholes')} />}
+          {tab === 'boreholes' && <Boreholes key={`b-${navCount}`} user={{ email: auth.email, role: auth.role }} outbox={outbox} onNew={() => go('new')} openBorehole={intent?.borehole} />}
+          {tab === 'new' && <DailyReportForm key={`n-${navCount}`} onDone={() => go('boreholes')} defaults={intent?.newWith as Record<string, string> | undefined} />}
+          {page && <div key={`${tab}-${navCount}`}>{page}</div>}
           {tab === 'qa' && <QA />}
           {tab === 'summary' && <Summary />}
           {tab === 'dashboard' && <Dashboard />}
@@ -297,12 +358,12 @@ export default function App() {
       </main>
 
       <nav className="bottom-nav" aria-label={t('Main menu')}>
-        {[field[0], field[1], analysis[0], analysis[2]].map(item => (
+        {[field[0], field[1], ...(can('projects') ? [comop[0]] : [analysis[2]]), analysis[0]].map(item => (
           <button key={item.key} type="button" className={tab === item.key ? 'active' : ''} aria-current={tab === item.key ? 'page' : undefined} onClick={() => go(item.key)}>
             <Icon name={item.icon} />{item.label}
           </button>
         ))}
-        <button type="button" className={moreOpen || ['summary', 'about', 'users', 'activity', 'account'].includes(tab) ? 'active' : ''}
+        <button type="button" className={moreOpen || !BOTTOM.includes(tab) ? 'active' : ''}
           aria-expanded={moreOpen} onClick={() => setMoreOpen(v => !v)}>
           <Icon name="more" />{t('More')}
         </button>
@@ -312,13 +373,24 @@ export default function App() {
           <div className="sheet-backdrop" onClick={() => setMoreOpen(false)} />
           <div className="sheet" role="dialog" aria-label={t('More')}>
             {who}
-            {navButton(analysis[1])}
-            {admin.map(navButton)}
+            {groups.map(([title, items]) => {
+              const shown = items.filter(i => can(i.entity) && !BOTTOM.includes(i.key))
+              return shown.length > 0 && (
+                <div key={title}>
+                  <div className="nav-group-title" style={{ marginTop: '.5rem' }}>{t(title)}</div>
+                  {shown.map(navButton)}
+                </div>
+              )
+            })}
             {navButton(about)}
             {accountButtons}
           </div>
         </>
       )}
     </div>
+    </SchemaContext.Provider>
+    </NavContext.Provider>
   )
 }
+
+const BOTTOM: TabKey[] = ['boreholes', 'new', 'projects', 'qa']
