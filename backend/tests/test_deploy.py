@@ -110,3 +110,28 @@ def test_vercel_defaults(tmp_path, monkeypatch):
         docstore.close_pool()
         importlib.reload(docstore)
         importlib.reload(main)
+
+
+def test_app_shell_etag_follows_content(tmp_path, monkeypatch):
+    """A new release of index.html with the same size and mtime must get a new ETag."""
+    import os
+
+    index = tmp_path / "index.html"
+    index.write_text("<script src=/assets/index-AAAA.js></script>")
+    os.utime(index, (315532800, 315532800))
+    monkeypatch.setenv("FRONTEND_DIST", str(tmp_path))
+    from backend.app import main
+
+    module = importlib.reload(main)
+    try:
+        with TestClient(module.app) as c:
+            first = c.get("/").headers["etag"]
+            index.write_text("<script src=/assets/index-BBBB.js></script>")
+            os.utime(index, (315532800, 315532800))
+            second = c.get("/")
+            assert second.headers["etag"] != first and "BBBB" in second.text
+            assert second.headers["cache-control"] == "no-cache"
+            assert c.get("/sw.js").headers["etag"] == second.headers["etag"]  # SPA fallback
+    finally:
+        monkeypatch.delenv("FRONTEND_DIST")
+        importlib.reload(main)

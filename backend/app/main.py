@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import math
 import mimetypes
@@ -10,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from . import config, docstore, mailer
 from .auth import bootstrap_admin_from_env
@@ -185,12 +186,23 @@ if _FRONTEND is not None and (_FRONTEND / "index.html").is_file():
         except (ValueError, OSError):  # NUL bytes, over-long names ...
             found = False
         if found:
-            return FileResponse(candidate)
+            return candidate_response(candidate)
         if full_path.startswith("assets/"):
             # A missing build file must not be answered with the app shell (and cached for a year).
             raise HTTPException(status_code=404, detail="Not Found")
         # Client-side routes all load the app shell.
-        return FileResponse(_UI_DIR / "index.html")
+        return candidate_response(_UI_DIR / "index.html")
+
+    def candidate_response(path: Path):
+        if _UI_DIR / "assets" in path.parents:
+            return FileResponse(path)
+        # index.html, sw.js, the manifest: their ETag must follow the content. FileResponse
+        # derives it from mtime + size, and deployments reset mtimes, so a new release of the
+        # same size was answered "not modified" and browsers kept the previous app.
+        data = path.read_bytes()
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        etag = '"' + hashlib.sha256(data).hexdigest()[:32] + '"'
+        return Response(content=data, media_type=media_type, headers={"ETag": etag})
 
 else:
 
