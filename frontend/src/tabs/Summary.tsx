@@ -69,7 +69,7 @@ export default function Summary() {
   const copy = async () => {
     if (!data?.text) return
     try {
-      await navigator.clipboard.writeText(data.text)
+      await navigator.clipboard.writeText(prettyDates(data.text))
       setStatus(t('Copied to clipboard'))
     } catch {
       setStatus(t('Copy failed'))
@@ -100,7 +100,7 @@ export default function Summary() {
 
   const detailHtml = useMemo(() => {
     if (!data?.text) return null
-    const raw = marked.parse(data.text, { breaks: true }) as string
+    const raw = marked.parse(prettyDates(data.text), { breaks: true }) as string
     return DOMPurify.sanitize(raw)
   }, [data?.text])
 
@@ -196,7 +196,7 @@ export default function Summary() {
               <h3>{t('Operational Highlights')}</h3>
               <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                 {data.highlights.map((line, idx) => (
-                  <li key={`${line}-${idx}`} style={{ marginBottom: '.35rem' }}>{line}</li>
+                  <li key={`${line}-${idx}`} style={{ marginBottom: '.35rem' }}>{prettyDates(line)}</li>
                 ))}
               </ul>
             </div>
@@ -213,7 +213,7 @@ export default function Summary() {
               <div className="markdown" dangerouslySetInnerHTML={{ __html: detailHtml }} />
             ) : (
               <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '.95rem' }}>
-                {data.text}
+                {prettyDates(data.text)}
               </div>
             )}
           </div>

@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { lang, t, translateServer } from "./i18n";
 
 // Origin of the backend. Empty = same origin (Docker/nginx and the Vite dev proxy).
 // Every request path below already starts with "/api", so a trailing "/api" or "/"
@@ -125,7 +125,7 @@ async function parseJson<T>(response: Response, message: string, opts?: { skipUn
     if (response.status === 401 && unauthorizedHandler && !opts?.skipUnauthorizedHandler) {
       unauthorizedHandler();
     }
-    const detail = await readErrorDetail(response);
+    const detail = translateServer(await readErrorDetail(response));
     const error = new Error(`${message}: ${detail || response.status}`) as Error & { status?: number };
     error.status = response.status;
     throw error;
@@ -234,7 +234,7 @@ export async function getAIPrompt(question: string, maxChars: number) {
 }
 
 export async function getSummary(period: "weekly" | "monthly", filters?: Record<string, string | number>) {
-  const params = new URLSearchParams({ period })
+  const params = new URLSearchParams({ period, lang: lang() })
   if (filters) {
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
@@ -247,7 +247,7 @@ export async function getSummary(period: "weekly" | "monthly", filters?: Record<
 }
 
 export async function getDashboard() {
-  const r = await fetch(`${BASE}/api/dashboard`, { headers: buildHeaders() });
+  const r = await fetch(`${BASE}/api/dashboard?lang=${lang()}`, { headers: buildHeaders() });
   return parseJson<DashboardResponse>(r, t("Failed to get dashboard"));
 }
 

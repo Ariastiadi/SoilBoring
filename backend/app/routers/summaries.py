@@ -28,6 +28,7 @@ def summaries(
     end_date: Optional[str] = Q(None, description="End date (YYYY-MM-DD) for weekly summaries"),
     month: Optional[int] = Q(None, ge=1, le=12, description="Month number for monthly summaries"),
     year: Optional[int] = Q(None, ge=2000, le=2100, description="Year for monthly summaries"),
+    lang: str = Q("en", pattern="^(en|id)$", description="Language of the summary text"),
 ):
     reports = load_reports()
     start_dt = _parse_date(start_date, "start_date")
@@ -49,5 +50,6 @@ def summaries(
         end_date=end_dt,
         month=month,
         year=year,
+        lang=lang,
     )
 

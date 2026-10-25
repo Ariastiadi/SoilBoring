@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ..analytics import build_dashboard_report
 from ..auth import get_current_user
@@ -9,5 +9,5 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[De
 
 
 @router.get("")
-def dashboard():
-    return build_dashboard_report(load_reports())
+def dashboard(lang: str = Query("en", pattern="^(en|id)$")):
+    return build_dashboard_report(load_reports(), lang)

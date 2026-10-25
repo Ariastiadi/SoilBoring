@@ -132,7 +132,34 @@ def _period_range(rows: Sequence[Dict[str, Any]]) -> Dict[str, Optional[str]]:
     return {"from": dates[0].strftime("%Y-%m-%d"), "to": dates[-1].strftime("%Y-%m-%d")}
 
 
-def compute_dashboard(rows_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
+# Words in the generated summary text, per interface language (en, id).
+_TEXT = {
+    "en": {
+        "to": "to", "up_to": "Up to", "title": "Soil boring {period} summary ({label})", "latest": "latest interval",
+        "weekly": "weekly", "monthly": "monthly", "boreholes": "Boreholes executed", "projects": "Active projects",
+        "sites": "Sites logged", "meterage": "Total meterage drilled", "avg_depth": "Average final depth",
+        "avg_gw": "Average groundwater depth", "avg_spt": "Average SPT N60", "methods": "Dominant methods",
+        "uscs": "Dominant USCS classes", "highlights": "Highlights:", "line": "{date} | {id} at {project} ({site}): depth {depth}",
+        "months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+                   "November", "December"],
+    },
+    "id": {
+        "to": "s.d.", "up_to": "Sampai", "title": "Ringkasan {period} pengeboran tanah ({label})", "latest": "periode terakhir",
+        "weekly": "mingguan", "monthly": "bulanan", "boreholes": "Titik bor dikerjakan", "projects": "Proyek aktif",
+        "sites": "Lokasi tercatat", "meterage": "Total meter bor", "avg_depth": "Rata-rata kedalaman akhir",
+        "avg_gw": "Rata-rata kedalaman muka air tanah", "avg_spt": "Rata-rata SPT N60", "methods": "Metode dominan",
+        "uscs": "Kelas USCS dominan", "highlights": "Sorotan:", "line": "{date} | {id} di {project} ({site}): kedalaman {depth}",
+        "months": ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober",
+                   "November", "Desember"],
+    },
+}
+
+
+def _words(lang: str) -> Dict[str, Any]:
+    return _TEXT.get(lang, _TEXT["en"])
+
+
+def compute_dashboard(rows_raw: List[Dict[str, Any]], lang: str = "en") -> Dict[str, Any]:
     rows = [normalize_row(r) for r in rows_raw]
     rows = sorted([r for r in rows if r.get("start_dt")], key=lambda r: r["start_dt"])
 
@@ -148,7 +175,7 @@ def compute_dashboard(rows_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
     period_range = _period_range(rows)
     period_label = None
     if period_range["from"] and period_range["to"]:
-        period_label = f"{period_range['from']} to {period_range['to']}"
+        period_label = f"{period_range['from']} {_words(lang)['to']} {period_range['to']}"
 
     recent = sorted(rows, key=lambda r: r["start_dt"] or datetime.min, reverse=True)[:5]
     recent_payload = [
@@ -188,7 +215,9 @@ def build_summary_report(
     end_date: Optional[datetime] = None,
     month: Optional[int] = None,
     year: Optional[int] = None,
+    lang: str = "en",
 ) -> Dict[str, Any]:
+    w = _words(lang)
     rows_all = [normalize_row(r) for r in rows_raw]
     rows_all = sorted([r for r in rows_all if r.get("start_dt")], key=lambda r: r["start_dt"])
     rows = filter_period(rows_all, period, start_date=start_date, end_date=end_date, month=month, year=year)
@@ -216,12 +245,12 @@ def build_summary_report(
 
     period_label = None
     if period == "weekly" and actual_range["from"] and actual_range["to"]:
-        period_label = f"{actual_range['from']} to {actual_range['to']}"
+        period_label = f"{actual_range['from']} {w['to']} {actual_range['to']}"
     elif period == "monthly":
         if month and year:
-            period_label = datetime(year, month, 1).strftime("%B %Y")
+            period_label = f"{w['months'][month - 1]} {year}"
         elif actual_range["to"]:
-            period_label = f"Up to {actual_range['to']}"
+            period_label = f"{w['up_to']} {actual_range['to']}"
 
     stats = {
         "as_of": now,
@@ -239,26 +268,29 @@ def build_summary_report(
         "period_label": period_label,
     }
 
+    def item(key: str, value: Any, unit: str = "") -> str:
+        return f"- {w[key]}: {value}{unit}" if value not in (None, "") else f"- {w[key]}: -"
+
     lines = [
-        f"Soil boring {period} summary ({period_label or 'latest interval'})",
-        f"- Boreholes executed: {stats['boreholes']}",
-        f"- Active projects: {', '.join(projects) if projects else '-'}",
-        f"- Sites logged: {', '.join(sites) if sites else '-'}",
-        f"- Total meterage drilled: {total_meterage} m",
-        f"- Average final depth: {avg_depth} m" if avg_depth is not None else "- Average final depth: -",
-        f"- Average groundwater depth: {avg_gw} m" if avg_gw is not None else "- Average groundwater depth: -",
-        f"- Average SPT N60: {avg_spt}" if avg_spt is not None else "- Average SPT N60: -",
-        f"- Dominant methods: {', '.join(f'{k} ({v})' for k, v in methods.most_common(3)) or '-'}",
-        f"- Dominant USCS classes: {', '.join(f'{k} ({v})' for k, v in uscs_counts.most_common(3)) or '-'}",
+        w["title"].format(period=w[period], label=period_label or w["latest"]),
+        item("boreholes", stats["boreholes"]),
+        item("projects", ", ".join(projects) if projects else "-"),
+        item("sites", ", ".join(sites) if sites else "-"),
+        item("meterage", total_meterage, " m"),
+        item("avg_depth", avg_depth, " m"),
+        item("avg_gw", avg_gw, " m"),
+        item("avg_spt", avg_spt),
+        item("methods", ", ".join(f"{k} ({v})" for k, v in methods.most_common(3)) or "-"),
+        item("uscs", ", ".join(f"{k} ({v})" for k, v in uscs_counts.most_common(3)) or "-"),
         "",
-        "Highlights:",
+        w["highlights"],
     ]
 
     highlights: List[str] = []
     for r in rows[-3:]:
         desc = r["soil_description"][:120] if r["soil_description"] else ""
         depth = f"{r['final_depth']} m" if r["final_depth"] is not None else "-"
-        line = f"{r['start_date']} | {r['borehole_id']} at {r['project']} ({r['site']}): depth {depth}"
+        line = w["line"].format(date=r["start_date"], id=r["borehole_id"], project=r["project"], site=r["site"], depth=depth)
         if desc:
             line += f" – {desc}"
         lines.append(f"- {line}")
@@ -296,8 +328,8 @@ def build_summary_text(rows_raw: List[Dict[str, Any]], period: str) -> str:
     return build_summary_report(rows_raw, period).get("text", "")
 
 
-def build_dashboard_report(rows_raw: List[Dict[str, Any]]) -> Dict[str, Any]:
-    metrics = compute_dashboard(rows_raw)
+def build_dashboard_report(rows_raw: List[Dict[str, Any]], lang: str = "en") -> Dict[str, Any]:
+    metrics = compute_dashboard(rows_raw, lang)
     narrative: Dict[str, Any] = {"narrative": None, "narrative_prompt": None}
     if metrics.get("total_boreholes"):
         narrative = _narrative(

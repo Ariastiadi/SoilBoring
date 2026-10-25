@@ -152,3 +152,16 @@ def test_prompt_endpoint_for_on_device_ai(client, admin_headers):
     assert body["context"].splitlines()[0].startswith("BoreholeID")
     assert client.post("/api/ai/prompt", json={"question": "x", "max_chars": 10}, headers=admin_headers).status_code == 422
     assert client.post("/api/ai/prompt", json={"question": "x"}).status_code == 401
+
+
+def test_summary_and_dashboard_text_in_indonesian(client, admin_headers):
+    client.post("/api/reports", json=sample_report(), headers=admin_headers)
+    body = client.get("/api/summaries?period=monthly&month=3&year=2026&lang=id", headers=admin_headers).json()
+    assert body["period_label"] == "Maret 2026"
+    assert body["text"].startswith("Ringkasan bulanan pengeboran tanah (Maret 2026)")
+    assert "Titik bor dikerjakan: 1" in body["text"]
+    english = client.get("/api/summaries?period=monthly&month=3&year=2026", headers=admin_headers).json()
+    assert english["period_label"] == "March 2026" and "Boreholes executed: 1" in english["text"]
+    dash = client.get("/api/dashboard?lang=id", headers=admin_headers).json()
+    assert " s.d. " in (dash["period_label"] or "") or dash["period_label"] is None
+    assert client.get("/api/dashboard?lang=xx", headers=admin_headers).status_code == 422

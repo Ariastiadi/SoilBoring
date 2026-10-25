@@ -162,4 +162,4 @@ export function Breakdown({ title, entries, label = (k: string) => k }: {
 }
 
 /** Rewrites every yyyy-mm-dd inside a text as dd/mm/yyyy. */
-export const prettyDates = (text?: string | null) => (text || '').replace(/\d{4}-\d{2}-\d{2}/g, m => formatDate(m))
+export const prettyDates = (text?: string | null) => (text || '').replace(/\d{4}-\d{2}-\d{2}/g, m => formatDate(m)).replace(/(\d{2}\/\d{2}\/\d{4}) (to|s\.d\.) (\d{2}\/\d{2}\/\d{4})/g, '$1 – $3')

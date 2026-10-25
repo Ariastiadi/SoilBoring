@@ -109,7 +109,7 @@ export default function App() {
   const handleLogout = () => {
     if (!confirmLeave()) return
     const waiting = outboxItems().length
-    if (waiting && !window.confirm(t('{n} log(s) on this device have not been sent yet. They stay here and are sent the next time you sign in. Sign out anyway?', { n: waiting }))) return
+    if (waiting && !window.confirm((waiting === 1 ? t('1 log on this device has not been sent yet. It stays here and is sent the next time you sign in. Sign out anyway?') : t('{n} log(s) on this device have not been sent yet. They stay here and are sent the next time you sign in. Sign out anyway?', { n: waiting })))) return
     setMoreOpen(false)
     setNotice('')
     clearUserData()
@@ -256,7 +256,7 @@ export default function App() {
               <span>
                 {!online && <strong>{t('Offline.')} </strong>}
                 {waiting > 0
-                  ? t('{n} log(s) saved on this device, waiting to be sent.', { n: waiting })
+                  ? (waiting === 1 ? t('1 log saved on this device, waiting to be sent.') : t('{n} log(s) saved on this device, waiting to be sent.', { n: waiting }))
                   : t('New logs are kept on this device and sent when the connection is back.')}
               </span>
               {online && waiting > 0 && <button type="button" className="small" onClick={() => void flushOutbox()}>{t('Send now')}</button>}

@@ -306,8 +306,12 @@ export default function Boreholes({ user, outbox = [], onNew }: { user: Viewer, 
 
   const summary = reports.length ? (
     <>
-      {t('{n} boreholes in {p} projects, {m} m drilled in total.', { n: reports.length, p: projects, m: Number(metres.toFixed(1)) })}{' '}
-      {todo > 0 ? t('{n} still need depth data.', { n: todo }) : t('All have depth data.')}
+      {t('{boreholes} in {projects}, {m} m drilled in total.', {
+        boreholes: reports.length === 1 ? t('1 borehole') : t('{n} boreholes', { n: reports.length }),
+        projects: projects === 1 ? t('1 project') : t('{n} projects', { n: projects }),
+        m: Number(metres.toFixed(1)),
+      })}{' '}
+      {todo > 0 ? (todo === 1 ? t('1 still needs depth data.') : t('{n} still need depth data.', { n: todo })) : t('All have depth data.')}
     </>
   ) : t('No borehole logs have been submitted yet.')
 
@@ -535,8 +539,8 @@ export default function Boreholes({ user, outbox = [], onNew }: { user: Viewer, 
                             <span className={`status ${STATUS_CLASS[st]}`}>{t(STATUS_LABEL[st])}</span>
                             {ov && (ov.photos > 0 || ov.samples > 0) && (
                               <div className="bh-sub">{[
-                                ov.samples ? t('{n} samples', { n: ov.samples }) : '',
-                                ov.photos ? t('{n} photos', { n: ov.photos }) : '',
+                                ov.samples ? (ov.samples === 1 ? t('1 sample') : t('{n} samples', { n: ov.samples })) : '',
+                                ov.photos ? (ov.photos === 1 ? t('1 photo') : t('{n} photos', { n: ov.photos })) : '',
                               ].filter(Boolean).join(', ')}</div>
                             )}
                           </td>

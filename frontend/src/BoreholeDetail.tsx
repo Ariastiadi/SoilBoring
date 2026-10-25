@@ -5,7 +5,7 @@ import {
 } from './api'
 import BoreLog from './BoreLog'
 import { USCS_OPTIONS } from './options'
-import { locale, t } from './i18n'
+import { fieldLabel, locale, t } from './i18n'
 import { setUnsaved } from './unsaved'
 import { Profile } from './Profile'
 import { Icon, formatDate } from './ui'
@@ -312,8 +312,8 @@ export function describeEvent(e: AuditEvent): string {
   const label = t(ACTION_LABELS[e.action] || e.action)
   if (!e.changes) return label
   const parts = Object.entries(e.changes).map(([k, v]) => {
-    if (Array.isArray(v) && v.length === 2) return `${k}: ${s(v[0]) || '–'} → ${s(v[1]) || '–'}`
-    return k
+    if (Array.isArray(v) && v.length === 2) return `${fieldLabel(k)}: ${s(v[0]) || '–'} → ${s(v[1]) || '–'}`
+    return fieldLabel(k)
   })
   return `${label} (${parts.join('; ')})`
 }

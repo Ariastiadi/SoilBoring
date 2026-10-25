@@ -25,6 +25,8 @@ export default function BoreholeMap({ reports, onOpen, colorFor, caption = true 
       referrerPolicy: 'strict-origin-when-cross-origin',
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     } as L.TileLayerOptions).addTo(map.current)
+    // Plain credit text (Leaflet's default has an English tooltip and a flag icon).
+    map.current.attributionControl.setPrefix('Leaflet')
     layer.current = L.layerGroup().addTo(map.current)
     return () => {
       map.current?.remove()
