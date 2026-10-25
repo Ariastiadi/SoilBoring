@@ -7,19 +7,19 @@ Borehole logging for geotechnical field work: logs, strata, SPT, samples, core r
 - **Data:** files in `data/` (logs in `reports.csv`), or a Postgres database when `DATABASE_URL` is set. `scripts/seed_demo_data.py` can fill a fresh install with 123 synthetic 2024 borehole logs for a demo.
 - **Live demo deployment:** [soilboring.vercel.app](https://soilboring.vercel.app) (sign-in required)
 
-![Borehole list](docs/assets/screen-boreholes.png)
+![Borehole list](docs/assets/en-boreholes.png)
 
 **Borehole profile:** graphic log (column width follows grain size) next to SPT N against depth.
 
-![Borehole profile](docs/assets/screen-profile.png)
+![Borehole profile](docs/assets/en-profile.png)
 
 **New log:** the form in sections, with the required fields checked off beside the submit button.
 
-![New log form](docs/assets/screen-new-log.png)
+![New log form](docs/assets/en-new-log.png)
 
 **On a phone:** bottom navigation; each borehole becomes a compact entry.
 
-<img src="docs/assets/screen-phone.png" alt="Borehole list on a phone" width="320">
+<img src="docs/assets/en-phone.png" alt="Borehole list on a phone" width="320">
 
 ---
 
