@@ -1,12 +1,17 @@
 ## Soil Boring Ops – Geotechnical Field Log
 
-Comprehensive borehole logging with AI-assisted narratives and dashboards. The steps below guide everyone from first-time users to experienced engineers.
+Borehole logging for geotechnical field work: logs, strata, SPT, samples, core runs and photos, a printable bore log, AGS4 export, offline use in the field and an AI assistant that runs in the browser. The steps below guide everyone from first-time users to experienced engineers.
 
 - **Backend:** Python + FastAPI (Uvicorn)
-- **Frontend:** React + Vite (TypeScript)
-- **Data:** a plain `data/reports.csv` file. It is created on the first saved log; `scripts/seed_demo_data.py` can fill it with 123 synthetic 2024 borehole logs for a demo.
+- **Frontend:** React + Vite (TypeScript), Bahasa Indonesia by default with an English option
+- **Data:** files in `data/` (logs in `reports.csv`), or a Postgres database when `DATABASE_URL` is set. `scripts/seed_demo_data.py` can fill a fresh install with 123 synthetic 2024 borehole logs for a demo.
+- **Live demo deployment:** [soilboring.vercel.app](https://soilboring.vercel.app) (sign-in required)
 
-![Login flow](docs/assets/login.gif)
+![Borehole list](docs/assets/screen-boreholes.png)
+
+| Borehole profile | New log | Phone |
+| --- | --- | --- |
+| ![Profile: graphic log and SPT N](docs/assets/screen-profile.png) | ![New log form](docs/assets/screen-new-log.png) | ![Borehole list on a phone](docs/assets/screen-phone.png) |
 
 ---
 
@@ -70,7 +75,7 @@ Environment variables:
 | `APP_TIMEZONE` | `Asia/Jakarta` | Time zone for "today", report timestamps and the last-7/30-days views. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
 
-> **Run a single Uvicorn worker.** Storage is a CSV file guarded by an in-process lock, and the login throttle and AI cache are in-memory. For multiple workers or instances, move storage to a database first.
+> **File mode: run a single Uvicorn worker.** Files are guarded by locks inside one process. With `DATABASE_URL` the data, the sign-in lockout and the locks live in Postgres, so several workers or serverless instances are fine (only the AI narrative cache stays per process).
 
 #### 2) Frontend
 
@@ -99,7 +104,7 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 
 - Passwords are stored as salted PBKDF2-HMAC-SHA256 (600k iterations). Entries from older versions (`sha256$...` or plain text in a hand-edited file) still work and are upgraded automatically on the next successful login.
 - Minimum password length is 8. After 5 failed sign-ins for an email, further attempts are blocked for 15 minutes.
-- Everyone can change their own password with **Change Password** (top right). Admins can set a new password for another user with **Reset Password** in the Users tab.
+- Everyone can change their own password under **Account & security** (bottom of the side menu; on phones under *More*). Admins can set a new password for another user with **Reset Password** in the Users tab.
 - **admin**: manages users and can edit/delete any log. **general**: can create logs and can edit/delete only the logs they submitted.
 - An admin cannot remove their own account, and the last admin can never be removed.
 - Tokens are signed with `AUTH_TOKEN_SECRET` and expire per `AUTH_TOKEN_TTL`. Changing or resetting a password, or removing the account, ends every other session of that user.
@@ -133,32 +138,41 @@ Rules enforced by the API:
 
 ### Features at a Glance
 
-- **Borehole Log:** Form-driven capture of project/site, drilling parameters, groundwater, USCS, and SPT stats.
-- **Borehole Data:** Filter/search/sort logs, export CSV (spreadsheet-formula safe) or **AGS4**, and edit/delete rows with confirmations.
-- **Dashboard:** KPIs, method and USCS breakdowns, and recent activity with an executive AI brief (cached for 10 minutes; failures are never cached).
-- **Summaries:** Weekly (date range) and monthly (month/year) rollups with stats, highlights, and markdown AI narratives.
-- **Geo AI:** Q&A backed by the borehole CSV with evidence display. The model only sees the most relevant rows and is told to answer from them.
-- **About:** Primer derived from `archive/template/soilboring.md`, with the Indonesian standards (SNI) used in practice.
-- **Language:** Bahasa Indonesia (default) or English, switched with the ID/EN button.
+The side menu (bottom bar on phones) has three groups:
 
-### Depth data, bore log sheet, photos and map
+- **Field work**
+  - **Boreholes** (start page): every log with a one-line overview ("12 boreholes in 3 projects, 300 m drilled in total. 4 still need depth data."), a status filter (*Drilling now*, *Needs depth data*, *Complete*), search, project and more filters, a mini soil column per borehole, a map beside the list coloured by status, and the **Export** menu (CSV of the rows shown, AGS4 per project). Click a row to open the borehole; the *…* menu edits or deletes the log.
+  - **New log:** the borehole log form in sections (borehole and location, dates and team, drilling, soil and groundwater, notes) with a checklist of required fields next to the submit button. Dates are typed as dd/mm/yyyy (or picked from a calendar), "Use my location" fills the coordinates, and the draft is kept on the device while typing.
+- **Analysis**
+  - **Geo AI:** questions in plain language, answered from the logs, with the data rows used shown as evidence.
+  - **Summaries:** weekly (date range) or monthly summary with figures, highlights and a written narrative.
+  - **Dashboard:** key figures, method and USCS bars, recent boreholes and a short narrative.
+- **Administration** (admins): **Users** and the **Activity** log.
+- **About:** primer on soil boring with the Indonesian standards (SNI) used in practice.
+- **Language:** Bahasa Indonesia (default) or English, switched at the bottom of the side menu. Messages from the server, summary texts and dates (dd/mm/yyyy) follow the chosen language.
 
-Open a borehole in **Borehole Data** (button *Open*) to record what changes with depth:
+### Depth data, profile, bore log sheet, photos and map
 
+Open a borehole from the **Boreholes** list. Its section menu holds:
+
+- **Profile:** the borehole to depth scale: a graphic log whose column width follows grain size (fine soils narrow, coarse soils wide), USCS labels, samples, groundwater and end of hole, next to SPT N plotted against depth (hollow points = refusal).
 - **Strata:** from/to depth, USCS group, soil or rock description. Layers may not overlap; a new row starts where the previous one ended.
-- **SPT:** blows for the 150 mm seating drive and the two 150 mm test increments; N is calculated. For refusal (e.g. 50 blows) enter the test penetration reached in mm (reported as `50/80mm`).
+- **SPT:** blows for the 150 mm seating drive and the two 150 mm test increments; N is calculated. For refusal (e.g. 50 blows) enter the test penetration reached in mm (reported as `50/80mm`). Decimal commas (1,5) are accepted.
 - **Samples:** depth range, AGS4 sample type (U, UT, TW, P, D, B, SPTLS, C, W) and reference.
 - **Core runs:** TCR, SCR and RQD in % (SCR ≤ TCR, RQD ≤ SCR are checked).
-- **Photos:** core boxes and site photos straight from the phone camera; they are reduced to at most 1600 px (JPEG) in the browser before upload and stored with the data (max. 30 per borehole, 2 MB each).
+- **Photos:** core boxes and site photos from the camera or the gallery; they are reduced to at most 1600 px (JPEG) in the browser before upload and stored with the data (max. 30 per borehole, 2 MB each).
 - **History:** every change to the log, its depth data and photos, with user and time.
 - **Bore log (print / PDF):** an A4 sheet per 15 m (one sheet up to 20 m) with header data, depth scale, graphic log (patterns by USCS group), descriptions, samples, SPT N graph, core TCR/RQD bars, groundwater and end of hole. Use the browser's *Save as PDF*.
-- **Map:** *Show Map* in Borehole Data places every borehole with coordinates on OpenStreetMap; click a point to open it.
 
-The depth data also goes into the AGS4 export (GEOL, ISPT, SAMP, CORE). API: `GET/PUT /api/details/{BoreholeID}`, `POST /api/photos`, `GET/DELETE /api/photos/{id}`.
+Changes are saved with the bar at the bottom (*Save depth data* / *Discard changes*). If someone else saved the same borehole in the meantime, saving is refused (`409`) instead of overwriting their work. The **map** (*Show map* on the Boreholes page) places every borehole with coordinates on OpenStreetMap; click a point to open it.
+
+A borehole's status in the list: *Drilling now* while its end date is today or later; *Depth data complete* when strata reach the final depth (within 0.5 m) and there is at least one SPT; otherwise *incomplete* or *no depth data yet*.
+
+The depth data also goes into the AGS4 export (GEOL, ISPT, SAMP, CORE). API: `GET/PUT /api/details/{BoreholeID}` (send `expected_updated_at` to detect conflicting edits), `GET /api/depth-overview` (strata and SPT of every borehole, for the list), `POST /api/photos`, `GET/DELETE /api/photos/{id}`.
 
 ### Working offline in the field
 
-The app is installable ("Add to home screen") and keeps its own files in the browser, so it opens without a connection. A log submitted while offline is kept on the device and sent automatically when the connection is back; a banner shows how many are waiting, and a log the server refuses (e.g. the Borehole ID already exists) stays there with the reason, to retry or discard. Viewing data, depth data and photos needs a connection.
+The app is installable ("Add to home screen") and keeps its own files in the browser, so it opens without a connection. A log submitted while offline is kept on the device, tied to the user who made it, and sent with that user's sign-in when the connection is back (also retried every minute and when the app is reopened). Waiting logs appear at the top of the Boreholes list as *Waiting to be sent*; a log the server refuses (e.g. the Borehole ID already exists) stays there with the reason, to retry or discard. Viewing data, depth data and photos needs a connection.
 
 ### Account security
 
@@ -182,7 +196,7 @@ Geo AI works on every deployment, also without any AI server or key: the browser
 
 ### AGS4 export
 
-Choose a project in the **Project** filter of the Borehole Data tab and press **Export AGS4** (or call `GET /api/export/ags?project=<name>`). The file follows AGS4 edition 4.1.1, the ground-investigation data format read by gINT, HoleBASE, OpenGround and similar tools, and passes the official AGS4 checker ([python-ags4](https://pypi.org/project/python-ags4/), used in the tests).
+Choose a project in the **Project** filter of the Boreholes page and pick **Export → AGS4 for the chosen project** (or call `GET /api/export/ags?project=<name>`). The file follows AGS4 edition 4.1.1, the ground-investigation data format read by gINT, HoleBASE, OpenGround and similar tools, and passes the official AGS4 checker ([python-ags4](https://pypi.org/project/python-ags4/), used in the tests).
 
 | App field | AGS4 |
 | --- | --- |
@@ -192,8 +206,12 @@ Choose a project in the **Project** filter of the Borehole Data tab and press **
 | Borehole / casing diameter (nominal Q-series hole size when only the core size was logged) | `HDIA` / `CDIA` |
 | Groundwater depth (when encountered) | `WSTG` |
 | USCS class, average SPT N60, target depth, soil description, remarks | `LOCA_REM` |
+| Strata (from/to, USCS, description) | `GEOL` |
+| Each SPT (seating, test drive, N or refusal) | `ISPT` |
+| Samples (depth, type, reference) | `SAMP` |
+| Core runs (TCR, SCR, RQD) | `CORE` |
 
-The daily log keeps one soil description and one average N60 per hole, so no layer (`GEOL`) or individual SPT (`ISPT`) rows are invented. Text is converted to ASCII as AGS4 requires (é → e).
+Depth groups are only written for boreholes that have depth data; nothing is invented from the log's single soil description or average N60. Text is converted to ASCII as AGS4 requires (é → e).
 
 ---
 
@@ -217,9 +235,21 @@ backend/
     routers/           # auth, users, reports, boreholes, ai, summaries, dashboard, export
   tests/               # pytest suite
 frontend/
-  src/                 # React app (api.ts, App.tsx, Login.tsx, BoreholeDetail.tsx, BoreLog.tsx,
-                       #   BoreholeMap.tsx, Security.tsx, localai.ts, outbox.ts, i18n*.ts, tabs/)
-  public/              # sw.js (offline), manifest.webmanifest, icon.svg
+  src/
+    App.tsx            # side menu / bottom bar, pages
+    tabs/              # Boreholes (DailyReportData), New log (DailyReportForm), Geo AI, Summaries,
+                       #   Dashboard, Users, Activity, About
+    BoreholeDetail.tsx # depth data, photos, history of one borehole
+    Profile.tsx        # graphic log + SPT plot, mini soil columns
+    BoreLog.tsx        # printable A4 bore log
+    BoreholeMap.tsx    # Leaflet map
+    soil.tsx           # USCS patterns, colours, grain-size widths
+    ui.tsx             # page heading, dd/mm/yyyy date field, icons
+    i18n.ts, i18n-id.ts# Bahasa Indonesia / English, server messages translated
+    outbox.ts          # logs saved offline
+    localai.ts, LocalAI.tsx  # Qwen in the browser
+    api.ts, Login.tsx, Security.tsx, ChangePassword.tsx, unsaved.ts, styles.css
+  public/              # sw.js (offline), manifest.webmanifest, icons
 scripts/
   seed_demo_data.py    # synthetic demo logs
 archive/               # original templates and spec (not used at runtime)
@@ -273,12 +303,12 @@ Notes:
 
 Vercel's Hobby plan and Neon's free Postgres need no credit card, and both accept "Sign in with GitHub". `pyproject.toml` and `vercel.json` hold the whole setup: Vercel builds the UI (`frontend/dist`) and runs the FastAPI app as one function, which serves the API and the UI from the same address.
 
-1. **Neon:** create a project and copy the connection string (`postgresql://...`).
-2. **Vercel:** Add New → Project → import this repository; keep the detected settings.
-3. Under *Environment Variables* add `DATABASE_URL` (the Neon string) and optionally `ORG_NAME`, `APP_TIMEZONE`, `ADMIN_EMAIL`. Then deploy.
+1. **Vercel:** Add New → Project → import this repository; keep the detected settings.
+2. **Database:** in the Vercel project open *Storage* → *Create* → **Neon** (free) and connect it with the prefix `DATABASE`; Vercel then sets `DATABASE_URL` itself. Or create a Neon project yourself and add its connection string as `DATABASE_URL`.
+3. Optionally add `ORG_NAME`, `APP_TIMEZONE`, `ADMIN_EMAIL` under *Environment Variables*. Then deploy.
 4. Open the site: as long as no account exists, the sign-in page offers **Create admin account**. Do this right after the first deploy (or set `ADMIN_EMAIL`, so only that address can be used).
 
-Without `DATABASE_URL` the app still starts, but keeps its data in `/tmp`, which Vercel wipes regularly. `vercel.json` places the function in `cle1` (Ohio), next to Neon's AWS US East 2; pick the matching Vercel region if your database lives elsewhere. Every push to `main` redeploys.
+Without `DATABASE_URL` the app still starts, but keeps its data in `/tmp`, which Vercel wipes regularly. The app page, `sw.js` and the manifest are served with an ETag taken from their content, so every deployment reaches the browsers (asset files are cached for a year under hashed names). `vercel.json` places the function in `cle1` (Ohio), next to Neon's AWS US East 2; pick the matching Vercel region if your database lives elsewhere. Every push to `main` redeploys.
 
 ### Deploy on Render with a Neon database
 
