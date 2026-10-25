@@ -10,7 +10,7 @@ import {
 import { t } from '../i18n'
 import { useNav, type Intent, type TabKey } from '../nav'
 import { display, invalidate, number, optionLabel, useList, useSchemas } from '../records'
-import { Icon, PageHead, formatDate, todayIso } from '../ui'
+import { Icon, PageHead, ScrollTable, formatDate, todayIso } from '../ui'
 import { useCatalog } from '../worksheets'
 
 const GROUPS: Array<[string, string]> = [
@@ -63,32 +63,35 @@ export function WorksheetCatalogPage() {
         return (
           <section key={code} className="card" style={{ marginBottom: '1rem' }}>
             <h3><span className="ws-code">{code}.</span> {t(label)}</h3>
-            <div className="table-wrap">
-              <table className="data-table ws-catalog">
-                <thead><tr><th>{t('Number')}</th><th>{t('Worksheet')}</th><th>{t('Standards')}</th><th className="num">{t('Records')}</th><th /></tr></thead>
-                <tbody>
-                  {items.map(s => {
-                    const n = count(s)
-                    return (
-                      <tr key={s.kind + s.key}>
-                        <td className="nowrap">{s.code}</td>
-                        <td><strong>{t(s.label)}</strong>{s.calc && <span className="chip">{t('calculated')}</span>}</td>
-                        <td className="small">{s.standards.map(x => x[0]).join(', ') || '–'}</td>
-                        <td className="num">{n === null ? '' : n}</td>
-                        <td className="nowrap" style={{ textAlign: 'right' }}>
-                          {s.kind === 'page' ? (
-                            <button type="button" className="small" onClick={() => open(s, false)}>{t('Open')}</button>
-                          ) : <>
-                            <button type="button" className="small" onClick={() => open(s, false)}>{t('Blank')}</button>{' '}
-                            {Object.keys(s.example || {}).length > 0 && <button type="button" className="small quiet" onClick={() => open(s, true)}>{t('Example')}</button>}
-                          </>}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <ul className="ws-list">
+              {items.map(s => {
+                const n = count(s)
+                const codes = s.standards.map(x => x[0])
+                const hasExample = s.kind !== 'page' && Object.keys(s.example || {}).length > 0
+                return (
+                  <li key={s.kind + s.key}>
+                    <span className="ws-no">{s.code}</span>
+                    <div className="ws-main">
+                      <strong>{t(s.label)}</strong>
+                      <span className="ws-std" title={codes.join(', ')}>
+                        {codes.length ? codes.slice(0, 3).join(' · ') + (codes.length > 3 ? ` · +${codes.length - 3}` : '') : t('No standard listed')}
+                      </span>
+                    </div>
+                    <div className="ws-side">
+                    <span className="ws-count">{n ? t('{n} saved', { n }) : ''}</span>
+                    <div className="ws-actions">
+                      {s.kind === 'page' ? (
+                        <button type="button" className="small" onClick={() => open(s, false)}>{t('Open')}</button>
+                      ) : <>
+                        <button type="button" className="small" onClick={() => open(s, false)}>{t('Blank')}</button>
+                        {hasExample && <button type="button" className="small quiet" onClick={() => open(s, true)}>{t('Example')}</button>}
+                      </>}
+                    </div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           </section>
         )
       })}
@@ -117,19 +120,16 @@ export function StandardsPage() {
         return (
           <section key={code} className="card" style={{ marginBottom: '1rem' }}>
             <h3><span className="ws-code">{code}.</span> {t(label)}</h3>
-            <table className="data-table">
-              <thead><tr><th>{t('Number')}</th><th>{t('Work')}</th><th>{t('Standard')}</th><th>{t('Subject')}</th></tr></thead>
-              <tbody>
-                {items.flatMap(s => s.standards.map(([std, title], i) => (
-                  <tr key={s.key + std}>
-                    {i === 0 && <td rowSpan={s.standards.length} className="nowrap">{s.code}</td>}
-                    {i === 0 && <td rowSpan={s.standards.length}>{t(s.label)}</td>}
-                    <td className="nowrap"><strong>{std}</strong></td>
-                    <td>{t(title)}</td>
-                  </tr>
-                )))}
-              </tbody>
-            </table>
+            <ul className="std-groups">
+              {items.map(s => (
+                <li key={s.kind + s.key}>
+                  <div className="std-work"><span className="ws-no">{s.code}</span> <strong>{t(s.label)}</strong></div>
+                  <ul className="std-list">
+                    {s.standards.map(([std, title]) => <li key={std}><strong>{std}</strong> {title && <span className="muted">{t(title)}</span>}</li>)}
+                  </ul>
+                </li>
+              ))}
+            </ul>
           </section>
         )
       })}
@@ -225,7 +225,7 @@ export function CoordinatesPage() {
         </div>
         {error && <p className="notice error">{error}</p>}
         {rows && (
-          <div className="table-wrap" style={{ marginTop: '1rem' }}>
+          <div style={{ marginTop: '1rem' }}><ScrollTable>
             <table className="data-table">
               <thead><tr><th>{t('Name')}</th><th className="num">{t('Latitude')}</th><th className="num">{t('Longitude')}</th><th>{t('Zone')}</th><th className="num">{t('Easting (m)')}</th><th className="num">{t('Northing (m)')}</th><th>DMS</th></tr></thead>
               <tbody>{rows.map((r, i) => r.error
@@ -234,7 +234,7 @@ export function CoordinatesPage() {
                   <td className="num">{number(r.easting)}</td><td className="num">{number(r.northing)}</td><td className="small nowrap">{r.dms}</td></tr>)}
               </tbody>
             </table>
-          </div>
+          </ScrollTable></div>
         )}
       </section>
     </div>
@@ -319,8 +319,8 @@ export function SampleRegisterPage() {
       )}
       {labels && <SampleLabels samples={labels} onClose={() => setLabels(null)} />}
       {rows && (
-        <div className="table-wrap">
-          <table className="data-table">
+        <ScrollTable>
+          <table className="data-table sample-table">
             <thead><tr>
               <th style={{ width: '2rem' }}><input type="checkbox" aria-label={t('Select all')} checked={rows.length > 0 && chosen.length === rows.length}
                 onChange={e => setPicked(e.target.checked ? Object.fromEntries(rows.map(r => [key(r), true])) : {})} /></th>
@@ -332,16 +332,16 @@ export function SampleRegisterPage() {
                 <tr key={key(s)}>
                   <td><input type="checkbox" aria-label={`${s.borehole_id} ${s.ref}`} checked={!!picked[key(s)]} onChange={e => setPicked({ ...picked, [key(s)]: e.target.checked })} /></td>
                   <td className="nowrap"><strong>{s.borehole_id}</strong><div className="bh-sub">{s.project}</div></td>
-                  <td>{s.ref || '–'}</td><td>{s.type}</td>
-                  <td className="num">{number(s.top)}</td><td className="num">{number(s.base)}</td>
-                  <td>{s.tests.length ? s.tests.map(x => (
+                  <td data-label={t('Sample')}>{s.ref || '–'}</td><td data-label={t('Type')}>{s.type}</td>
+                  <td className="num" data-label={t('From (m)')}>{number(s.top)}</td><td className="num" data-label={t('To (m)')}>{number(s.base)}</td>
+                  <td data-label={t('Laboratory tests')} className="tests">{s.tests.length ? s.tests.map(x => (
                     <span key={x.id} className={`chip status-${x.status}`}>{testField ? optionLabel(testField, x.test_type) : x.test_type}</span>
                   )) : <span className="muted">–</span>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollTable>
       )}
     </div>
   )

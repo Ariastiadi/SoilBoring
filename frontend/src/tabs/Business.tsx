@@ -8,10 +8,10 @@ import { getDepthOverview, listRecords, listReports, saveRecord, type DepthOverv
 import { lang, t, translateServer } from '../i18n'
 import { useNav, type Intent, type TabKey } from '../nav'
 import {
-  RecordFields, RecordForm, RecordsPage, RecordTable, STATUS_TONE, display, invalidate, money, number, optionLabel,
+  RecordFields, RecordForm, RecordsPage, type FormLayout, RecordTable, STATUS_TONE, display, invalidate, money, number, optionLabel,
   useList, useSchemas,
 } from '../records'
-import { Icon, PageHead, formatDate, todayIso } from '../ui'
+import { Icon, PageHead, ScrollTable, formatDate, todayIso } from '../ui'
 import { CptCalcPreview, ResultView, StandardsList, sheetOf, useCatalog, useSheetTools } from '../worksheets'
 
 const COMMERCIAL_ROLES = ['admin', 'manager', 'finance']
@@ -126,7 +126,7 @@ function ProjectHub({ project }: { project: Rec }) {
           <button type="button" className="small" onClick={() => go('new', { newWith: { ProjectName: project.name } })}><Icon name="plus" />{t('Add')}</button>
         </div>
         {boreholes.length > 0 ? (
-          <div className="table-wrap">
+          <ScrollTable>
             <table className="data-table">
               <thead><tr><th>{t('Borehole')}</th><th>{t('Dates')}</th><th className="num">{t('Depth')}</th><th>{t('Status')}</th></tr></thead>
               <tbody>
@@ -143,7 +143,7 @@ function ProjectHub({ project }: { project: Rec }) {
                 })}
               </tbody>
             </table>
-          </div>
+          </ScrollTable>
         ) : <p className="muted small">{t('Borehole logs whose Project is "{name}" appear here.', { name: project.name })}</p>}
       </section>
       {sections.map(s => <HubSection key={s.key} s={s} />)}
@@ -402,7 +402,7 @@ export function ContractsPage({ intent }: { intent?: Intent }) {
           <section className="hub-section">
             <div className="hub-head"><h3>{t('Payment terms')}</h3></div>
             {Math.abs(sum - 100) > 0.01 && terms.length > 0 && <p className="notice warn">{t('The terms add up to {p}%, not 100%.', { p: number(sum) })}</p>}
-            <div className="table-wrap">
+            <ScrollTable>
               <table className="data-table">
                 <thead><tr><th>{t('Term')}</th><th className="num">{t('Share (%)')}</th><th className="num">{t('Amount')}</th><th>{t('Invoice')}</th><th /></tr></thead>
                 <tbody>
@@ -426,7 +426,7 @@ export function ContractsPage({ intent }: { intent?: Intent }) {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ScrollTable>
             <p className="help">{t('The contract value includes VAT; a new invoice takes the term amount without VAT as its price, so the total with 11% VAT matches the term.')}</p>
           </section>
         )
@@ -689,7 +689,7 @@ function cptTools(data: Record<string, any>, setData: (u: (p: Record<string, any
 export function CptPage({ intent }: { intent?: Intent }) {
   const [printing, setPrinting] = useState<Rec | null>(null)
   return <>
-    <RecordsPage entityName="cpt" openId={intent?.open} startNew={intent?.newWith}
+    <RecordsPage entityName="cpt" hideInView={['summary']} openId={intent?.open} startNew={intent?.newWith}
       description={t('Cone penetration tests (sondir): readings of cone resistance qc and sleeve friction fs with depth. Readings can be pasted from Excel.')}
       defaults={{ date: todayIso(), equipment: 'mechanical', qc_unit: 'kgcm2', area_ratio: 0.8, unit_weight: 18, nkt: 15, rigidity_index: 100 }}
       formTools={cptTools}
@@ -710,8 +710,14 @@ export function FieldWorkPage({ intent }: { intent?: Intent }) {
   const filter = useMemo(() => (r: Rec) => type === 'all' || r.type === type, [type])
   const tools = useSheetTools('field', 'data', 'method')
   const catalog = useCatalog()
+  const layout = useMemo<FormLayout>(() => ({
+    first: ['type', 'method', 'code', 'date', 'project_id', 'borehole_id'],
+    groups: [{ title: 'Location, elevation and crew', fields: ['latitude', 'longitude', 'elevation', 'length', 'crew'] }],
+    // Calculated worksheets give their own results; the free list of measurements is for the others.
+    hide: data => sheetOf(catalog, 'field', data.method)?.calc ? ['values'] : [],
+  }), [catalog])
   return <>
-    <RecordsPage entityName="field_activities" openId={intent?.open} startNew={intent?.newWith} filter={filter}
+    <RecordsPage entityName="field_activities" hideInView={['summary']} formLayout={layout} openId={intent?.open} startNew={intent?.newWith} filter={filter}
       description={t('Daily reports, survey, in-situ tests, geophysics and geology worksheets, calculated and printable with their standards.')}
       toolbar={<Segments value={type} onChange={setType} label={t('Discipline')} options={FIELD_GROUP_OPTIONS} />}
       formTools={tools}
@@ -747,8 +753,13 @@ export function LabPage({ intent }: { intent?: Intent }) {
   const tools = useMemo(() => (data: Record<string, any>, setData: (u: (p: Record<string, any>) => Record<string, any>) => void, place: 'top' | 'bottom') =>
     place === 'top' ? <><SampleCodeInput setData={setData} />{sheetTools(data, setData, place)}</> : sheetTools(data, setData, place), [sheetTools])
   const catalog = useCatalog()
+  const layout = useMemo<FormLayout>(() => ({
+    first: ['test_type', 'borehole_id', 'sample_ref', 'depth_top', 'depth_base', 'status'],
+    // With raw data the results are calculated; the result fields are for tests reported without it.
+    hide: data => sheetOf(catalog, 'lab', data.test_type)?.calc && Object.values(data.raw || {}).some(v => Array.isArray(v) ? v.length : v !== '' && v !== null && v !== undefined) ? ['results'] : [],
+  }), [catalog])
   return <>
-    <RecordsPage entityName="lab_tests" openId={intent?.open} startNew={intent?.newWith} filter={filter}
+    <RecordsPage entityName="lab_tests" hideInView={r => r.calc && Object.keys(r.calc).length && !r.calc.error ? ['summary', 'results'] : ['summary']} formLayout={layout} openId={intent?.open} startNew={intent?.newWith} filter={filter}
       description={t('Samples from the boreholes and their test results. Results feed the engineering analyses.')}
       toolbar={<Segments value={status} onChange={setStatus} label={t('Show tests')} options={[['open', 'In progress'], ['done', 'Done'], ['all', 'All']]} />}
       formTools={tools}
@@ -800,9 +811,9 @@ function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' 
   return (
     <PrintSheet title={`${title} ${number || ''}`} onClose={onClose}>
       <Letterhead settings={settings} title={title} number={number} date={date} />
-      {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} /></div>}
+      {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} hideEmpty /></div>}
       {kind === 'cpt' && <CptPlot test={record} />}
-      {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} /></>}
+      {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} notesOpen /></>}
       {sheet && sheet.standards.length > 0 && <><h3 className="doc-h">{t('Standards')}</h3><StandardsList sheet={sheet} /></>}
       <div className="doc-approvals">
         {people.map(([label, who]) => (

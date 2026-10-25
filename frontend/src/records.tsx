@@ -8,7 +8,7 @@ import {
   type EntityDef, type FieldDef, type FileMeta, type Rec, type Schemas,
 } from './api'
 import { lang, locale, t, translateServer } from './i18n'
-import { DateInput, Icon, PageHead, formatDate } from './ui'
+import { DateInput, Icon, PageHead, ScrollTable, formatDate } from './ui'
 
 export const SchemaContext = createContext<Schemas | null>(null)
 export const useSchemas = () => useContext(SchemaContext)
@@ -58,7 +58,13 @@ export const money = (v: unknown) => {
 export const number = (v: unknown) => {
   const n = typeof v === 'number' ? v : Number(v)
   if (v === null || v === undefined || v === '' || !Number.isFinite(n)) return '–'
-  return n.toLocaleString(locale(), { maximumFractionDigits: 3 })
+  if (n !== 0 && Math.abs(n) < 0.001) {
+    // Small values such as permeability (3.95e-5) keep three significant figures: 3,95×10⁻⁵
+    const [m, e] = n.toExponential(2).split('e')
+    const sup = String(Number(e)).replace(/[-0-9]/g, c => '⁻⁰¹²³⁴⁵⁶⁷⁸⁹'['-0123456789'.indexOf(c)])
+    return `${Number(m).toLocaleString(locale(), { maximumFractionDigits: 2 })}×10${sup}`
+  }
+  return Math.abs(n) < 1 ? n.toLocaleString(locale(), { maximumSignificantDigits: 3 }) : n.toLocaleString(locale(), { maximumFractionDigits: 3 })
 }
 
 export function optionLabel(f: FieldDef, value: unknown): string {
@@ -241,8 +247,8 @@ function ItemsEditor({ f, rows, onChange, record }: { f: FieldDef, rows: Array<R
   }
   const total = subs.some(s => s.name === 'unit_price') ? rows.reduce((sum, r) => sum + (Number(r.qty) || 0) * (Number(r.unit_price) || 0), 0) : null
   return (
-    <div>
-      <div className="table-scroll">
+    <div className="items-editor">
+      <ScrollTable>
         <table className="grid-table">
           <thead>
             <tr>
@@ -279,7 +285,7 @@ function ItemsEditor({ f, rows, onChange, record }: { f: FieldDef, rows: Array<R
             <tfoot><tr><td colSpan={editable.length} style={{ textAlign: 'right', fontWeight: 600 }}>{t('Subtotal')}</td><td className="num nowrap" style={{ fontWeight: 600 }}>{money(total)}</td><td /></tr></tfoot>
           )}
         </table>
-      </div>
+      </ScrollTable>
       <div className="actions" style={{ marginTop: '.5rem' }}>
         <button type="button" onClick={() => onChange([...rows, {}].slice(0, f.max_items))} disabled={rows.length >= f.max_items}><Icon name="plus" />{t('Add row')}</button>
         <button type="button" className="quiet" onClick={() => setPaste(paste === null ? '' : null)}>{t('Paste from Excel')}</button>
@@ -360,9 +366,16 @@ function initial(entity: EntityDef, record?: Rec | null, defaults?: Record<strin
 
 export type FormTools = (data: Record<string, any>, setData: (update: (prev: Record<string, any>) => Record<string, any>) => void, place: 'top' | 'bottom') => ReactNode
 
-export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide = [], tools }: {
+/** How a form is laid out: fields shown first, optional groups folded away, fields hidden for the data entered. */
+export type FormLayout = {
+  first?: string[]
+  groups?: Array<{ title: string, fields: string[] }>
+  hide?: (data: Record<string, any>) => string[]
+}
+
+export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide = [], tools, layout }: {
   entity: EntityDef, record?: Rec | null, defaults?: Record<string, any>, onSaved: (r: Rec) => void, onCancel?: () => void, hide?: string[],
-  tools?: FormTools
+  tools?: FormTools, layout?: FormLayout
 }) {
   const [data, setData] = useState<Record<string, any>>(() => initial(entity, record, defaults))
   const [busy, setBusy] = useState(false)
@@ -384,29 +397,55 @@ export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide =
       setBusy(false)
     }
   }
-  const fields = entity.fields.filter(f => !f.readonly && !hide.includes(f.name))
+  const hidden = new Set([...hide, ...(layout?.hide?.(data) || [])])
+  const visible = entity.fields.filter(f => !f.readonly && !hidden.has(f.name))
+  const first = layout?.first || []
+  const fields = [...first.map(n => visible.find(f => f.name === n)).filter((f): f is FieldDef => !!f), ...visible.filter(f => !first.includes(f.name))]
+  const grouped = new Map<string, { title: string, fields: FieldDef[] }>()
+  for (const g of layout?.groups || []) grouped.set(g.title, { title: g.title, fields: fields.filter(f => g.fields.includes(f.name)) })
+  const groupOf = (f: FieldDef) => (layout?.groups || []).find(g => g.fields.includes(f.name))?.title
   const wide = (f: FieldDef) => ['longtext', 'items', 'files', 'json', 'multiselect'].includes(f.type)
+  const filled = (v: unknown) => !(v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length))
+  const fieldBlock = (f: FieldDef) => {
+    // A worksheet's data field brings its own section headings, so its label would stand alone.
+    const ownHeadings = f.type === 'json' && !!f.variants && !!f.variants_by && !!data[f.variants_by]
+    return (
+      <div key={f.name} className={`field${wide(f) ? ' wide' : ''}`}>
+        {f.type === 'bool' ? (
+          <label className="checkbox"><FieldInput f={f} value={data[f.name]} record={data} onChange={v => set(f.name, v)} id={`r-${f.name}`} />{t(f.label)}</label>
+        ) : (
+          <>
+            {!ownHeadings && <label htmlFor={`r-${f.name}`}>{t(f.label)}{f.required && f.name !== entity.number_field && <span className="tag-req">{t('required')}</span>}</label>}
+            <FieldInput f={f} value={data[f.name]} record={data} onChange={v => set(f.name, v)} id={`r-${f.name}`} />
+          </>
+        )}
+        {f.help && <p className="help">{t(f.help)}</p>}
+      </div>
+    )
+  }
+  const placed = new Set<string>()
   return (
     <form onSubmit={submit} className="card" noValidate>
       {tools?.(data, setData, 'top')}
       <div className="fields">
-        {fields.map(f => (
-          <div key={f.name} className={`field${wide(f) ? ' wide' : ''}`}>
-            {f.type === 'bool' ? (
-              <label className="checkbox"><FieldInput f={f} value={data[f.name]} record={data} onChange={v => set(f.name, v)} id={`r-${f.name}`} />{t(f.label)}</label>
-            ) : (
-              <>
-                <label htmlFor={`r-${f.name}`}>{t(f.label)}{f.required && f.name !== entity.number_field && <span className="tag-req">{t('required')}</span>}</label>
-                <FieldInput f={f} value={data[f.name]} record={data} onChange={v => set(f.name, v)} id={`r-${f.name}`} />
-              </>
-            )}
-            {f.help && <p className="help">{t(f.help)}</p>}
-          </div>
-        ))}
+        {fields.map(f => {
+          const g = groupOf(f)
+          if (!g) return fieldBlock(f)
+          if (placed.has(g)) return null
+          placed.add(g)
+          const group = grouped.get(g)!
+          const open = group.fields.some(x => filled(data[x.name]) && x.type !== 'select')
+          return (
+            <details key={'g-' + g} className="field wide form-group" open={open || undefined}>
+              <summary>{t(g)}<span className="muted small"> · {t('optional')}</span></summary>
+              <div className="fields">{group.fields.map(fieldBlock)}</div>
+            </details>
+          )
+        })}
       </div>
       {tools?.(data, setData, 'bottom')}
       {error && <p className="notice error" role="alert">{error}</p>}
-      <div className="actions" style={{ marginTop: '1rem' }}>
+      <div className="save-bar">
         <button type="submit" className="primary" disabled={busy}>{busy ? t('Saving…') : t('Save')}</button>
         {onCancel && <button type="button" onClick={onCancel} disabled={busy}>{t('Cancel')}</button>}
       </div>
@@ -423,23 +462,25 @@ function ItemsTable({ f, rows }: { f: FieldDef, rows: any[] }) {
   return (
     <section style={{ marginTop: '1rem' }}>
       <h3>{t(f.label)}{rows.length > 12 && <span className="muted small"> · {rows.length} {t('rows')}</span>}</h3>
-      <div className="table-wrap" style={rows.length > 12 ? { maxHeight: '26rem', overflowY: 'auto' } : undefined}>
+      <ScrollTable maxHeight={rows.length > 12 ? '26rem' : undefined}>
         <table className="data-table">
           <thead><tr>{cols.map(s => <th key={s.name} className={['number', 'int', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{t(s.label)}</th>)}</tr></thead>
           <tbody>
             {rows.slice(0, 300).map((row, i) => (
-              <tr key={i}>{cols.map(s => <td key={s.name} className={['number', 'int', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{display(s, row?.[s.name])}</td>)}</tr>
+              <tr key={i}>{cols.map(s => <td key={s.name} className={['number', 'int', 'money', 'percent'].includes(s.type) ? 'num' : String(row?.[s.name] ?? '').length <= 18 ? 'short' : ''}>{display(s, row?.[s.name])}</td>)}</tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollTable>
       {rows.length > 300 && <p className="muted small">{t('Showing the first 300 rows.')}</p>}
     </section>
   )
 }
 
-export function RecordFields({ entity, record, hide = [] }: { entity: EntityDef, record: Rec, hide?: string[] }) {
-  const simple = entity.fields.filter(f => !['items', 'files', 'json', 'longtext'].includes(f.type) && !hide.includes(f.name) && f.name in record)
+export function RecordFields({ entity, record, hide = [], hideEmpty = false }: { entity: EntityDef, record: Rec, hide?: string[], hideEmpty?: boolean }) {
+  const blank = (v: unknown) => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)
+  const simple = entity.fields.filter(f => !['items', 'files', 'json', 'longtext'].includes(f.type) && !hide.includes(f.name) && f.name in record
+    && !(hideEmpty && blank(record[f.name])))
   const long = entity.fields.filter(f => f.type === 'longtext' && record[f.name] && !hide.includes(f.name))
   const items = entity.fields.filter(f => f.type === 'items' && !hide.includes(f.name) && (record[f.name] || []).length)
   const json = entity.fields.filter(f => f.type === 'json' && f.variants && !hide.includes(f.name))
@@ -489,9 +530,11 @@ export function RecordFields({ entity, record, hide = [] }: { entity: EntityDef,
 
 export type DetailExtra = (record: Rec, reload: () => void) => ReactNode
 
-export function RecordsPage({ entityName, description, defaults, filter, extra, columns, back, title, hideInForm, openId, startNew, renderForm, actions, toolbar, formTools }: {
+export function RecordsPage({ formLayout, hideInView, entityName, description, defaults, filter, extra, columns, back, title, hideInForm, openId, startNew, renderForm, actions, toolbar, formTools }: {
   toolbar?: ReactNode
   formTools?: FormTools
+  formLayout?: FormLayout
+  hideInView?: string[] | ((record: Rec) => string[])
   entityName: string
   openId?: string
   startNew?: Record<string, any> | null
@@ -550,7 +593,7 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
           onCancel: () => setMode(open ? 'view' : 'list'),
           onSaved: r => { invalidate(entityName); setOpen(r); setMode('view'); setNotice(t('Saved.')); load() },
         }) : (
-          <RecordForm entity={entity} record={mode === 'edit' ? open : null} defaults={newDefaults} hide={hideInForm} tools={formTools}
+          <RecordForm entity={entity} record={mode === 'edit' ? open : null} defaults={newDefaults} hide={hideInForm} tools={formTools} layout={formLayout}
             onCancel={() => setMode(open ? 'view' : 'list')}
             onSaved={r => { setOpen(r); setMode('view'); setNotice(t('Saved.')); load() }} />
         )}
@@ -578,15 +621,20 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
           description={t(entity.label_one)}
           actions={<>
             {actions?.(open)}
-            {open._can_edit && <>
-              <button type="button" className="quiet danger-quiet" onClick={remove}>{t('Delete')}</button>
-              <button type="button" className="primary" onClick={() => { setMode('edit'); setNotice('') }}>{t('Edit')}</button>
-            </>}
+            {open._can_edit && <button type="button" className="primary" onClick={() => { setMode('edit'); setNotice('') }}>{t('Edit')}</button>}
           </>} />
         {notice && <p className="notice ok" role="status">{notice}</p>}
         {error && <p className="notice error">{error}</p>}
         {extra?.(open, reload)}
-        <section className="card"><RecordFields entity={entity} record={open} /></section>
+        <section className="card">
+          {extra && <h3 className="card-title">{t('Data entered')}</h3>}
+          <RecordFields entity={entity} record={open} hide={typeof hideInView === 'function' ? hideInView(open) : hideInView} hideEmpty />
+        </section>
+        {open._can_edit && (
+          <div className="detail-foot">
+            <button type="button" className="quiet danger-quiet" onClick={remove}><Icon name="trash" />{t('Delete {what}', { what: t(entity.label_one).toLowerCase() })}</button>
+          </div>
+        )}
       </div>
     )
   }
@@ -617,14 +665,15 @@ export function RecordTable({ entity, rows, cols, onOpen }: { entity: EntityDef,
   const columns = cols || entity.fields.filter(f => f.list)
   const numeric = (f: FieldDef) => ['money', 'number', 'percent', 'int'].includes(f.type)
   return (
-    <div className="table-wrap">
+    <div className="table-wrap record-list">
       <table className="bh-table record-table">
         <thead><tr>{columns.map(f => <th key={f.name} className={numeric(f) ? 'num' : ''}>{t(f.label)}</th>)}</tr></thead>
         <tbody>
           {rows.map(r => (
             <tr key={r.id} onClick={() => onOpen(r)}>
               {columns.map((f, i) => (
-                <td key={f.name} className={numeric(f) ? 'num nowrap' : ''}>
+                <td key={f.name} data-label={t(f.label)}
+                  className={[numeric(f) ? 'num nowrap' : '', i > 0 && (r[f.name] === null || r[f.name] === undefined || r[f.name] === '') ? 'blank' : ''].join(' ').trim() || undefined}>
                   {i === 0 ? (
                     <button type="button" className="quiet" style={{ padding: 0, minHeight: 0, color: 'inherit' }} onClick={e => { e.stopPropagation(); onOpen(r) }}>
                       <span className="bh-id">{display(f, r[f.name])}</span>

@@ -5,6 +5,7 @@ import { t, translateServer } from '../i18n'
 import type { Intent } from '../nav'
 import { FieldInput, RecordsPage, number, useSchemas } from '../records'
 import { ResultView } from '../worksheets'
+import { ScrollTable } from '../ui'
 
 type Inputs = Record<string, any>
 
@@ -374,7 +375,7 @@ function LineChart({ points, xLabel, yLabel, refLine, invertY = true }: {
 }
 
 export function AnalysisResult({ type, result }: { type: string, result: Record<string, any> }) {
-  if (Array.isArray(result.values) || Array.isArray(result.tables)) return <ResultView result={result} />
+  if (Array.isArray(result.values) || Array.isArray(result.tables)) return <ResultView result={result} notesOpen />
   const notes: string[] = result.notes || []
   return (
     <div>
@@ -401,14 +402,14 @@ export function AnalysisResult({ type, result }: { type: string, result: Record<
         )}
       </>}
       {type === 'settlement' && (
-        <div className="table-wrap">
+        <ScrollTable>
           <table className="data-table">
             <thead><tr><th className="num">{t('Depth (m)')}</th><th className="num">σ'v0 (kPa)</th><th className="num">Δσ (kPa)</th><th>{t('State')}</th><th className="num">{t('Settlement (mm)')}</th></tr></thead>
             <tbody>{(result.sublayers || []).map((r: Rec, i: number) => (
               <tr key={i}><td className="num">{number(r.mid_depth)}</td><td className="num">{number(r.sigma_v0_eff)}</td><td className="num">{number(r.delta_sigma)}</td><td>{r.state}</td><td className="num">{number(r.settlement_mm)}</td></tr>
             ))}</tbody>
           </table>
-        </div>
+        </ScrollTable>
       )}
       {type === 'liquefaction' && <>
         {(result.rows || []).filter((r: Rec) => r.FS !== null && r.FS !== undefined).length > 1 && (
@@ -418,7 +419,7 @@ export function AnalysisResult({ type, result }: { type: string, result: Record<
             <figcaption className="help">{t('Red line: FS = 1. Points left of it are expected to liquefy.')}</figcaption>
           </figure>
         )}
-        <div className="table-wrap">
+        <ScrollTable>
           <table className="data-table">
             <thead><tr><th className="num">{t('Depth (m)')}</th><th className="num">N</th><th className="num">(N1)60cs</th><th className="num">CSR</th><th className="num">CRR</th><th className="num">FS</th><th>{t('Result')}</th></tr></thead>
             <tbody>{(result.rows || []).map((r: Rec, i: number) => (
@@ -429,7 +430,7 @@ export function AnalysisResult({ type, result }: { type: string, result: Record<
               </tr>
             ))}</tbody>
           </table>
-        </div>
+        </ScrollTable>
       </>}
       {result.method && <p className="help">{t('Method')}: {translateServer(result.method)}</p>}
       {notes.length > 0 && <ul className="notes">{notes.map((n, i) => <li key={i}>{translateServer(n)}</li>)}</ul>}

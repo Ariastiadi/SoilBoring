@@ -5,8 +5,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { calcWorksheet, getCatalog, type CalcResult, type ChartAxis, type ChartSpec, type SheetInfo } from './api'
-import { t, translateServer } from './i18n'
+import { localValue, t, translateServer } from './i18n'
 import { number } from './records'
+import { ScrollTable } from './ui'
 
 export function useCatalog(): SheetInfo[] | null {
   const [list, setList] = useState<SheetInfo[] | null>(null)
@@ -78,7 +79,7 @@ function heat(f: number) {
 }
 
 export function Chart({ spec }: { spec: ChartSpec }) {
-  const W = 520, H = 340, L = 56, R = 16, T = 26, B = 42
+  const W = 520, H = 360, L = 62, R = 16, T = 18, B = 50
   const pts = spec.kind === 'value' ? (spec.points || []).map(p => [p[0], p[1]] as [number, number]) : (spec.series || []).flatMap(s => s.points)
   if (!pts.length) return null
   // Depth on y with reverse: y grows downward on screen already, so reverse means "small at top".
@@ -91,18 +92,18 @@ export function Chart({ spec }: { spec: ChartSpec }) {
   return (
     <figure className="ws-chart">
       <figcaption>{t(spec.title)}</figcaption>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W }} role="img" aria-label={t(spec.title)}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={t(spec.title)}>
         <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="#fff" stroke="#cdd2c9" />
         {xs.ticks.map(v => (
           <g key={'x' + v}>
             <line x1={xs.map(v)} x2={xs.map(v)} y1={T} y2={H - B} stroke="#eef0eb" />
-            <text x={xs.map(v)} y={H - B + 14} fontSize="10" textAnchor="middle" fill="#545b61">{tickLabel(v)}</text>
+            <text x={xs.map(v)} y={H - B + 18} fontSize="13" textAnchor="middle" fill="#545b61">{tickLabel(v)}</text>
           </g>
         ))}
         {ys.ticks.map(v => (
           <g key={'y' + v}>
             <line x1={L} x2={W - R} y1={ys.map(v)} y2={ys.map(v)} stroke="#eef0eb" />
-            <text x={L - 6} y={ys.map(v) + 3.5} fontSize="10" textAnchor="end" fill="#545b61">{tickLabel(v)}</text>
+            <text x={L - 7} y={ys.map(v) + 4.5} fontSize="13" textAnchor="end" fill="#545b61">{tickLabel(v)}</text>
           </g>
         ))}
         <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="none" stroke="#9aa19a" />
@@ -121,8 +122,8 @@ export function Chart({ spec }: { spec: ChartSpec }) {
               </g>
             )
           })}
-        <text x={L + (W - L - R) / 2} y={H - 6} fontSize="11" textAnchor="middle" fill="#23282d">{t(spec.x.label)}</text>
-        <text x={13} y={T + (H - T - B) / 2} fontSize="11" textAnchor="middle" fill="#23282d" transform={`rotate(-90 13 ${T + (H - T - B) / 2})`}>{t(spec.y.label)}</text>
+        <text x={L + (W - L - R) / 2} y={H - 8} fontSize="14" textAnchor="middle" fill="#23282d">{t(spec.x.label)}</text>
+        <text x={16} y={T + (H - T - B) / 2} fontSize="14" textAnchor="middle" fill="#23282d" transform={`rotate(-90 16 ${T + (H - T - B) / 2})`}>{t(spec.y.label)}</text>
       </svg>
       {spec.kind === 'value' ? (
         <div className="ws-legend">
@@ -145,33 +146,65 @@ export function Chart({ spec }: { spec: ChartSpec }) {
 
 const cell = (v: any) => (typeof v === 'number' ? number(v) : v === null || v === undefined || v === '' ? '–' : translateServer(String(v)))
 
-export function ResultView({ result, compact = false }: { result: CalcResult | null | undefined, compact?: boolean }) {
+/** "Label = 88.29 kPa; Label = 4" → [["Label", "88.29 kPa"], ...] */
+function summaryParts(summary: string): Array<[string, string]> {
+  return summary.split('; ').map((part): [string, string] => {
+    const i = part.indexOf(' = ')
+    return i < 0 ? ['', part] : [part.slice(0, i), part.slice(i + 3)]
+  }).filter(([, v]) => v !== '')
+}
+
+function KeyFigure({ label, value }: { label: string, value: string }) {
+  const local = localValue(value)
+  const m = /^(-?[\d.,]+(?:e[-+]?\d+)?)(?: (.+))?$/.exec(local)
+  return (
+    <div className="key-figure">
+      <span className="key-label">{t(label)}</span>
+      <span className="key-value">{m ? <>{m[1]}{m[2] && <small> {m[2]}</small>}</> : translateServer(local)}</span>
+    </div>
+  )
+}
+
+export function ResultView({ result, compact = false, notesOpen = false }: { result: CalcResult | null | undefined, compact?: boolean, notesOpen?: boolean }) {
   if (!result || !Object.keys(result).length) return null
   if (result.error) return <p className="notice error">{translateServer(result.error)}</p>
+  const keys = result.summary ? summaryParts(result.summary) : []
+  // A value already shown as a key figure is left out of the list below ("e0" and "Initial void ratio e0").
+  const shown = keys.map(([l]) => l).filter(Boolean)
+  const same = (label: string) => shown.some(k => label === k || label.endsWith(' ' + k) || label.startsWith(k + ' ('))
+  // Values that could not be worked out for this sample (e.g. D10 above the hydrometer range) are left out.
+  const rest = (result.values || []).filter(v => !same(v.label) && v.value !== null && v.value !== undefined && v.value !== '')
+  const hasNotes = !!result.method || !!result.notes?.length
   return (
     <div className="ws-result">
-      {result.summary && <p className="result-line"><strong>{translateServer(result.summary)}</strong></p>}
-      {!!result.values?.length && (
-        <dl className="facts-grid">
-          {result.values.map((v, i) => (
+      {keys.length > 0 && <div className="key-figures">{keys.map(([l, v], i) => <KeyFigure key={i} label={l} value={v} />)}</div>}
+      {rest.length > 0 && (
+        <dl className="facts-grid compact">
+          {rest.map((v, i) => (
             <div key={i}><dt>{t(v.label)}{v.unit ? ` (${v.unit})` : ''}</dt><dd>{cell(v.value)}</dd></div>
           ))}
         </dl>
       )}
       {!compact && !!result.charts?.length && <div className="ws-charts">{result.charts.map((c, i) => <Chart key={i} spec={c} />)}</div>}
       {!compact && result.tables?.map((tb, i) => (
-        <section key={i} style={{ marginTop: '1rem' }}>
-          {tb.title && <h4>{t(tb.title)}</h4>}
-          <div className="table-wrap" style={tb.rows.length > 14 ? { maxHeight: '24rem', overflowY: 'auto' } : undefined}>
+        <section key={i} className="ws-table">
+          {tb.title && <h4>{t(tb.title)}{tb.rows.length > 12 && <span className="muted small"> · {tb.rows.length} {t('rows')}</span>}</h4>}
+          <ScrollTable maxHeight={tb.rows.length > 14 ? '26rem' : undefined}>
             <table className="data-table">
-              <thead><tr>{tb.columns.map((c, k) => <th key={k}>{t(c)}</th>)}</tr></thead>
-              <tbody>{tb.rows.map((r, k) => <tr key={k}>{r.map((v, j) => <td key={j} className={typeof v === 'number' ? 'num' : ''}>{cell(v)}</td>)}</tr>)}</tbody>
+              <thead><tr>{tb.columns.map((c, k) => <th key={k} className={typeof tb.rows[0]?.[k] === 'number' ? 'num' : ''}>{t(c)}</th>)}</tr></thead>
+              <tbody>{tb.rows.map((r, k) => <tr key={k}>{r.map((v, j) => <td key={j} className={typeof v === 'number' ? 'num' : typeof v === 'string' && v.length <= 18 ? 'short' : ''}>{cell(v)}</td>)}</tr>)}</tbody>
             </table>
-          </div>
+          </ScrollTable>
         </section>
       ))}
-      {result.method && <p className="help">{t('Method')}: {translateServer(result.method)}</p>}
-      {!compact && !!result.notes?.length && <ul className="notes">{result.notes.map((n, i) => <li key={i}>{translateServer(n)}</li>)}</ul>}
+      {compact && result.method && <p className="help">{t('Method')}: {translateServer(result.method)}</p>}
+      {!compact && hasNotes && (
+        <details className="ws-notes" open={notesOpen}>
+          <summary>{t('Method and calculation notes')}</summary>
+          {result.method && <p className="help">{t('Method')}: {translateServer(result.method)}</p>}
+          {!!result.notes?.length && <ul className="notes">{result.notes.map((n, i) => <li key={i}>{translateServer(n)}</li>)}</ul>}
+        </details>
+      )}
     </div>
   )
 }

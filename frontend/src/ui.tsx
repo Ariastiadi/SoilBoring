@@ -124,6 +124,7 @@ const PATHS: Record<string, string> = {
   pin: 'M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   book: 'M5 4h6a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H5zM19 4h-5M19 4v13.5h-5',
   sample: 'M9 3h6M10 3v15a2 2 0 0 0 4 0V3M10 9h4',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   calc: 'M5 3h14v18H5zM8 7h8M8 11h2M12 11h2M16 11v6M8 15h2M12 15h2M8 18h6',
   invoice: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z',
@@ -181,3 +182,32 @@ export const prettyDates = (text?: string | null) => (text || '').replace(/\d{4}
 export const ROLE_LABELS: Record<string, string> = {
   admin: 'Administrator', manager: 'Project leader / commercial', general: 'Field user', lab: 'Laboratory', finance: 'Finance',
 }
+
+/** A wide table that says so: a fade on the edge and a hint while columns are hidden to the right. */
+export function ScrollTable({ children, maxHeight }: { children: ReactNode, maxHeight?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState(false)
+  const [moved, setMoved] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => {
+      setMore(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+      setMoved(el.scrollLeft > 2)
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    ro?.observe(el)
+    return () => { el.removeEventListener('scroll', update); ro?.disconnect() }
+  }, [])
+  return (
+    <div className={`scroll-x${more ? ' more-right' : ''}${moved ? ' moved' : ''}`}>
+      {more && <p className="scroll-hint" aria-hidden="true">{t('Scroll sideways for more columns')} →</p>}
+      <div className="scroll-frame">
+        <div ref={ref} className="table-wrap" tabIndex={0} style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}>{children}</div>
+      </div>
+    </div>
+  )
+}
+

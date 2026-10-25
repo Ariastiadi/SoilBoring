@@ -17,8 +17,8 @@ HEMISPHERES = [("S", "South (S)"), ("N", "North (N)")]
 
 SNI_HORIZONTAL = ("SNI 19-6724-2002", "Horizontal control network")
 SNI_VERTICAL = ("SNI 19-6988-2004", "Vertical control network by differential levelling")
-SNI_SURVEY_A = ("SNI 7964:2022", "Survey and mapping (company standards list)")
-SNI_SURVEY_B = ("RSNI3 9217:2024", "Survey and mapping (company standards list)")
+SNI_SURVEY_A = ("SNI 7964:2022", "Continuously operating reference stations (CORS)")
+SNI_SURVEY_B = ("RSNI3 9217:2024", "Geodetic control network")
 
 
 def n(name: str, label: str, **kw: Any) -> F:

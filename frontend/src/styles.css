@@ -50,7 +50,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .small { font-size: .85rem; }
 .nowrap { white-space: nowrap; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sr-only { position: absolute; left: 0; top: 0; margin: -1px; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- Controls ---------- */
 label { font-size: .88rem; color: var(--ink-2); font-weight: 500; }
@@ -187,7 +187,7 @@ button.primary:focus-visible { outline-color: var(--ink); }
   }
   .sheet .nav-item { min-height: 2.9rem; font-size: 1rem; }
   .page-head h1 { font-size: 1.45rem; }
-  .row, .fields { grid-template-columns: 1fr; }
+  .row, .fields { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- Borehole list ---------- */
@@ -227,7 +227,7 @@ summary.button-like:hover { border-color: #9aa198; }
 @media (max-width: 1099px) { .split { grid-template-columns: minmax(0, 1fr); } .split .map-col { position: static; order: -1; } .split .map-box { height: 340px; } }
 
 .bh-table { width: 100%; border-collapse: collapse; background: var(--surface); }
-.table-wrap { border: 1px solid var(--line); border-radius: var(--r-md); overflow: auto; background: var(--surface); }
+.table-wrap { border: 1px solid var(--line); border-radius: var(--r-md); overflow: auto; background: var(--surface); position: relative; }
 .bh-table th {
   position: sticky; top: 0; z-index: 1; background: var(--sunken); text-align: left; font-family: var(--head); font-weight: 600;
   font-size: .9rem; color: var(--ink); padding: .5rem .75rem; border-bottom: 1px solid var(--line); white-space: nowrap;
@@ -326,7 +326,7 @@ summary.button-like:hover { border-color: #9aa198; }
 .grid-table td { padding: .25rem .2rem; vertical-align: top; border-bottom: 1px solid var(--line-soft); }
 .grid-table input, .grid-table select, .grid-table textarea { width: 100%; padding: .35rem .45rem; min-height: 2.2rem; }
 .grid-table textarea { min-height: 2.2rem; resize: vertical; }
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll { position: relative; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .subtabs { display: flex; gap: .25rem; flex-wrap: wrap; margin: .75rem 0; border-bottom: 1px solid var(--line); }
 .subtabs button { border: 0; border-radius: 0; background: transparent; font-weight: 500; }
 .subtabs button.active, .subtabs button[aria-selected=true] { box-shadow: inset 0 -3px 0 var(--yellow-press); font-weight: 700; }
@@ -525,3 +525,129 @@ td.bad { color: var(--bad, #b42318); }
 .label-bh { font-family: var(--head); font-weight: 700; font-size: 13pt; }
 .label-ref { font-weight: 600; }
 .label-small { font-size: 7.5pt; color: #444; word-break: break-all; }
+
+/* Worksheet results: key figures first, then the rest, charts, tables, notes */
+.key-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; margin: .25rem 0 1rem; }
+.key-figure { display: flex; flex-direction: column; gap: .15rem; padding: .6rem .75rem; background: var(--sunken); border-radius: var(--r-sm); border-left: 3px solid var(--yellow); min-width: 0; }
+.key-label { font-size: .82rem; color: var(--ink-2); line-height: 1.25; }
+.key-value { font-family: var(--head); font-weight: 700; font-size: 1.45rem; line-height: 1.15; color: var(--ink); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.key-value small { font-size: .9rem; font-weight: 600; color: var(--ink-2); }
+.facts-grid.compact { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem 1rem; font-size: .9rem; }
+.facts-grid.compact dt { font-size: .78rem; }
+.ws-charts { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1.25rem; margin-top: 1rem; }
+.ws-chart svg { display: block; max-width: 640px; }
+.ws-table { margin-top: 1.25rem; }
+.ws-table h4 { margin: 0 0 .4rem; }
+.ws-notes { margin-top: 1rem; border-top: 1px solid var(--line-soft); padding-top: .6rem; }
+.ws-notes summary { cursor: pointer; font-family: var(--head); font-weight: 600; color: var(--steel); min-height: 2rem; display: list-item; }
+.ws-notes .help { margin: .4rem 0 0; }
+
+/* Wide tables: fade on the right edge and a hint while columns are hidden */
+.scroll-x { position: relative; }
+.scroll-frame { position: relative; }
+.scroll-x.more-right .scroll-frame::after { content: ''; position: absolute; top: 1px; right: 1px; bottom: 1px; width: 28px; pointer-events: none;
+  border-radius: 0 var(--r-md) var(--r-md) 0; background: linear-gradient(to right, rgba(255,255,255,0), rgba(35,40,45,.12)); }
+.scroll-hint { margin: 0 0 .3rem; text-align: right; font-size: .78rem; color: var(--ink-2); }
+.scroll-x .data-table th:first-child, .scroll-x .data-table td:first-child { position: sticky; left: 0; }
+.scroll-x .data-table td:first-child { background: var(--surface); z-index: 1; }
+.scroll-x .data-table th:first-child { z-index: 2; }
+.scroll-x.moved .data-table td:first-child, .scroll-x.moved .data-table th:first-child { box-shadow: 1px 0 0 var(--line); }
+.table-wrap:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+.data-table td.num, .data-table th.num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 699px) {
+  .key-figures { grid-template-columns: 1fr 1fr; }
+  .key-value { font-size: 1.25rem; }
+  .facts-grid, .facts-grid.compact { grid-template-columns: 1fr 1fr; gap: .6rem .9rem; }
+  .data-table { font-size: .88rem; }
+  .data-table th, .data-table td { padding: .45rem .5rem; }
+}
+
+/* Printed worksheets: everything open, no scroll boxes */
+.doc-page .scroll-hint { display: none; }
+.doc-page .table-wrap { max-height: none !important; overflow: visible !important; }
+.doc-page .scroll-frame::after { display: none; }
+.doc-page .ws-notes summary { display: none; }
+.doc-page .key-figure { background: none; border: 1px solid #999; border-left: 3px solid #23282d; }
+@media print {
+  .scroll-hint { display: none; }
+  .table-wrap { max-height: none !important; overflow: visible !important; }
+  .scroll-frame::after { display: none !important; }
+}
+.card-title { margin: 0 0 .75rem; font-size: 1.05rem; }
+
+/* Worksheet list */
+.ws-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-soft); }
+.ws-list li { display: grid; grid-template-columns: 5.2rem minmax(0, 1fr) auto; align-items: center; gap: .4rem 1rem; padding: .6rem 0; border-bottom: 1px solid var(--line-soft); }
+.ws-no { font-family: var(--head); font-weight: 600; color: var(--steel); font-variant-numeric: tabular-nums; }
+.ws-main { display: flex; flex-direction: column; min-width: 0; }
+.ws-std { font-size: .8rem; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-side { display: flex; align-items: center; gap: 1rem; }
+.ws-count { font-size: .82rem; color: var(--ink-2); white-space: nowrap; min-width: 5.5rem; text-align: right; }
+.ws-actions { display: flex; gap: .4rem; justify-content: flex-end; min-width: 10rem; }
+@media (max-width: 699px) {
+  .ws-list li { grid-template-columns: 3.6rem minmax(0, 1fr); align-items: start; padding: .75rem 0; }
+  .ws-no { padding-top: .1rem; }
+  .ws-side { grid-column: 2; flex-direction: row-reverse; justify-content: flex-end; }
+  .ws-count { min-width: 0; text-align: left; }
+  .ws-actions { min-width: 0; justify-content: flex-start; }
+  .ws-std { white-space: normal; }
+}
+
+.field, .items-editor { min-width: 0; }
+.items-editor .table-wrap { border-radius: var(--r-sm); }
+.items-editor .grid-table { min-width: max(100%, 560px); }
+
+/* Record lists on phones: title on its own line, the other columns as labelled pairs */
+@media (max-width: 699px) {
+  .record-list .record-table tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .45rem 1rem; padding: .85rem .9rem; }
+  .record-list .record-table td { grid-column: auto; grid-row: auto; min-width: 0; overflow-wrap: anywhere; }
+  .record-list .record-table td:first-child { grid-column: 1 / -1; font-size: 1.02rem; }
+  .record-list .record-table td:not(:first-child)::before { content: attr(data-label); display: block; font-size: .74rem; color: var(--ink-2); line-height: 1.3; }
+  .record-list .record-table td.num { text-align: left; }
+  .record-list .record-table td.blank { display: none; }
+  .record-list .record-table .status { white-space: normal; }
+}
+.scroll-x .data-table th { white-space: nowrap; vertical-align: bottom; }
+.scroll-x .data-table td:first-child, .lab-summary .data-table td:nth-child(-n+3) { white-space: nowrap; }
+.data-table td.short { white-space: nowrap; }
+
+/* Standards page: one block per kind of work */
+.std-groups { list-style: none; margin: 0; padding: 0; }
+.std-groups > li { padding: .7rem 0; border-top: 1px solid var(--line-soft); }
+.std-groups > li:first-child { border-top: 0; padding-top: .2rem; }
+.std-work { display: flex; gap: .6rem; align-items: baseline; }
+.std-work .ws-no { min-width: 4.2rem; }
+.std-groups .std-list { margin: .3rem 0 0 4.8rem; padding: 0; list-style: none; font-size: .92rem; }
+.std-groups .std-list li { margin: .2rem 0; }
+@media (max-width: 699px) {
+  .std-groups .std-list { margin-left: 0; }
+  .std-work .ws-no { min-width: 0; }
+}
+
+/* Optional field groups in forms */
+.form-group { border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: .2rem .9rem .4rem; background: var(--surface); }
+.form-group > summary { cursor: pointer; font-family: var(--head); font-weight: 600; color: var(--ink); min-height: 2.6rem; display: flex; align-items: center; gap: .3rem; }
+.form-group > summary::before { content: '▸'; color: var(--steel); width: 1rem; }
+.form-group[open] > summary::before { content: '▾'; }
+.form-group > summary::-webkit-details-marker { display: none; }
+.form-group > .fields { margin-top: .4rem; }
+
+/* Delete sits apart, below the record */
+.detail-foot { display: flex; justify-content: flex-end; margin-top: 1rem; }
+
+/* Sample register on phones: one card per sample */
+@media (max-width: 699px) {
+  .sample-table thead { display: none; }
+  .sample-table, .sample-table tbody { display: block; }
+  .sample-table tr { display: grid; grid-template-columns: 2rem repeat(3, max-content) minmax(0, 1fr); gap: .35rem 1.4rem; padding: .7rem .75rem; border-bottom: 1px solid var(--line-soft); }
+  .sample-table td { padding: 0; border: 0; text-align: left !important; white-space: normal !important; position: static !important; }
+  .sample-table td:first-child { grid-row: 1; grid-column: 1; align-self: start; padding-top: .15rem; }
+  .sample-table td:nth-child(2) { grid-column: 2 / -1; }
+  .sample-table td:nth-child(n+3) { grid-row: 2; }
+  .sample-table td:nth-child(3) { grid-column: 2; }
+  .sample-table td.tests { grid-row: 3; grid-column: 2 / -1; }
+  .sample-table td[data-label]::before { content: attr(data-label); display: block; font-size: .72rem; color: var(--ink-2); }
+  .sample-table td.tests::before { display: none; }
+  .sample-table td.tests .muted { display: none; }
+}
