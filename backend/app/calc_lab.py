@@ -1311,7 +1311,8 @@ def direct_shear(data: Dict[str, Any]) -> Dict[str, Any]:
                               "Residual shear stress (kPa)", "Water content w (%)", "Bulk density ρ (g/cm³)",
                               "Dry density ρd (g/cm³)", "Void ratio e", "Degree of saturation Sr (%)"],
                 [[r["n"], _r(r["sn"], 1), _r(r["peak"], 2), r["x"], _r(r["res"], 2), _r(r["w"]), _r(r["rho_m"], 3),
-                  _r(r["rho_d"], 3), _r(r["e"], 3), _r(r["sr"], 1)] for r in results])
+                  _r(r["rho_d"], 3), _r(r["e"], 3), _r(r["sr"], 1)] for r in results],
+                key=["Specimen", "Normal stress (kPa)", "Peak shear stress (kPa)", "Residual shear stress (kPa)"])
     top = max(r["sn"] for r in results) * 1.2
     env = [series("Peak", [(r["sn"], r["peak"]) for r in results], "points"),
            series("Peak envelope", [(0, fit["c"]), (top, fit["c"] + top * math.tan(math.radians(fit["phi"])))], "line")]
@@ -1573,7 +1574,8 @@ def consolidation(data: Dict[str, Any]) -> Dict[str, Any]:
                                     "av (m²/MN)", "mv (m²/MN)", "t90 or t50 (min)", "cv (cm²/s)", "cv (m²/year)", "k (cm/s)"],
                 [[_r(r["p"], 1), r["dial"], _r(r["h"], 3), _r(r["e"], 4), _r(r["hdr"], 4), rnd(r["av"], 3), rnd(r["mv"], 3),
                   rnd(r["t"], 3), rnd(r["cv"], 3), rnd(r["cv"] * 3153.6 if r["cv"] is not None else None, 3), rnd(r["k"], 3)]
-                 for r in rows])
+                 for r in rows],
+                key=["Pressure (kPa)", "Void ratio e", "mv (m²/MN)", "cv (m²/year)", "k (cm/s)"])
     elog = [series("Loading", positive, "both"), series("Unloading", unl, "both", dash=True)]
     if pre and manual_pc is None:
         real = pre["real"]

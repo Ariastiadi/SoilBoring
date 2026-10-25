@@ -651,3 +651,14 @@ td.bad { color: var(--bad, #b42318); }
   .sample-table td.tests::before { display: none; }
   .sample-table td.tests .muted { display: none; }
 }
+
+.ws-table-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem 1rem; flex-wrap: wrap; margin-bottom: .4rem; }
+.ws-table-head h4 { margin: 0; }
+.ws-table-head button { min-height: 2.2rem; }
+/* Key-column view: headers may wrap so the main columns fit a phone */
+.ws-table.keyed .data-table th { white-space: normal; min-width: 3.2rem; }
+@media (max-width: 699px) {
+  .ws-table.keyed .data-table th, .ws-table.keyed .data-table td { padding: .45rem .3rem; font-size: .85rem; }
+  .ws-table.keyed .data-table td.short { white-space: normal; }
+}
+.cell-note { display: block; font-size: .72rem; font-weight: 600; color: var(--bad, #b42318); white-space: nowrap; }

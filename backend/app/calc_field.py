@@ -216,7 +216,8 @@ def coordinates(data: Dict[str, Any]) -> Dict[str, Any]:
         values=values,
         tables=[table("Coordinates", ["Point", "Latitude (°)", "Longitude (°)", "Latitude (DMS)", "Longitude (DMS)",
                                       "UTM zone", "Easting (m)", "Northing (m)", "Elevation (m)", "Chainage (m)",
-                                      "Planned depth (m)", "Description"], rows)],
+                                      "Planned depth (m)", "Description"], rows,
+                      key=["Point", "Easting (m)", "Northing (m)", "Elevation (m)", "Planned depth (m)"])],
         charts=charts, notes=notes, method="WGS84 geographic to UTM conversion")
 
 
@@ -284,7 +285,8 @@ def daily_report(data: Dict[str, Any]) -> Dict[str, Any]:
     if drows:
         tables.append(table("Drilling progress", ["Borehole", "Plan depth (m)", "Previous depth (m)", "Today (m)",
                                                   "Cumulative depth (m)", "Progress (%)", "SPT today", "SPT cumulative",
-                                                  "UDS cumulative", "DS cumulative", "Remarks"], drows))
+                                                  "UDS cumulative", "DS cumulative", "Remarks"], drows,
+                            key=["Borehole", "Today (m)", "Cumulative depth (m)", "Progress (%)", "SPT today"]))
     if manpower:
         tables.append(table("Manpower", ["Role", "Persons"], [[k, v] for k, v in manpower] + [["Total", total_people]]))
     if srows:
@@ -880,7 +882,8 @@ def spt_correction(header: Dict[str, Any], rows: List[Dict[str, Any]]) -> Dict[s
                 ("CS", cs, ""), ("Refusals", n_refusal, "")],
         tables=[table("SPT corrections", ["Depth (m)", "Blows", "Penetration (cm)", "N (300 mm)", "Remark", "Soil",
                                           "γ (kN/m³)", "σv (kPa)", "u (kPa)", "σ'v (kPa)", "CN", "CE", "CB", "CS", "CR",
-                                          "N60", "(N1)60", "N corrected", "Consistency / density"], out_rows)],
+                                          "N60", "(N1)60", "N corrected", "Consistency / density"], out_rows,
+                      key=["Depth (m)", "N (300 mm)", "N60", "N corrected", "Consistency / density"], note="Remark")],
         charts=[chart("SPT N values", axis("N"), axis("Depth (m)", reverse=True),
                       series("N", prof["N"]), series("N60", prof["N60"]), series("N corrected", prof["N corrected"]))],
         notes=notes, method="SPT energy and overburden corrections (Skempton 1986; Youd et al. 2001)")

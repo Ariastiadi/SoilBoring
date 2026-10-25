@@ -149,3 +149,14 @@ def test_spt_correction_analysis_uses_borehole(client, admin_headers):
     assert rows[0][16] is None and rows[1][16] is not None  # (N1)60 only for sand
     assert abs(rows[0][15] - 7 * 1.2 * 1.0 * 1.2 * 0.85) < 0.01  # N60 = N·CE·CB·CS·CR, rod 4.5 m
     assert rows[2][4] == "Refusal" and abs(rows[2][3] - 150) < 1e-6
+
+
+def test_wide_tables_name_their_key_columns():
+    from backend.app import sheets
+    out = sheets.calculate("field", "spt_corrected", sheets.get("field", "spt_corrected").example)
+    tbl = out["tables"][0]
+    assert [tbl["columns"][i] for i in tbl["key"]] == ["Depth (m)", "N (300 mm)", "N60", "N corrected", "Consistency / density"]
+    assert tbl["columns"][tbl["note"]] == "Remark"
+    with pytest.raises(ValueError):
+        from backend.app.calcbase import table
+        table("T", ["A"], [[1]], key=["B"])

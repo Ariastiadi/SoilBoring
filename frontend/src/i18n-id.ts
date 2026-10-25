@@ -3010,4 +3010,6 @@ export const ID: Record<string, string> = {
   "Location, elevation and crew": "Lokasi, elevasi & tim",
   "optional": "opsional",
   "Delete {what}": "Hapus {what}",
+  "Main columns only": "Kolom utama saja",
+  "Show all {n} columns": "Tampilkan semua {n} kolom",
 }

@@ -105,9 +105,23 @@ def chart(title: str, x: Dict[str, Any], y: Dict[str, Any], *data: Dict[str, Any
     return {"title": title, "x": x, "y": y, "series": [s for s in data if s["points"]]}
 
 
-def table(title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]]) -> Dict[str, Any]:
-    return {"title": title, "columns": list(columns),
-            "rows": [[rnd(v, 4) if isinstance(v, float) else v for v in row] for row in rows]}
+def table(title: str, columns: Sequence[str], rows: Iterable[Sequence[Any]],
+          key: Optional[Sequence[str]] = None, note: Optional[str] = None) -> Dict[str, Any]:
+    """A result table. ``key`` names the columns shown first on small screens, in that order;
+    the others stay one tap away. ``note`` names a column (such as a remark) shown under the
+    first cell of its row while only the key columns are visible."""
+    out: Dict[str, Any] = {"title": title, "columns": list(columns),
+                           "rows": [[rnd(v, 4) if isinstance(v, float) else v for v in row] for row in rows]}
+    if key:
+        missing = [k for k in key if k not in out["columns"]]
+        if missing:
+            raise ValueError(f"key columns not in the table: {missing}")
+        out["key"] = [out["columns"].index(k) for k in key]
+    if note:
+        if note not in out["columns"]:
+            raise ValueError(f"note column not in the table: {note}")
+        out["note"] = out["columns"].index(note)
+    return out
 
 
 def linear_fit(xs: Sequence[float], ys: Sequence[float]) -> Tuple[float, float, float]:

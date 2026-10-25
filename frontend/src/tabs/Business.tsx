@@ -813,7 +813,7 @@ function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' 
       <Letterhead settings={settings} title={title} number={number} date={date} />
       {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} hideEmpty /></div>}
       {kind === 'cpt' && <CptPlot test={record} />}
-      {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} notesOpen /></>}
+      {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} notesOpen full /></>}
       {sheet && sheet.standards.length > 0 && <><h3 className="doc-h">{t('Standards')}</h3><StandardsList sheet={sheet} /></>}
       <div className="doc-approvals">
         {people.map(([label, who]) => (

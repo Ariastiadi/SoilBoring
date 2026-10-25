@@ -4,7 +4,7 @@
  * server sends, so one renderer serves every test.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { calcWorksheet, getCatalog, type CalcResult, type ChartAxis, type ChartSpec, type SheetInfo } from './api'
+import { calcWorksheet, getCatalog, type CalcResult, type ChartAxis, type ChartSpec, type ResultTableSpec, type SheetInfo } from './api'
 import { localValue, t, translateServer } from './i18n'
 import { number } from './records'
 import { ScrollTable } from './ui'
@@ -165,7 +165,41 @@ function KeyFigure({ label, value }: { label: string, value: string }) {
   )
 }
 
-export function ResultView({ result, compact = false, notesOpen = false }: { result: CalcResult | null | undefined, compact?: boolean, notesOpen?: boolean }) {
+/** One result table. A wide table opens on its key columns; the button shows every column. */
+function ResultTable({ tb, full }: { tb: ResultTableSpec, full: boolean }) {
+  const [all, setAll] = useState(false)
+  const key = (tb.key || []).filter(i => i >= 0 && i < tb.columns.length)
+  const keyed = !full && key.length > 0 && key.length < tb.columns.length
+  const cols = keyed && !all ? key : tb.columns.map((_, i) => i)
+  const numeric = (k: number) => tb.rows.some(r => typeof r[k] === 'number')
+  return (
+    <section className={`ws-table${keyed && !all ? ' keyed' : ''}`}>
+      <div className="ws-table-head">
+        {tb.title && <h4>{t(tb.title)}{tb.rows.length > 12 && <span className="muted small"> · {tb.rows.length} {t('rows')}</span>}</h4>}
+        {keyed && (
+          <button type="button" className="small quiet" aria-expanded={all} onClick={() => setAll(v => !v)}>
+            {all ? t('Main columns only') : t('Show all {n} columns', { n: tb.columns.length })}
+          </button>
+        )}
+      </div>
+      <ScrollTable maxHeight={!full && tb.rows.length > 14 ? '26rem' : undefined}>
+        <table className="data-table">
+          <thead><tr>{cols.map(k => <th key={k} className={numeric(k) ? 'num' : ''}>{t(tb.columns[k])}</th>)}</tr></thead>
+          <tbody>{tb.rows.map((r, j) => <tr key={j}>{cols.map((k, n) => {
+            const v = r[k]
+            // With only the key columns showing, a remark such as "Refusal" goes under the first cell.
+            const note = keyed && !all && n === 0 && tb.note !== undefined && !cols.includes(tb.note) ? r[tb.note] : null
+            return <td key={k} className={typeof v === 'number' ? 'num' : typeof v === 'string' && v.length <= 18 ? 'short' : ''}>
+              {cell(v)}{note ? <span className="cell-note">{translateServer(String(note))}</span> : null}
+            </td>
+          })}</tr>)}</tbody>
+        </table>
+      </ScrollTable>
+    </section>
+  )
+}
+
+export function ResultView({ result, compact = false, notesOpen = false, full = false }: { result: CalcResult | null | undefined, compact?: boolean, notesOpen?: boolean, full?: boolean }) {
   if (!result || !Object.keys(result).length) return null
   if (result.error) return <p className="notice error">{translateServer(result.error)}</p>
   const keys = result.summary ? summaryParts(result.summary) : []
@@ -186,17 +220,7 @@ export function ResultView({ result, compact = false, notesOpen = false }: { res
         </dl>
       )}
       {!compact && !!result.charts?.length && <div className="ws-charts">{result.charts.map((c, i) => <Chart key={i} spec={c} />)}</div>}
-      {!compact && result.tables?.map((tb, i) => (
-        <section key={i} className="ws-table">
-          {tb.title && <h4>{t(tb.title)}{tb.rows.length > 12 && <span className="muted small"> · {tb.rows.length} {t('rows')}</span>}</h4>}
-          <ScrollTable maxHeight={tb.rows.length > 14 ? '26rem' : undefined}>
-            <table className="data-table">
-              <thead><tr>{tb.columns.map((c, k) => <th key={k} className={typeof tb.rows[0]?.[k] === 'number' ? 'num' : ''}>{t(c)}</th>)}</tr></thead>
-              <tbody>{tb.rows.map((r, k) => <tr key={k}>{r.map((v, j) => <td key={j} className={typeof v === 'number' ? 'num' : typeof v === 'string' && v.length <= 18 ? 'short' : ''}>{cell(v)}</td>)}</tr>)}</tbody>
-            </table>
-          </ScrollTable>
-        </section>
-      ))}
+      {!compact && result.tables?.map((tb, i) => <ResultTable key={i} tb={tb} full={full} />)}
       {compact && result.method && <p className="help">{t('Method')}: {translateServer(result.method)}</p>}
       {!compact && hasNotes && (
         <details className="ws-notes" open={notesOpen}>

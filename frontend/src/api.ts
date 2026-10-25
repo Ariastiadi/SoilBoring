@@ -569,11 +569,14 @@ export type SheetInfo = {
   standards: Array<[string, string]>; example: Record<string, any>; calc: boolean; help: string; link: string;
 };
 
+/** A result table; `key` lists the columns shown first, the rest are one tap away. */
+export type ResultTableSpec = { title: string; columns: string[]; rows: any[][]; key?: number[]; note?: number }
+
 export type CalcResult = {
   error?: string;
   summary?: string;
   values?: Array<{ label: string; value: any; unit: string }>;
-  tables?: Array<{ title: string; columns: string[]; rows: any[][] }>;
+  tables?: ResultTableSpec[];
   charts?: ChartSpec[];
   notes?: string[];
   method?: string;
