@@ -26,7 +26,8 @@ SECRET_DOC = ".token_secret"
 USER_FILE = docstore.path_for(USERS_DOC)  # only meaningful in file mode
 SECRET_FILE = docstore.path_for(SECRET_DOC)
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL", "28800"))  # 8 hours
-VALID_ROLES = {"admin", "general"}
+# general = field staff; manager = project leader / commercial; lab = laboratory; finance = invoices.
+VALID_ROLES = {"admin", "manager", "general", "lab", "finance"}
 MIN_PASSWORD_LENGTH = 8
 
 # Password hashing: PBKDF2-HMAC-SHA256 (stdlib, no extra dependency).

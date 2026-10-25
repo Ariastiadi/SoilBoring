@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .. import audit
-from ..auth import MIN_PASSWORD_LENGTH, create_user, delete_user, disable_totp, list_users, require_admin, set_password
+from ..auth import MIN_PASSWORD_LENGTH, create_user, delete_user, disable_totp, get_current_user, list_users, require_admin, set_password
 from ..models import Email
 
 
@@ -14,12 +14,18 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 class UserCreate(BaseModel):
     email: Email
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=256)
-    role: Literal["admin", "general"]
+    role: Literal["admin", "manager", "general", "lab", "finance"]
 
 
 @router.get("")
 def get_users(admin=Depends(require_admin)):
     return list_users()
+
+
+@router.get("/directory")
+def directory(user=Depends(get_current_user)):
+    """Names to choose from (project leader, engineer, ...): emails and roles only."""
+    return [{"email": u["email"], "role": u["role"]} for u in list_users()]
 
 
 @router.post("", status_code=201)

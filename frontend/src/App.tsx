@@ -14,11 +14,12 @@ import { flushOutbox, outboxItems, setOutboxUser, subscribeOutbox, type OutboxIt
 import { confirmLeave } from './unsaved'
 import { lang, setLang, t } from './i18n'
 import { appTitle, getPublicConfig, login as loginApi, setAuthToken, setUnauthorizedHandler, setupFirstAdmin } from './api'
-import type { Session } from './api'
+import type { Role, Session } from './api'
 import { BrandMark, Icon, PageHead } from './ui'
 
 type TabKey = 'boreholes' | 'new' | 'qa' | 'summary' | 'dashboard' | 'about' | 'users' | 'activity' | 'account'
-type AuthState = { token: string; email: string; role: 'admin' | 'general'; expiresAt?: number } | null
+type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
+const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
 const AUTH_STORAGE_KEY = 'soilboring-auth'
 // AI answers cached in the browser contain data from the logs, so they are cleared when the
 // session ends. The unsaved borehole form draft is kept on purpose so field work is never lost.
@@ -50,7 +51,7 @@ export default function App() {
           window.localStorage.removeItem(AUTH_STORAGE_KEY)
           return null
         }
-        const role = parsed?.role === 'admin' ? 'admin' : 'general'
+        const role: Role = ROLES.includes(parsed?.role) ? parsed.role : 'general'
         // Set now, not in an effect: the first page fetches data while mounting.
         setAuthToken(parsed.token)
         return { token: parsed.token, email: parsed.email, role, expiresAt: parsed.expiresAt }

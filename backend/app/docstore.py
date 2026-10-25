@@ -219,6 +219,28 @@ def write_text(name: str, content: str, *, private: bool = False) -> None:
         )
 
 
+def list_prefix(prefix: str) -> Dict[str, str]:
+    """Every document whose name starts with ``prefix`` (name -> text). Used for records
+    kept one document each, e.g. ``rec/clients/<id>.json``."""
+    out: Dict[str, str] = {}
+    if not USE_DATABASE:
+        folder = path_for(prefix).parent if not prefix.endswith("/") else path_for(prefix.rstrip("/"))
+        if not folder.is_dir():
+            return out
+        for path in sorted(folder.iterdir()):
+            name = str(path.relative_to(DATA_PATH)).replace(os.sep, "/")
+            if path.is_file() and name.startswith(prefix) and not path.name.startswith("."):
+                with path.open("r", encoding="utf-8") as handle:
+                    out[name] = handle.read()
+        return out
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    with _connection() as conn:
+        rows = conn.execute(f"SELECT name, content FROM {TABLE} WHERE name LIKE %s ORDER BY name", (escaped + "%",)).fetchall()
+    for name, content in rows:
+        out[name] = content
+    return out
+
+
 def delete(name: str) -> None:
     if not USE_DATABASE:
         with contextlib.suppress(FileNotFoundError):
@@ -265,9 +287,11 @@ def reset_all_for_tests() -> None:
     if os.environ.get("SOILBORING_TESTING") != "1":
         raise RuntimeError("reset_all_for_tests() is only allowed in the test suite")
     if not USE_DATABASE:
-        for path in DATA_PATH.iterdir():
+        for path in sorted(DATA_PATH.rglob("*"), reverse=True):
             if path.is_file():
                 path.unlink()
+            elif path.is_dir():
+                path.rmdir()
         return
     with _connection() as conn:
         conn.execute(f"DELETE FROM {TABLE}")

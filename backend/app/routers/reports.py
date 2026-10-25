@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 def can_modify(user: dict, report: dict) -> bool:
     """Admins may change any log; other users only the logs they submitted."""
-    if user.get("role") == "admin":
+    if user.get("role") in ("admin", "manager"):
         return True
     owner = str(report.get("SubmittedBy") or "").strip().lower()
     return bool(owner) and owner == str(user.get("email") or "").strip().lower()

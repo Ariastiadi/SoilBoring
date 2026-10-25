@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { changePassword } from './api'
 import { t } from './i18n'
 
-type Session = { token: string; email: string; role: 'admin' | 'general'; expires_in: number }
+type Session = { token: string; email: string; role: import('./api').Role; expires_in: number }
 
 type Props = {
   onChanged: (session: Session) => void

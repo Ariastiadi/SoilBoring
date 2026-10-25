@@ -45,7 +45,7 @@ const EDITABLE_FIELDS: Array<{ key: string; label: string; type?: string }> = [
   { key: 'Remarks', label: t('Remarks') },
 ]
 
-type Viewer = { email: string, role: 'admin' | 'general' }
+type Viewer = { email: string, role: string }
 type Row = Record<string, any>
 export type BoreStatus = 'drilling' | 'complete' | 'partial' | 'none'
 type StatusFilter = 'all' | 'drilling' | 'todo' | 'complete'

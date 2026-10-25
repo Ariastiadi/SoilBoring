@@ -20,7 +20,7 @@ def main(argv=None) -> int:
 
     create = sub.add_parser("create-user", help="Create a user (prompts for the password)")
     create.add_argument("email")
-    create.add_argument("--role", choices=["admin", "general"], default="general")
+    create.add_argument("--role", choices=["admin", "manager", "general", "lab", "finance"], default="general")
 
     sub.add_parser("list-users", help="List existing users")
 

@@ -8,9 +8,10 @@ const BASE = String(import.meta.env.VITE_API_URL ?? "")
   .replace(/\/+$/, "")
   .replace(/\/api$/, "");
 
+export type Role = 'admin' | 'manager' | 'general' | 'lab' | 'finance'
 export type User = {
   email: string
-  role: 'admin' | 'general'
+  role: Role
   totp_enabled?: boolean
 }
 
@@ -455,4 +456,105 @@ export const resetWithToken = (token: string, new_password: string) =>
 export async function resetUserTwoFactor(email: string) {
   const r = await fetch(`${BASE}/api/users/${encodeURIComponent(email)}/2fa`, { method: "DELETE", headers: buildHeaders() })
   return parseJson<{ status: string }>(r, t("Failed to turn off two-step verification"))
+}
+
+
+// ---------------------------------------------------------------------------
+// Business records (clients, projects, quotations, contracts, field work, lab,
+// analyses, reports, invoices, settings) — see backend/app/entities.py
+// ---------------------------------------------------------------------------
+
+export type FieldDef = {
+  name: string
+  type: string
+  label: string
+  required: boolean
+  options: Array<[string, string] | [string, string, string]> | null
+  options_filter: string | null
+  ref: string | null
+  min: number | null
+  max: number | null
+  maxlen: number
+  help: string
+  fields: FieldDef[] | null
+  max_items: number
+  list: boolean
+  readonly: boolean
+  default: unknown
+  variants_by: string | null
+  variants: Record<string, FieldDef[]> | null
+  private: boolean
+}
+export type EntityDef = {
+  name: string
+  label: string
+  label_one: string
+  fields: FieldDef[]
+  title: string
+  number_field: string
+  singleton: boolean
+  group: string
+  can_read: boolean
+  can_create: boolean
+}
+export type Schemas = Record<string, EntityDef>
+export type Rec = Record<string, any> & { id: string, _can_edit?: boolean, updated_at?: string }
+export type FileMeta = { id: string, name: string, type: string, size: number }
+
+export async function getSchemas() {
+  const r = await fetch(`${BASE}/api/schemas`, { headers: buildHeaders() });
+  return parseJson<Schemas>(r, t("Failed to load"));
+}
+
+export async function listRecords(entity: string, projectId?: string) {
+  const q = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  const r = await fetch(`${BASE}/api/records/${entity}${q}`, { headers: buildHeaders() });
+  return parseJson<Rec[]>(r, t("Failed to load"));
+}
+
+export async function getRecord(entity: string, id: string) {
+  const r = await fetch(`${BASE}/api/records/${entity}/${encodeURIComponent(id)}`, { headers: buildHeaders() });
+  return parseJson<Rec>(r, t("Failed to load"));
+}
+
+export async function saveRecord(entity: string, data: Record<string, unknown>, id?: string) {
+  const r = await fetch(`${BASE}/api/records/${entity}${id ? `/${encodeURIComponent(id)}` : ""}`, {
+    method: id ? "PUT" : "POST",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(data),
+  });
+  return parseJson<Rec>(r, t("Could not save"));
+}
+
+export async function deleteRecord(entity: string, id: string) {
+  const r = await fetch(`${BASE}/api/records/${entity}/${encodeURIComponent(id)}`, { method: "DELETE", headers: buildHeaders() });
+  return parseJson<{ status: string }>(r, t("Could not delete"));
+}
+
+export async function uploadFile(file: File): Promise<FileMeta> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  const type = file.type || (file.name.toLowerCase().endsWith(".csv") ? "text/csv" : "application/octet-stream");
+  return postJson<FileMeta>("/api/files", { name: file.name, content_type: type, data_base64: btoa(bin) }, t("Upload failed"));
+}
+
+export async function downloadFile(meta: FileMeta) {
+  const r = await fetch(`${BASE}/api/files/${encodeURIComponent(meta.id)}`, { headers: buildHeaders() });
+  if (!r.ok) throw new Error(t("Download failed"));
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = meta.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function userDirectory() {
+  const r = await fetch(`${BASE}/api/users/directory`, { headers: buildHeaders() });
+  return parseJson<Array<{ email: string, role: Role }>>(r, t("Failed to load users"));
+}
+
+export async function runAnalysis(type: string, inputs: Record<string, unknown>) {
+  return postJson<Record<string, any>>("/api/analyses/run", { type, inputs }, t("Calculation failed"));
 }
