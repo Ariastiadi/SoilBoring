@@ -166,29 +166,33 @@ Rules enforced by the API:
 The side menu (bottom bar on phones, the rest under *More*) is grouped the way a soil investigation job runs. Each role sees only its own groups.
 
 - **Commercial operations**
-  - **Projects:** status from tender → contract → ongoing → reporting → completed, project leader, services and contract value. A project's page (the hub) gathers its boreholes (logs whose *Project* is the project name), CPT, other field work, lab tests, analyses, reports, quotations, contracts and invoices, each with an *Add* button that fills in the project.
-  - **Clients:** contractors, state-owned companies (BUMN), private owners and government agencies.
-  - **Quotations:** items picked from the price list or pasted from Excel; discount, VAT 11% and total calculated; numbered QUO-YYYY-NNN; printable with the company letterhead and the amount in words.
+  - **Projects:** status from tender → contract → ongoing → reporting → completed, project leader, services and contract value. A project's page (the hub) gathers its boreholes (logs whose *Project* is the project name), CPT, field worksheets, lab tests, analyses, reports, quotations, contracts and invoices, each with an *Add* button that fills in the project.
+  - **Clients:** contractors, state-owned companies (BUMN), private owners and government agencies, each with a price tier (client or internal/group price).
+  - **Quotations:** items picked from the price list (client or internal price) or pasted from Excel; discount, VAT 11% and total calculated; numbered QUO-YYYY-NNN; mobilisation/demobilisation priced or stated as excluded; a price check flags items below the internal price and refuses items below a minimum selling price; printable with the company letterhead, the exclusions and the amount in words.
   - **Contracts:** contract number, value (incl. VAT), dates, signatories, payment terms in % and the signed documents. Each term shows its invoice, or a *Create invoice* button.
-- **Field work:** **Boreholes** and **New log** (below), **CPT / sondir** (readings of qc, fs and u2 pasted from Excel, plotted with the friction ratio), and **Other field work** for geophysics (seismic refraction, MASW, resistivity, GPR, downhole), geology (outcrops, mapping, structure, test pits) and geodesy & mapping (topography, benchmarks, stake-out, drone).
-- **Laboratory:** samples sent from a borehole's sample list, with status (received, testing, done) and results per test: moisture content, Atterberg limits (PI calculated), grain size (fines calculated), unit weight, specific gravity, direct shear, triaxial, unconfined compression and consolidation.
-- **Engineering:**
-  - **Engineering analyses:** shallow foundation bearing capacity (Vesic/De Beer/Hansen factors), pile capacity from SPT (Decourt) with a capacity-versus-length chart, consolidation settlement (2:1 stress spread) and liquefaction (Idriss & Boulanger 2014). *Use field and lab data* fills the inputs from the borehole's strata, SPT, groundwater and lab results. All results are preliminary and say so.
-  - **Client reports:** the soil investigation report: summary, scope, every borehole, CPT, field activity, lab result and analysis of the project, recommendations and the prepared / reviewed / approved signatures, printed as one document.
-- **Finance:** **Invoices** (from a contract term or free items; VAT, PPh 23 withholding, payments, outstanding and overdue status; printable) and the **Price list**.
-
 - **Field work**
-  - **Boreholes** (start page): every log with a one-line overview ("12 boreholes in 3 projects, 300 m drilled in total. 4 still need depth data."), a status filter (*Drilling now*, *Needs depth data*, *Complete*), search, project and more filters, a mini soil column per borehole, a map beside the list coloured by status, and the **Export** menu (CSV of the rows shown, AGS4 per project). Click a row to open the borehole; the *…* menu edits or deletes the log.
-  - **New log:** the borehole log form in sections (borehole and location, dates and team, drilling, soil and groundwater, notes) with a checklist of required fields next to the submit button. Dates are typed as dd/mm/yyyy (or picked from a calendar), "Use my location" fills the coordinates, and the draft is kept on the device while typing.
-- **Data & AI**
+  - **Boreholes** (start page) and **New log** — see below.
+  - **CPT / sondir:** mechanical sondir (kg/cm²) or electric CPT/CPTu (MPa, kPa) — readings pasted from Excel or read from the data logger's CSV file. Interpretation: corrected cone resistance qt, friction ratio, pore pressure ratio Bq, soil behaviour type index Ic and zone (Robertson 2009), su for clays, φ' for sands, and the dissipation test (t50, ch after Teh & Houlsby).
+  - **Field worksheets:** one form per kind of work, with the company's document numbers, calculation, charts, an *Example* fill, the standards it follows, a field QC status (waiting / passed / redo) and an A4 print: daily report and daily HSE report, field work instruction, coordinate table; GPS point description and logsheet, topographic points, traverse (Bowditch adjustment, closure 1:X), levelling (rise & fall, misclosure); pocket penetrometer, SPT correction (N60, (N1)60), field vane shear, permeability (falling, rising and constant head; Lugeon packer test), test pit, field CBR, plate load test; resistivity 1D and 2D (geometric factor, apparent resistivity, pseudo-section), downhole and crosshole seismic (interval velocities, Gmax, Vs30), thermal resistivity (needle probe).
+  - **Coordinates & maps:** latitude/longitude ⇄ UTM (WGS84) for a pasted table, and Google Earth (KML) files of the points or of a whole project (boreholes, CPT and field points).
+- **Laboratory**
+  - **Laboratory tests:** raw data per test with the calculation, chart and standard of each: water content & density, specific gravity, grain size with hydrometer, Atterberg limits, Proctor compaction, CBR, unconfined compression, UU and CU triaxial (Mohr circles), direct shear, consolidation (e–log p, Cc, Cr, σ'p, cv), swelling, Los Angeles abrasion, sulfate soundness and slake durability. Results feed the engineering analyses.
+  - **Sample register:** every sample taken in the boreholes, with the tests requested or done on it. Tick samples and tests to send a laboratory instruction (the tests appear as *requested*), and print sample labels with a QR code; the lab form reads the label code.
+  - **Results summary:** all finished results per sample in one table, exported to CSV or printed for the report.
+- **Engineering**
+  - **Engineering analyses:** shallow foundation bearing capacity (Vesic/De Beer/Hansen factors) and a bearing table over several widths and depths (with a warning below FS 3), pile capacity from SPT (Decourt) with a capacity-versus-length chart, consolidation settlement (2:1 stress spread), liquefaction (Idriss & Boulanger 2014), SPT correction, and the seismic site class and design spectrum after SNI 1726:2019 (whose PGA_M can be taken as amax in the liquefaction analysis). *Use field and lab data* fills the inputs from the borehole's strata, SPT, groundwater and lab results. All results are preliminary and say so.
+  - **Client reports:** the soil investigation report: summary, scope, every borehole, CPT, field activity, lab result and analysis of the project, recommendations and the prepared / reviewed / approved signatures, printed as one document.
+- **Finance:** **Invoices** (from a contract term or free items; VAT, PPh 23 withholding, payments, outstanding and overdue status; printable) and the **Price list** (client price, internal/group price, minimum price, standard exclusions; import from Excel; a rate build-up per item — equipment, labour, consumables, operations and overhead per hour × hours per unit, plus contingency, risk premium and margins — gives the cost per unit and the calculated internal and client prices next to the published ones).
+- **Data & references**
   - **Geo AI:** questions in plain language, answered from the logs, with the data rows used shown as evidence.
-  - **Summaries:** weekly (date range) or monthly summary with figures, highlights and a written narrative.
-  - **Dashboard:** key figures, method and USCS bars, recent boreholes and a short narrative.
-- **Administration** (admins): **Users**, the **Activity** log and **Company settings** (name, address, NPWP, bank account and signatory printed on quotations, invoices and reports).
+  - **Summaries** and **Dashboard.**
+  - **Worksheet list:** every worksheet by document number (01 General … 05 Laboratory), opened blank or filled with example data.
+  - **Standards:** the SNI and ASTM standards per kind of work.
+- **Administration** (admins): **Users**, the **Activity** log and **Company settings** (name, address, NPWP, bank account and signatory printed on quotations, invoices, worksheets and reports).
 - Attachments (contracts, lab sheets, field data) are PDF, JPEG, PNG, CSV, TXT, ZIP, XLSX or DOCX up to 5 MB each and are stored with the data, so on the free Neon plan they share its 0.5 GB.
-- Business API: `GET /api/schemas` (record definitions and what the signed-in role may open), `GET/POST /api/records/{entity}`, `GET/PUT/DELETE /api/records/{entity}/{id}` (send `expected_updated_at` with `PUT` to detect conflicting edits; a record still referenced elsewhere cannot be deleted), `POST /api/analyses/run`, `POST /api/files`, `GET /api/files/{id}`. Entities: `clients`, `projects`, `rates`, `quotes`, `contracts`, `cpt`, `field_activities`, `lab_tests`, `analyses`, `project_reports`, `invoices`, `settings`.
+- Business API: `GET /api/schemas` (record definitions and what the signed-in role may open), `GET/POST /api/records/{entity}`, `GET/PUT/DELETE /api/records/{entity}/{id}` (send `expected_updated_at` with `PUT` to detect conflicting edits; a record still referenced elsewhere cannot be deleted), `POST /api/analyses/run`, `GET /api/worksheets` (worksheet list with standards and examples), `POST /api/worksheets/calc` (calculate without saving), `GET /api/samples`, `POST /api/tools/coordinates`, `POST /api/tools/kml`, `GET /api/export/kml?project_id=`, `POST /api/files`, `GET /api/files/{id}`. Entities: `clients`, `projects`, `rates`, `quotes`, `contracts`, `cpt`, `field_activities`, `lab_tests`, `analyses`, `project_reports`, `invoices`, `settings`.
 - **About:** primer on soil boring with the Indonesian standards (SNI) used in practice.
-- **Language:** Bahasa Indonesia (default) or English, switched at the bottom of the side menu. Messages from the server, summary texts and dates (dd/mm/yyyy) follow the chosen language.
+- **Language:** Bahasa Indonesia (default) or English, switched at the bottom of the side menu. Messages from the server, calculation notes, summary texts and dates (dd/mm/yyyy) follow the chosen language.
 
 ### Depth data, profile, bore log sheet, photos and map
 
@@ -275,14 +279,21 @@ backend/
     records.py         # validation, totals, numbering, references, files, permissions
     engineering.py     # bearing capacity, pile capacity, settlement, liquefaction
     analysis_runner.py # runs an analysis from borehole and lab data
-    routers/           # auth, users, reports, boreholes, ai, summaries, dashboard, export, records
+    calcbase.py        # shape of worksheet results (values, tables, charts, notes)
+    sheets.py, sheets_field.py, sheets_lab.py  # worksheet definitions: fields, standards, examples
+    calc_field.py, calc_lab.py, cpt_calc.py    # worksheet and CPT calculations
+    seismic.py         # site class and design spectrum (SNI 1726:2019)
+    geo.py             # UTM conversion and KML files
+    routers/           # auth, users, reports, boreholes, ai, summaries, dashboard, export, records, worksheets
   tests/               # pytest suite
 frontend/
   src/
     App.tsx            # side menu / bottom bar, pages
     tabs/              # Boreholes (DailyReportData), New log (DailyReportForm), Geo AI, Summaries,
-                       #   Dashboard, Users, Activity, About, Business (projects ... invoices), Analyses
+                       #   Dashboard, Users, Activity, About, Business (projects ... invoices), Analyses,
+                       #   Worksheets (worksheet list, standards, coordinates, sample register, lab summary)
     records.tsx        # forms, lists and views built from /api/schemas
+    worksheets.tsx     # worksheet results, charts, example and calculate tools
     nav.ts             # page keys and links between pages
     BoreholeDetail.tsx # depth data, photos, history of one borehole
     Profile.tsx        # graphic log + SPT plot, mini soil columns

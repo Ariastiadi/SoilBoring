@@ -129,3 +129,23 @@ def test_rate_buildup_tiers_and_quote_price_checks(client, admin_headers):
     res = client.post("/api/records/quotes", json={"project_id": p["id"], "date": "2026-10-01", "status": "draft",
                                                     "items": [{**item, "unit_price": 150000}]}, headers=admin_headers)
     assert res.status_code == 422 and "minimum selling price" in res.json()["detail"]
+
+
+def test_spt_correction_analysis_uses_borehole(client, admin_headers):
+    report = {"BoreholeID": "BH-S1", "ProjectName": "Proyek SPT", "SiteName": "A", "StartDate": "2026-10-01", "EndDate": "2026-10-02",
+              "DrillingMethod": "Coring + SPT", "FinalDepth_m": "30", "Contractor": "X", "Latitude": "-6.3", "Longitude": "106.9",
+              "GroundwaterEncountered": "true", "GroundwaterDepth_m": "2"}
+    assert client.post("/api/reports", json=report, headers=admin_headers).status_code == 201
+    details = {"layers": [{"top": 0, "base": 6, "uscs": "CH", "description": "Lempung"}, {"top": 6, "base": 30, "uscs": "SM", "description": "Pasir"}],
+               "spt": [{"depth": 3, "seat": 2, "inc1": 3, "inc2": 4}, {"depth": 10, "seat": 8, "inc1": 10, "inc2": 12},
+                       {"depth": 27, "seat": 20, "inc1": 50, "penetration_mm": 100}], "core": [], "photos": [], "samples": []}
+    assert client.put("/api/details/BH-S1", json=details, headers=admin_headers).status_code == 200
+    res = client.post("/api/analyses/run", json={"type": "spt_correction", "inputs": {
+        "borehole_id": "BH-S1", "energy_ratio": "72", "borehole_diameter_mm": "100", "rod_extra_m": "1.5", "sampler_liners": "no"}},
+        headers=admin_headers)
+    assert res.status_code == 200, res.text
+    rows = res.json()["tables"][0]["rows"]
+    assert [r[5] for r in rows] == ["Clay", "Sand", "Sand"]
+    assert rows[0][16] is None and rows[1][16] is not None  # (N1)60 only for sand
+    assert abs(rows[0][15] - 7 * 1.2 * 1.0 * 1.2 * 0.85) < 0.01  # N60 = N·CE·CB·CS·CR, rod 4.5 m
+    assert rows[2][4] == "Refusal" and abs(rows[2][3] - 150) < 1e-6

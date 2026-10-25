@@ -151,6 +151,16 @@ const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^(.+) must be text$/, m => t('{field} must be text', { field: where(m[1]) })],
 ]
 
+const UNIT_WORDS: Record<string, string> = { h: 'jam', persons: 'orang', days: 'hari', points: 'titik' }
+
+/** "1.0833" → "1,0833" and unit words such as "h" → "jam" in calculated values. */
+function localValue(value: string): string {
+  const m = /^(-?[\d.]+(?:e[-+]?\d+)?)(?: (.+))?$/.exec(value)
+  if (!m) return ID[value] ?? value
+  const unit = m[2] ? ` ${UNIT_WORDS[m[2]] ?? ID[m[2]] ?? m[2]}` : ''
+  return m[1].replace('.', ',') + unit
+}
+
 function translateOne(text: string): string | null {
   if (ID[text]) return ID[text]
   // Calculated summaries: "Label = value unit; Label = value unit"
@@ -159,7 +169,7 @@ function translateOne(text: string): string | null {
       const i = part.indexOf(' = ')
       if (i < 0) return part
       const label = part.slice(0, i)
-      return `${ID[label] ?? label} = ${part.slice(i + 3)}`
+      return `${ID[label] ?? label} = ${localValue(part.slice(i + 3))}`
     })
     const out = parts.join('; ')
     if (out !== text) return out

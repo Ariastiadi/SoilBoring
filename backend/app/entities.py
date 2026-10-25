@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import sheets
+from . import sheets, sheets_lab
 from .fields import ALL_ROLES, COMMERCIAL, Entity, F, Option  # noqa: F401
 
 
@@ -32,59 +32,9 @@ PROJECT_STATUS: List[Option] = [
     ("cancelled", "Cancelled"),
 ]
 
-# Laboratory: results recorded for each kind of test.
-LAB_RESULTS: Dict[str, List[F]] = {
-    "moisture": [F("w", "number", "Moisture content w (%)", min=0, max=1000)],
-    "density": [
-        F("gamma_bulk", "number", "Bulk unit weight γ (kN/m³)", min=5, max=30),
-        F("gamma_dry", "number", "Dry unit weight γd (kN/m³)", min=3, max=30),
-    ],
-    "specific_gravity": [F("gs", "number", "Specific gravity Gs", min=1.5, max=4)],
-    "atterberg": [
-        F("ll", "number", "Liquid limit LL (%)", min=0, max=500),
-        F("pl", "number", "Plastic limit PL (%)", min=0, max=500),
-        F("pi", "number", "Plasticity index PI (%)", min=0, max=500, help="Left empty: LL − PL"),
-    ],
-    "grain_size": [
-        F("gravel", "number", "Gravel (%)", min=0, max=100),
-        F("sand", "number", "Sand (%)", min=0, max=100),
-        F("silt", "number", "Silt (%)", min=0, max=100),
-        F("clay", "number", "Clay (%)", min=0, max=100),
-        F("fines", "number", "Fines < 0.075 mm (%)", min=0, max=100, help="Left empty: silt + clay"),
-    ],
-    "ucs": [
-        F("qu", "number", "Unconfined strength qu (kPa)", min=0, max=200000),
-        F("strain", "number", "Strain at failure (%)", min=0, max=100),
-    ],
-    "direct_shear": [
-        F("c", "number", "Cohesion c (kPa)", min=0, max=5000),
-        F("phi", "number", "Friction angle φ (°)", min=0, max=60),
-    ],
-    "triaxial": [
-        F("test", "select", "Test type", options=[("UU", "UU"), ("CU", "CU"), ("CD", "CD")]),
-        F("c", "number", "Cohesion c (kPa)", min=0, max=5000),
-        F("phi", "number", "Friction angle φ (°)", min=0, max=60),
-    ],
-    "consolidation": [
-        F("cc", "number", "Compression index Cc", min=0, max=10),
-        F("cr", "number", "Recompression index Cr", min=0, max=5),
-        F("e0", "number", "Initial void ratio e0", min=0, max=20),
-        F("pc", "number", "Preconsolidation pressure σ'p (kPa)", min=0, max=100000),
-        F("cv", "number", "Coefficient of consolidation cv (m²/year)", min=0, max=10000),
-    ],
-}
-
-LAB_TESTS: List[Option] = [
-    ("moisture", "Moisture content"),
-    ("density", "Unit weight"),
-    ("specific_gravity", "Specific gravity"),
-    ("atterberg", "Atterberg limits"),
-    ("grain_size", "Grain size"),
-    ("ucs", "Unconfined compression (UCS)"),
-    ("direct_shear", "Direct shear"),
-    ("triaxial", "Triaxial"),
-    ("consolidation", "Consolidation"),
-]
+# Laboratory: test types and the results recorded for each (see sheets_lab.py).
+LAB_TESTS = sheets_lab.LAB_TESTS
+LAB_RESULTS = sheets_lab.LAB_RESULTS
 
 # Methods without their own worksheet (results are written as text and measurements).
 OTHER_METHODS: List[Tuple[str, str, str]] = [
@@ -383,7 +333,8 @@ _add(Entity(
             ("settlement", "Consolidation settlement"),
             ("liquefaction", "Liquefaction (SPT, Idriss & Boulanger)"),
             ("bearing_table", "Bearing capacity table (several widths and depths)"),
-            ("site_class", "Seismic site class and design spectrum (SNI 1726:2019)")]),
+            ("site_class", "Seismic site class and design spectrum (SNI 1726:2019)"),
+            ("spt_correction", "SPT corrections N60 and (N1)60")]),
         F("inputs", "json", "Inputs"),
         F("results", "json", "Results", readonly=True),
         F("summary", "text", "Result", readonly=True, list=True, maxlen=300),

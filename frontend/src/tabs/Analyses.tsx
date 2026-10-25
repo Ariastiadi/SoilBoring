@@ -153,7 +153,7 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
     const gw = borehole && String(borehole.GroundwaterEncountered).toLowerCase() !== 'false' ? borehole.GroundwaterDepth_m : ''
     if (meta.type === 'bearing') {
       const shear = lab.find(x => x.test_type === 'direct_shear' || x.test_type === 'triaxial')
-      const dens = lab.find(x => x.test_type === 'density')
+      const dens = lab.find(x => (x.test_type === 'density' || x.test_type === 'moisture') && x.results?.gamma_bulk)
       setInputs(prev => ({
         ...prev,
         ...(shear ? { c: String(shear.results?.c ?? prev.c), phi_deg: String(shear.results?.phi ?? prev.phi_deg) } : {}),
@@ -165,7 +165,7 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
       const d = await getDetails(meta.borehole_id).catch(() => null)
       if (!d?.layers.length) { setHint(t('This borehole has no strata yet.')); return }
       const cons = lab.filter(x => x.test_type === 'consolidation')
-      const dens = lab.filter(x => x.test_type === 'density')
+      const dens = lab.filter(x => (x.test_type === 'density' || x.test_type === 'moisture') && x.results?.gamma_bulk)
       const layers = d.layers.map(l => {
         const c = cons.find(x => x.depth_top >= l.top && x.depth_top < l.base)
         const g = dens.find(x => x.depth_top >= l.top && x.depth_top < l.base)

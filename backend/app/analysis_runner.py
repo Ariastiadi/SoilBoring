@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import calcbase, details, engineering, records, seismic, storage
+from . import calc_field, calcbase, details, engineering, records, seismic, storage
 
 
 def _opt(inputs: Dict[str, Any], key: str) -> Optional[float]:
@@ -59,7 +59,7 @@ def _layer_props(layers: List[Dict[str, Any]], lab: List[Dict[str, Any]]) -> Lis
                 props["fines"] = res["fines"]
             if t.get("test_type") == "atterberg" and res.get("pi") is not None:
                 props["pi"] = res["pi"]
-            if t.get("test_type") == "density" and res.get("gamma_bulk") is not None:
+            if t.get("test_type") in ("density", "moisture") and res.get("gamma_bulk") is not None:
                 props["gamma"] = res["gamma_bulk"]
                 props["gamma_sat"] = max(res["gamma_bulk"], res["gamma_bulk"] + 1)
         out.append(props)
@@ -147,6 +147,8 @@ def run(kind: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
             pairs = [(float(x["depth"]), float(x.get("n") if x.get("n") is not None else x["inc1"] + (x.get("inc2") or 0)))
                      for x in found["depth"]["spt"]]
         return seismic.site_class_analysis(inputs, pairs)
+    if kind == "spt_correction":
+        return _spt_correction(inputs)
     raise ValueError("Choose an analysis type")
 
 
@@ -192,3 +194,36 @@ def _bearing_table(inputs: Dict[str, Any]) -> Dict[str, Any]:
         values=[("Factor of safety", fs, ""), ("L/B", ratio, "")],
         tables=[calcbase.table("q_allow (kPa)", ["Df (m) / B (m)"] + [f"{b:g}" for b in widths], rows)],
         charts=charts, notes=notes, method="Vesic bearing capacity factors with De Beer shape and Hansen depth factors")
+
+
+def _spt_correction(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """N60 and (N1)60 for every SPT of a borehole; soil type and unit weight come from the strata."""
+    data = _borehole(inputs)
+    report = data["report"]
+    layers = _layer_props(data["depth"]["layers"], _lab_by_depth(report["BoreholeID"]))
+    gw = _opt(inputs, "gw_depth")
+    if gw is None:
+        gw = _groundwater(report)
+    gamma = _opt(inputs, "gamma")
+    rows = []
+    for s in data["depth"]["spt"]:
+        depth = float(s["depth"])
+        n = s.get("n") if s.get("n") is not None else s["inc1"] + (s.get("inc2") or 0)
+        layer = next((x for x in layers if x["top"] - 1e-9 <= depth < x["base"]), layers[-1] if layers else {})
+        rows.append({"depth": depth, "n": n, "penetration_mm": s.get("penetration_mm"),
+                     "uscs": layer.get("uscs") or "", "unit_weight": layer.get("gamma") or gamma})
+    header = {
+        "energy_ratio": _req(inputs, "energy_ratio", 60.0),
+        "borehole_diameter": _opt(inputs, "borehole_diameter_mm") or _number(report.get("BoreholeDiameter_mm")) or 100.0,
+        "sampler": "standard" if str(inputs.get("sampler_liners") or "no") == "yes" else "no_liner",
+        "stick_up": _opt(inputs, "rod_extra_m") or 0.0,
+        "groundwater": gw,
+    }
+    return calc_field.spt_correction(header, rows)
+
+
+def _number(value: Any) -> Optional[float]:
+    try:
+        return float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
