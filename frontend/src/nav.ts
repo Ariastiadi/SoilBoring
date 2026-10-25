@@ -5,6 +5,7 @@ export type TabKey =
   | 'projects' | 'clients' | 'quotes' | 'contracts'
   | 'analyses' | 'reports' | 'invoices' | 'rates'
   | 'qa' | 'summary' | 'dashboard' | 'about' | 'users' | 'activity' | 'settings' | 'account'
+  | 'worksheets' | 'standards' | 'coordinates' | 'samples' | 'labsummary'
 
 /** Where to go, and what to open there: a record, or a new one with values filled in. */
 export type Intent = { open?: string, newWith?: Record<string, unknown>, borehole?: string }

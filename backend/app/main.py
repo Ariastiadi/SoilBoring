@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from . import config, docstore, mailer
 from .auth import bootstrap_admin_from_env
 from .ollama_client import ai_server_configured
-from .routers import ai, auth, boreholes, dashboard, export, records, reports, summaries, users
+from .routers import ai, auth, boreholes, dashboard, export, records, reports, summaries, users, worksheets
 from .storage import AmbiguousReportError, SchemaMismatchError
 
 
@@ -148,6 +148,7 @@ app.include_router(users.router)
 app.include_router(export.router)
 app.include_router(boreholes.router)
 app.include_router(records.router)
+app.include_router(worksheets.router)
 
 
 @app.get("/api/health")

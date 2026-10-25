@@ -4,6 +4,7 @@ import { getDetails, listRecords, listReports, runAnalysis, saveRecord, type Rec
 import { t, translateServer } from '../i18n'
 import type { Intent } from '../nav'
 import { FieldInput, RecordsPage, number, useSchemas } from '../records'
+import { ResultView } from '../worksheets'
 
 type Inputs = Record<string, any>
 
@@ -12,9 +13,15 @@ const DEFAULTS: Record<string, Inputs> = {
   pile: { diameter: '0.6', length: '20', pile_type: 'bored', fs_shaft: '2.5', fs_tip: '2.5' },
   settlement: { B: '2', L: '2', Df: '1.5', q: '100', gw_depth: '', layers: [] },
   liquefaction: { amax_g: '0.3', magnitude: '7.5', energy_ratio: '60', gw_depth: '' },
+  bearing_table: { B_list: '1 1.5 2 2.5 3', Df_list: '1 1.5 2', LB: '1', c: '0', phi_deg: '30', gamma: '18', gamma_sat: '19', gw_depth: '', fs: '3' },
+  site_class: { pga: '', ss: '', s1: '', tl: '20', site: '' },
+  spt_correction: { energy_ratio: '60', borehole_diameter_mm: '100', rod_extra_m: '1.5', sampler_liners: 'no', gw_depth: '', gamma: '18' },
 }
 
 const LABELS: Record<string, string> = {
+  B_list: 'Footing widths B (m), separated by spaces', Df_list: 'Founding depths Df (m), separated by spaces', LB: 'Length/width ratio L/B',
+  pga: 'Bedrock PGA (g)', ss: 'Bedrock Ss, 0.2 s (g)', s1: 'Bedrock S1, 1 s (g)', tl: 'Long period TL (s)',
+  borehole_diameter_mm: 'Borehole diameter (mm)', rod_extra_m: 'Rod above ground (m)',
   B: 'Footing width B (m)', L: 'Footing length L (m, empty = strip)', Df: 'Founding depth Df (m)', c: "Cohesion c (kPa)",
   phi_deg: 'Friction angle φ (°)', gamma: 'Unit weight γ (kN/m³)', gamma_sat: 'Saturated unit weight γsat (kN/m³)',
   gw_depth: 'Groundwater depth (m, empty = deep)', fs: 'Factor of safety', diameter: 'Pile diameter D (m)', length: 'Pile length L (m)',
@@ -22,13 +29,62 @@ const LABELS: Record<string, string> = {
   amax_g: 'Peak ground acceleration amax (g)', magnitude: 'Earthquake magnitude Mw', energy_ratio: 'SPT hammer energy ratio (%)',
 }
 
-const NEEDS_BOREHOLE = ['pile', 'liquefaction']
+const NEEDS_BOREHOLE = ['pile', 'liquefaction', 'spt_correction']
 
 function NumberField({ name, inputs, set }: { name: string, inputs: Inputs, set: (k: string, v: string) => void }) {
   return (
     <div className="field">
       <label htmlFor={`a-${name}`}>{t(LABELS[name] || name)}</label>
       <input id={`a-${name}`} type="text" inputMode="decimal" value={inputs[name] ?? ''} onChange={e => set(name, e.target.value.replace(/,/g, '.'))} />
+    </div>
+  )
+}
+
+function TextField({ name, inputs, set }: { name: string, inputs: Inputs, set: (k: string, v: string) => void }) {
+  return (
+    <div className="field">
+      <label htmlFor={`a-${name}`}>{t(LABELS[name] || name)}</label>
+      <input id={`a-${name}`} type="text" inputMode="decimal" value={inputs[name] ?? ''} onChange={e => set(name, e.target.value)} />
+    </div>
+  )
+}
+
+function VsLayers({ rows, onChange }: { rows: Inputs[], onChange: (r: Inputs[]) => void }) {
+  const cols: Array<[string, string]> = [['top', 'From (m)'], ['base', 'To (m)'], ['vs', 'Vs (m/s)']]
+  return (
+    <div className="field wide">
+      <label>{t('Shear wave velocity layers (optional)')}</label>
+      <div className="table-scroll">
+        <table className="grid-table" style={{ minWidth: 360 }}>
+          <thead><tr>{cols.map(([, l]) => <th key={l}>{t(l)}</th>)}<th /></tr></thead>
+          <tbody>{rows.map((row, i) => (
+            <tr key={i}>
+              {cols.map(([k, l]) => <td key={k}><input aria-label={`${t(l)} ${i + 1}`} inputMode="decimal" value={row[k] ?? ''} onChange={e => onChange(rows.map((r, j) => j === i ? { ...r, [k]: e.target.value.replace(/,/g, '.') } : r))} /></td>)}
+              <td><button type="button" className="quiet danger-quiet small" aria-label={t('Remove row')} onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="actions" style={{ marginTop: '.5rem' }}>
+        <button type="button" onClick={() => onChange([...rows, { top: rows.length ? rows[rows.length - 1].base : '0', base: '', vs: '' }])}>{t('Add row')}</button>
+      </div>
+    </div>
+  )
+}
+
+function AmaxFromSiteClass({ projectId, onPick }: { projectId: string, onPick: (v: number) => void }) {
+  const [found, setFound] = useState<Rec | null>(null)
+  useEffect(() => {
+    listRecords('analyses').then(list => {
+      const mine = list.filter(a => a.type === 'site_class' && (!projectId || a.project_id === projectId) && a.results?.values)
+      setFound(mine[0] || null)
+    }).catch(() => setFound(null))
+  }, [projectId])
+  const pga = found?.results?.values?.find((v: Rec) => String(v.label).startsWith('PGA_M'))?.value
+  if (pga === undefined || pga === null) return null
+  return (
+    <div className="field wide">
+      <button type="button" className="small" onClick={() => onPick(pga)}>{t('Use PGA_M = {v} g from "{title}"', { v: pga, title: found!.title })}</button>
     </div>
   )
 }
@@ -208,6 +264,31 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
         {meta.type === 'liquefaction' && <>
           {['amax_g', 'magnitude', 'energy_ratio', 'gw_depth'].map(k => <NumberField key={k} name={k} inputs={inputs} set={set} />)}
           <p className="help wide">{t('Uses the SPT and strata of the chosen borehole. SNI 1726:2019 gives amax for the site class (PGA × FPGA).')}</p>
+          <AmaxFromSiteClass projectId={meta.project_id} onPick={v => set('amax_g', String(v))} />
+        </>}
+        {meta.type === 'bearing_table' && ['B_list', 'Df_list', 'LB', 'c', 'phi_deg', 'gamma', 'gamma_sat', 'gw_depth', 'fs'].map(k => <TextField key={k} name={k} inputs={inputs} set={set} />)}
+        {meta.type === 'site_class' && <>
+          {['pga', 'ss', 's1', 'tl'].map(k => <NumberField key={k} name={k} inputs={inputs} set={set} />)}
+          <div className="field">
+            <label htmlFor="a-site">{t('Site class')}</label>
+            <select id="a-site" value={inputs.site || ''} onChange={e => set('site', e.target.value)}>
+              <option value="">{t('From the data (SPT or Vs)')}</option>
+              {['SA', 'SB', 'SC', 'SD', 'SE'].map(x => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+          <VsLayers rows={inputs.vs_layers || []} onChange={rows => set('vs_layers', rows)} />
+          <p className="help wide">{t('PGA, Ss and S1 are bedrock (SB) values for the site from the 2024 national seismic hazard maps. With a borehole, N̄ of the top 30 m is used; with Vs layers (downhole or crosshole), Vs30 is used.')}</p>
+        </>}
+        {meta.type === 'spt_correction' && <>
+          {['energy_ratio', 'borehole_diameter_mm', 'rod_extra_m', 'gamma', 'gw_depth'].map(k => <NumberField key={k} name={k} inputs={inputs} set={set} />)}
+          <div className="field">
+            <label htmlFor="a-liner">{t('Sampler')}</label>
+            <select id="a-liner" value={inputs.sampler_liners || 'no'} onChange={e => set('sampler_liners', e.target.value)}>
+              <option value="no">{t('Without liners')}</option>
+              <option value="yes">{t('With liners (standard)')}</option>
+            </select>
+          </div>
+          <p className="help wide">{t('Uses the SPT of the chosen borehole. The energy ratio comes from the hammer energy measurement of the rig.')}</p>
         </>}
         <div className="field">
           <label htmlFor="a-eng">{t('Engineer')}</label>
@@ -234,7 +315,9 @@ function clean(inputs: Inputs): Inputs {
   for (const [k, v] of Object.entries(inputs)) {
     if (k === 'layers' && Array.isArray(v)) {
       out.layers = v.map(row => Object.fromEntries(Object.entries(row).filter(([, x]) => x !== '' && x !== null).map(([kk, x]) => [kk, Number(x)])))
-    } else if (k === 'pile_type' || k === 'borehole_id') {
+    } else if (k === 'vs_layers' && Array.isArray(v)) {
+      out.vs_layers = v.filter(row => row.top !== '' && row.base !== '' && row.vs !== '').map(row => ({ top: Number(row.top), base: Number(row.base), vs: Number(row.vs) }))
+    } else if (['pile_type', 'borehole_id', 'B_list', 'Df_list', 'site', 'sampler_liners'].includes(k)) {
       out[k] = v
     } else if (v !== '' && v !== null && v !== undefined) {
       out[k] = num(v)
@@ -291,6 +374,7 @@ function LineChart({ points, xLabel, yLabel, refLine, invertY = true }: {
 }
 
 export function AnalysisResult({ type, result }: { type: string, result: Record<string, any> }) {
+  if (Array.isArray(result.values) || Array.isArray(result.tables)) return <ResultView result={result} />
   const notes: string[] = result.notes || []
   return (
     <div>

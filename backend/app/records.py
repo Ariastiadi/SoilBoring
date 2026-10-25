@@ -16,6 +16,8 @@ from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from . import docstore
+from . import cpt_calc, geo, sheets
+from .calcbase import CalcError
 from .entities import ENTITIES, Entity, F
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -264,9 +266,63 @@ def _totals(record: Dict[str, Any], discount: bool) -> None:
     record["total"] = record["subtotal"] + record["tax"]
 
 
+def _round_up(value: float, step: float) -> float:
+    return float(math.ceil(value / step - 1e-9) * step) if step > 0 else value
+
+
+def _rate_buildup(record: Dict[str, Any]) -> None:
+    """Cost per unit (HPJ) from the build-up lines, then the internal and client prices."""
+    lines = record.get("buildup") or []
+    if not lines:
+        for key in ("cost_unit", "suggested_internal", "suggested_client", "variance_pct"):
+            record[key] = None
+        return
+    hpj = 0.0
+    for line in lines:
+        hours = line.get("life_hours") or 0
+        coef = line.get("coef")
+        if not hours or coef is None:
+            continue
+        cost = (line.get("unit_cost") or 0) * (line.get("qty") if line.get("qty") is not None else 1)
+        cost *= 1 - (line.get("residual_pct") or 0) / 100
+        alloc = line.get("allocation_pct")
+        cost *= (alloc if alloc is not None else 100) / 100
+        hpj += cost / hours * coef
+    base = hpj * (1 + (record.get("contingency_pct") or 0) / 100) * (1 + (record.get("risk_pct") or 0) / 100)
+    step = float(record.get("rounding") or 1000)
+    internal = _round_up(base * (1 + (record.get("margin_internal_pct") or 0) / 100), step)
+    client = _round_up(base * (1 + (record.get("margin_client_pct") or 0) / 100), step)
+    record["cost_unit"] = _money(hpj)
+    record["suggested_internal"] = internal
+    record["suggested_client"] = client
+    price = record.get("price") or 0
+    record["variance_pct"] = round((price - client) / client * 100, 1) if client else None
+
+
+def _price_check(record: Dict[str, Any]) -> None:
+    """Quoted prices against the price list: below the minimum is refused, below the internal
+    (tier 1) price is flagged for approval."""
+    rates = {r["id"]: r for r in list_records("rates")}
+    below: List[str] = []
+    discount = (record.get("discount_pct") or 0) / 100
+    for row in record.get("items") or []:
+        rate = rates.get(row.get("rate_id") or "")
+        if not rate:
+            continue
+        net = (row.get("unit_price") or 0) * (1 - discount)
+        if rate.get("min_price") and net < rate["min_price"]:
+            raise RecordError(f"{rate.get('code')}: the price is below the minimum selling price")
+        if rate.get("internal_price") and net < rate["internal_price"]:
+            below.append(str(rate.get("code")))
+    record["price_check"] = ("Below the internal price, needs approval: " + ", ".join(below)) if below else ""
+
+
 def compute(entity: str, record: Dict[str, Any], today: Optional[str] = None) -> Dict[str, Any]:
     if entity == "quotes":
         _totals(record, discount=True)
+        _price_check(record)
+    elif entity == "rates":
+        _rate_buildup(record)
     elif entity == "invoices":
         _totals(record, discount=False)
         record["pph"] = _money(record["subtotal"] * (record.get("pph_pct") or 0) / 100)
@@ -287,7 +343,24 @@ def compute(entity: str, record: Dict[str, Any], today: Optional[str] = None) ->
             record["payment_status"] = "overdue"
         else:
             record["payment_status"] = "unpaid"
-    elif entity == "lab_tests":
+    elif entity == "field_activities":
+        _run_sheet(record, "field", str(record.get("method") or ""), record.get("data") or {}, "results_calc")
+        _add_utm(record)
+    elif entity == "cpt":
+        try:
+            out = cpt_calc.interpret(record) if len(record.get("readings") or []) >= 2 else None
+        except CalcError as exc:
+            out = {"error": str(exc)}
+        record["results"] = out or {}
+        record["summary"] = str((out or {}).get("summary") or "")[:300]
+        _add_utm(record)
+    if entity == "lab_tests":
+        _run_sheet(record, "lab", str(record.get("test_type") or ""), record.get("raw") or {}, "calc")
+        computed = (record.get("calc") or {}).get("lab") or {}
+        if computed:
+            merged = dict(record.get("results") or {})
+            merged.update(computed)
+            record["results"] = merged
         res = record.get("results") or {}
         if record.get("test_type") == "atterberg" and res.get("pi") is None and res.get("ll") is not None and res.get("pl") is not None:
             res["pi"] = round(res["ll"] - res["pl"], 2)
@@ -295,6 +368,32 @@ def compute(entity: str, record: Dict[str, Any], today: Optional[str] = None) ->
             res["fines"] = round(res["silt"] + res["clay"], 2)
         record["results"] = res
     return record
+
+
+def _has_data(data: Dict[str, Any]) -> bool:
+    for value in data.values():
+        if isinstance(value, list) and value:
+            return True
+        if value not in (None, "", [], {}) and not isinstance(value, (list, dict)):
+            return True
+    return False
+
+
+def _run_sheet(record: Dict[str, Any], kind: str, key: str, data: Dict[str, Any], target: str) -> None:
+    """Worksheet calculation; an error is kept on the record instead of refusing the save,
+    so a half-filled worksheet can be stored and finished later."""
+    out: Optional[Dict[str, Any]] = None
+    if data and _has_data(data):
+        try:
+            out = sheets.calculate(kind, key, data)
+        except CalcError as exc:
+            out = {"error": str(exc)}
+    record[target] = out or {}
+    record["summary"] = str((out or {}).get("summary") or "")[:300]
+
+
+def _add_utm(record: Dict[str, Any]) -> None:
+    record["utm"] = geo.describe(record.get("latitude"), record.get("longitude"))
 
 
 # --------------------------------------------------------------------------- #

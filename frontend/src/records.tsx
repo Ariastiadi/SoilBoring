@@ -181,7 +181,7 @@ export function FieldInput({ f, value, onChange, record, id }: {
     case 'user':
       return <UserSelect id={id} value={value} onChange={onChange} />
     case 'items':
-      return <ItemsEditor f={f} rows={Array.isArray(value) ? value : []} onChange={onChange} />
+      return <ItemsEditor f={f} rows={Array.isArray(value) ? value : []} onChange={onChange} record={record} />
     case 'files':
       return <FilesEditor files={Array.isArray(value) ? value : []} onChange={onChange} />
     case 'json':
@@ -191,12 +191,21 @@ export function FieldInput({ f, value, onChange, record, id }: {
         const obj = value && typeof value === 'object' ? value : {}
         return (
           <div className="fields">
-            {sub.map(s => (
-              <div className="field" key={s.name}>
-                <label htmlFor={`${id}-${s.name}`}>{t(s.label)}</label>
-                <FieldInput f={s} id={`${id}-${s.name}`} value={obj[s.name]} record={obj} onChange={v => onChange({ ...obj, [s.name]: v })} />
-                {s.help && <p className="help">{t(s.help)}</p>}
-              </div>
+            {sub.map((s, i) => (
+              <Fragment key={s.name}>
+                {s.section && s.section !== sub[i - 1]?.section && <h4 className="field wide sheet-section">{t(s.section)}</h4>}
+                {s.type === 'bool' ? (
+                  <div className="field">
+                    <label className="checkbox"><FieldInput f={s} id={`${id}-${s.name}`} value={obj[s.name]} record={obj} onChange={v => onChange({ ...obj, [s.name]: v })} />{t(s.label)}</label>
+                  </div>
+                ) : (
+                  <div className={`field${['items', 'longtext', 'files'].includes(s.type) ? ' wide' : ''}`}>
+                    <label htmlFor={`${id}-${s.name}`}>{t(s.label)}{s.required && <span className="tag-req">{t('required')}</span>}</label>
+                    <FieldInput f={s} id={`${id}-${s.name}`} value={obj[s.name]} record={obj} onChange={v => onChange({ ...obj, [s.name]: v })} />
+                    {s.help && <p className="help">{t(s.help)}</p>}
+                  </div>
+                )}
+              </Fragment>
             ))}
           </div>
         )
@@ -207,14 +216,15 @@ export function FieldInput({ f, value, onChange, record, id }: {
   }
 }
 
-function ItemsEditor({ f, rows, onChange }: { f: FieldDef, rows: Array<Record<string, any>>, onChange: (rows: Array<Record<string, any>>) => void }) {
+function ItemsEditor({ f, rows, onChange, record }: { f: FieldDef, rows: Array<Record<string, any>>, onChange: (rows: Array<Record<string, any>>) => void, record?: Record<string, any> }) {
   const subs = f.fields || []
   const rates = useList(subs.some(s => s.type === 'ref' && s.ref === 'rates') ? 'rates' : null)
   const [paste, setPaste] = useState<string | null>(null)
   const set = (i: number, key: string, v: any) => onChange(rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)))
   const pick = (i: number, rateId: string) => {
     const rate = rates?.find(r => r.id === rateId)
-    onChange(rows.map((r, j) => (j === i ? { ...r, rate_id: rateId, ...(rate ? { description: rate.description, unit: rate.unit, unit_price: rate.price } : {}) } : r)))
+    const price = rate && record?.price_tier === 'internal' && rate.internal_price ? rate.internal_price : rate?.price
+    onChange(rows.map((r, j) => (j === i ? { ...r, rate_id: rateId, ...(rate ? { description: rate.description, unit: rate.unit, unit_price: price } : {}) } : r)))
   }
   const editable = subs.filter(s => s.type !== 'ref' || s.ref === 'rates')
   const pasteCols = editable.filter(s => s.type !== 'ref')
@@ -348,8 +358,11 @@ function initial(entity: EntityDef, record?: Rec | null, defaults?: Record<strin
   return out
 }
 
-export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide = [] }: {
-  entity: EntityDef, record?: Rec | null, defaults?: Record<string, any>, onSaved: (r: Rec) => void, onCancel?: () => void, hide?: string[]
+export type FormTools = (data: Record<string, any>, setData: (update: (prev: Record<string, any>) => Record<string, any>) => void, place: 'top' | 'bottom') => ReactNode
+
+export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide = [], tools }: {
+  entity: EntityDef, record?: Rec | null, defaults?: Record<string, any>, onSaved: (r: Rec) => void, onCancel?: () => void, hide?: string[],
+  tools?: FormTools
 }) {
   const [data, setData] = useState<Record<string, any>>(() => initial(entity, record, defaults))
   const [busy, setBusy] = useState(false)
@@ -375,6 +388,7 @@ export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide =
   const wide = (f: FieldDef) => ['longtext', 'items', 'files', 'json', 'multiselect'].includes(f.type)
   return (
     <form onSubmit={submit} className="card" noValidate>
+      {tools?.(data, setData, 'top')}
       <div className="fields">
         {fields.map(f => (
           <div key={f.name} className={`field${wide(f) ? ' wide' : ''}`}>
@@ -390,6 +404,7 @@ export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide =
           </div>
         ))}
       </div>
+      {tools?.(data, setData, 'bottom')}
       {error && <p className="notice error" role="alert">{error}</p>}
       <div className="actions" style={{ marginTop: '1rem' }}>
         <button type="submit" className="primary" disabled={busy}>{busy ? t('Saving…') : t('Save')}</button>
@@ -403,44 +418,61 @@ export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide =
 // Read-only view
 // ---------------------------------------------------------------------------
 
+function ItemsTable({ f, rows }: { f: FieldDef, rows: any[] }) {
+  const cols = (f.fields || []).filter(s => s.type !== 'ref')
+  return (
+    <section style={{ marginTop: '1rem' }}>
+      <h3>{t(f.label)}{rows.length > 12 && <span className="muted small"> · {rows.length} {t('rows')}</span>}</h3>
+      <div className="table-wrap" style={rows.length > 12 ? { maxHeight: '26rem', overflowY: 'auto' } : undefined}>
+        <table className="data-table">
+          <thead><tr>{cols.map(s => <th key={s.name} className={['number', 'int', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{t(s.label)}</th>)}</tr></thead>
+          <tbody>
+            {rows.slice(0, 300).map((row, i) => (
+              <tr key={i}>{cols.map(s => <td key={s.name} className={['number', 'int', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{display(s, row?.[s.name])}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 300 && <p className="muted small">{t('Showing the first 300 rows.')}</p>}
+    </section>
+  )
+}
+
 export function RecordFields({ entity, record, hide = [] }: { entity: EntityDef, record: Rec, hide?: string[] }) {
   const simple = entity.fields.filter(f => !['items', 'files', 'json', 'longtext'].includes(f.type) && !hide.includes(f.name) && f.name in record)
   const long = entity.fields.filter(f => f.type === 'longtext' && record[f.name] && !hide.includes(f.name))
   const items = entity.fields.filter(f => f.type === 'items' && !hide.includes(f.name) && (record[f.name] || []).length)
   const json = entity.fields.filter(f => f.type === 'json' && f.variants && !hide.includes(f.name))
   const files = entity.fields.filter(f => f.type === 'files' && !hide.includes(f.name))
+  const subsOf = (f: FieldDef) => f.variants?.[record[f.variants_by || '']] || []
+  const valueOf = (f: FieldDef, s: FieldDef) => (record[f.name] || {})[s.name]
+  const filled = (v: unknown) => !(v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length))
   return (
     <div className="record-view">
       <dl className="facts-grid">
         {simple.map(f => (
           <div key={f.name}><dt>{t(f.label)}</dt><dd>{display(f, record[f.name])}</dd></div>
         ))}
-        {json.map(f => (f.variants?.[record[f.variants_by || '']] || []).map(s => (
-          <div key={s.name}><dt>{t(s.label)}</dt><dd>{display(s, (record[f.name] || {})[s.name])}</dd></div>
+        {json.map(f => subsOf(f).filter(s => !['items', 'longtext', 'files'].includes(s.type) && filled(valueOf(f, s))).map(s => (
+          <div key={f.name + s.name}><dt>{t(s.label)}</dt><dd>{display(s, valueOf(f, s))}</dd></div>
         )))}
       </dl>
+      {json.map(f => subsOf(f).filter(s => s.type === 'longtext' && valueOf(f, s)).map(s => (
+        <section key={f.name + s.name} style={{ marginTop: '1rem' }}>
+          <h3>{t(s.label)}</h3>
+          <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{valueOf(f, s)}</p>
+        </section>
+      )))}
+      {json.map(f => subsOf(f).filter(s => s.type === 'items' && (valueOf(f, s) || []).length).map(s => (
+        <ItemsTable key={f.name + s.name} f={s} rows={valueOf(f, s)} />
+      )))}
       {long.map(f => (
         <section key={f.name} style={{ marginTop: '1rem' }}>
           <h3>{t(f.label)}</h3>
           <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{record[f.name]}</p>
         </section>
       ))}
-      {items.map(f => (
-        <section key={f.name} style={{ marginTop: '1rem' }}>
-          <h3>{t(f.label)}{(record[f.name] as any[]).length > 12 && <span className="muted small"> · {(record[f.name] as any[]).length} {t('rows')}</span>}</h3>
-          <div className="table-wrap" style={(record[f.name] as any[]).length > 12 ? { maxHeight: '26rem', overflowY: 'auto' } : undefined}>
-            <table className="data-table">
-              <thead><tr>{(f.fields || []).filter(s => s.type !== 'ref').map(s => <th key={s.name} className={['number', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{t(s.label)}</th>)}</tr></thead>
-              <tbody>
-                {(record[f.name] as any[]).slice(0, 300).map((row, i) => (
-                  <tr key={i}>{(f.fields || []).filter(s => s.type !== 'ref').map(s => <td key={s.name} className={['number', 'money', 'percent'].includes(s.type) ? 'num' : ''}>{display(s, row[s.name])}</td>)}</tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {(record[f.name] as any[]).length > 300 && <p className="muted small">{t('Showing the first 300 rows.')}</p>}
-        </section>
-      ))}
+      {items.map(f => <ItemsTable key={f.name} f={f} rows={record[f.name]} />)}
       {files.map(f => (
         <section key={f.name} style={{ marginTop: '1rem' }}>
           <h3>{t(f.label)}</h3>
@@ -457,8 +489,9 @@ export function RecordFields({ entity, record, hide = [] }: { entity: EntityDef,
 
 export type DetailExtra = (record: Rec, reload: () => void) => ReactNode
 
-export function RecordsPage({ entityName, description, defaults, filter, extra, columns, back, title, hideInForm, openId, startNew, renderForm, actions, toolbar }: {
+export function RecordsPage({ entityName, description, defaults, filter, extra, columns, back, title, hideInForm, openId, startNew, renderForm, actions, toolbar, formTools }: {
   toolbar?: ReactNode
+  formTools?: FormTools
   entityName: string
   openId?: string
   startNew?: Record<string, any> | null
@@ -517,7 +550,7 @@ export function RecordsPage({ entityName, description, defaults, filter, extra, 
           onCancel: () => setMode(open ? 'view' : 'list'),
           onSaved: r => { invalidate(entityName); setOpen(r); setMode('view'); setNotice(t('Saved.')); load() },
         }) : (
-          <RecordForm entity={entity} record={mode === 'edit' ? open : null} defaults={newDefaults} hide={hideInForm}
+          <RecordForm entity={entity} record={mode === 'edit' ? open : null} defaults={newDefaults} hide={hideInForm} tools={formTools}
             onCancel={() => setMode(open ? 'view' : 'list')}
             onSaved={r => { setOpen(r); setMode('view'); setNotice(t('Saved.')); load() }} />
         )}
@@ -614,6 +647,7 @@ export const STATUS_TONE: Record<string, string> = {
   draft: '', sent: 'active', won: 'ok', lost: '', signed: 'ok', amended: 'warn', closed: '',
   received: '', testing: 'warn', done: 'ok', review: 'warn', approved: 'ok',
   unpaid: 'warn', partial: 'warn', paid: 'ok', overdue: 'bad',
+  requested: 'active', pending: 'warn', passed: 'ok', redo: 'bad',
 }
 
 export function Labeled({ label, children }: { label: string, children: ReactNode }) {

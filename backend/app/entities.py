@@ -6,57 +6,11 @@ the interface translates them.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
-ALL_ROLES = ("admin", "manager", "general", "lab", "finance")
-COMMERCIAL = ("admin", "manager", "finance")
-
-Option = Tuple[str, str]  # (stored value, English label)
-
-
-@dataclass
-class F:
-    name: str
-    type: str  # text, longtext, number, int, money, percent, date, select, multiselect, ref, user, email, bool, items, files, json
-    label: str
-    required: bool = False
-    options: Optional[List[Any]] = None  # [(value, label)] or [(value, label, group)]
-    options_filter: Optional[str] = None  # show only options whose group equals this field's value
-    ref: Optional[str] = None  # entity name for type "ref"
-    min: Optional[float] = None
-    max: Optional[float] = None
-    maxlen: int = 200
-    help: str = ""
-    fields: Optional[List["F"]] = None  # sub-fields for "items"
-    max_items: int = 200
-    list: bool = False  # shown as a column in lists
-    readonly: bool = False  # computed by the server
-    default: Any = None
-    variants_by: Optional[str] = None  # for "json": which field picks the variant
-    variants: Optional[Dict[str, List["F"]]] = None
-    section: str = ""
-    private: bool = False  # only shown to admin, manager and finance
-
-
-@dataclass
-class Entity:
-    name: str
-    label: str
-    label_one: str
-    fields: List[F]
-    title: str  # field used as the record's title
-    read: Tuple[str, ...] = ALL_ROLES
-    write: Tuple[str, ...] = ("admin", "manager")
-    own_write: Tuple[str, ...] = ()  # roles that may change only records they created
-    number_prefix: str = ""  # automatic numbers such as INV-2026-001
-    number_field: str = ""
-    singleton: bool = False
-    group: str = ""
-    sort: str = "-created_at"
-
-    def field(self, name: str) -> Optional[F]:
-        return next((f for f in self.fields if f.name == name), None)
+from . import sheets
+from .fields import ALL_ROLES, COMMERCIAL, Entity, F, Option  # noqa: F401
 
 
 SERVICE_LINES: List[Option] = [
@@ -132,24 +86,37 @@ LAB_TESTS: List[Option] = [
     ("consolidation", "Consolidation"),
 ]
 
-FIELD_METHODS: List[Tuple[str, str, str]] = [
+# Methods without their own worksheet (results are written as text and measurements).
+OTHER_METHODS: List[Tuple[str, str, str]] = [
     ("seismic_refraction", "Seismic refraction", "geophysics"),
     ("masw", "MASW (surface waves)", "geophysics"),
-    ("resistivity", "Resistivity (geolistrik)", "geophysics"),
     ("gpr", "Ground penetrating radar", "geophysics"),
-    ("downhole", "Downhole seismic", "geophysics"),
     ("outcrop", "Outcrop description", "geology"),
     ("mapping", "Geological mapping", "geology"),
     ("structure", "Structural measurement (strike/dip)", "geology"),
-    ("test_pit", "Test pit", "geology"),
-    ("topographic", "Topographic survey", "survey"),
-    ("benchmark", "Benchmark / control point", "survey"),
     ("stakeout", "Stake-out of test points", "survey"),
     ("drone", "Drone / photogrammetry", "survey"),
+    ("other_general", "Other", "general"),
+    ("other_survey", "Other", "survey"),
+    ("other_geotechnical", "Other", "geotechnical"),
     ("other", "Other", "geophysics"),
     ("other_geology", "Other", "geology"),
-    ("other_survey", "Other", "survey"),
 ]
+
+
+def _field_methods() -> List[Tuple[str, str, str]]:
+    return [(s.key, s.label, s.group) for s in sheets.all_sheets("field")] + OTHER_METHODS
+
+
+def _field_variants() -> Dict[str, List[F]]:
+    return {s.key: s.fields for s in sheets.all_sheets("field") if s.fields}
+
+
+def _lab_variants() -> Dict[str, List[F]]:
+    return {s.key: s.fields for s in sheets.all_sheets("lab") if s.fields}
+
+
+FIELD_METHODS = _field_methods()
 
 ITEM_FIELDS = [
     F("rate_id", "ref", "From price list", ref="rates"),
@@ -173,6 +140,8 @@ _add(Entity(
         F("type", "select", "Type", required=True, list=True, options=[
             ("contractor", "Contractor"), ("bumn", "State-owned (BUMN)"), ("private", "Private company"),
             ("government", "Government"), ("other", "Other")]),
+        F("pricing_tier", "select", "Price tier", default="client", options=[
+            ("client", "Client price"), ("internal", "Internal / group price")]),
         F("contact_person", "text", "Contact person", list=True),
         F("phone", "text", "Phone", maxlen=40, list=True),
         F("email", "email", "Email"),
@@ -200,6 +169,12 @@ _add(Entity(
     ],
 ))
 
+BUILDUP_SECTIONS: List[Option] = [
+    ("equipment", "Equipment depreciation"), ("aux", "Auxiliary tools"), ("calibration", "Calibration"),
+    ("consumable", "Consumables"), ("labour", "Direct labour"), ("operations", "Operations"),
+    ("overhead", "Overhead (G&A)"), ("subcontract", "Subcontract"),
+]
+
 _add(Entity(
     name="rates", label="Price list", label_one="Rate", title="description", group="finance", sort="code",
     read=COMMERCIAL, write=("admin", "manager", "finance"),
@@ -208,7 +183,38 @@ _add(Entity(
         F("description", "text", "Description", required=True, list=True),
         F("line", "select", "Service", options=SERVICE_LINES, list=True),
         F("unit", "text", "Unit", required=True, maxlen=20, list=True, help="e.g. m, point, sample, day, lump sum"),
-        F("price", "money", "Unit price (IDR)", required=True, min=0, max=1e13, list=True),
+        F("price", "money", "Client price (IDR)", required=True, min=0, max=1e13, list=True,
+          help="Published price for external clients, before VAT."),
+        F("internal_price", "money", "Internal / group price (IDR)", min=0, max=1e13, list=True,
+          help="Tier 1 price; quoting below it needs approval."),
+        F("min_price", "money", "Minimum selling price (IDR)", min=0, max=1e13,
+          help="Quotations below this price are refused."),
+        F("price_on_request", "bool", "Price on request (costing needed before quoting)"),
+        F("exclusions", "text", "Standard exclusions", maxlen=300,
+          help="e.g. mobilisation, transport, accommodation; printed on quotations."),
+        F("buildup", "items", "Rate build-up (cost per unit)", max_items=80, section="Rate build-up", fields=[
+            F("section", "select", "Cost group", required=True, options=BUILDUP_SECTIONS),
+            F("description", "text", "Description", required=True),
+            F("qty", "number", "Quantity", min=0, max=1e6, default=1),
+            F("unit_cost", "money", "Cost (IDR)", min=0, max=1e13,
+              help="Purchase cost, daily wage or annual amount."),
+            F("life_hours", "number", "Hours of use / life (h)", min=0.01, max=1e7,
+              help="e.g. 16 years × 365 × 8 h; 8 h for a daily wage."),
+            F("residual_pct", "percent", "Residual value (%)", min=0, max=100),
+            F("allocation_pct", "percent", "Allocation (%)", min=0, max=100, help="Share of an overhead account; empty = 100%."),
+            F("coef", "number", "Hours per unit", min=0, max=1e5, help="8 h ÷ output per day, e.g. 0.667 h/m."),
+        ]),
+        F("contingency_pct", "percent", "Contingency (%)", min=0, max=50),
+        F("risk_pct", "percent", "Risk premium (%)", min=0, max=20, help="Risk scale 1–5 → 1–5% of the cost."),
+        F("margin_internal_pct", "percent", "Margin, internal price (%)", min=0, max=5000, default=30),
+        F("margin_client_pct", "percent", "Margin, client price (%)", min=0, max=5000, default=60),
+        F("rounding", "select", "Round up to", default="1000", options=[
+            ("1", "1"), ("10", "10"), ("100", "100"), ("1000", "1,000"), ("10000", "10,000"), ("100000", "100,000")]),
+        F("cost_unit", "money", "Cost per unit (HPJ)", readonly=True),
+        F("suggested_internal", "money", "Calculated internal price", readonly=True),
+        F("suggested_client", "money", "Calculated client price", readonly=True),
+        F("variance_pct", "percent", "Published vs calculated (%)", readonly=True),
+        F("notes", "longtext", "Notes", maxlen=2000),
     ],
 ))
 
@@ -222,12 +228,17 @@ _add(Entity(
         F("valid_until", "date", "Valid until"),
         F("status", "select", "Status", required=True, default="draft", list=True, options=[
             ("draft", "Draft"), ("sent", "Sent"), ("won", "Won"), ("lost", "Lost")]),
+        F("price_tier", "select", "Price tier", default="client", options=[
+            ("client", "Client price"), ("internal", "Internal / group price")]),
         F("items", "items", "Items", fields=ITEM_FIELDS),
         F("discount_pct", "percent", "Discount (%)", min=0, max=100, default=0),
         F("tax_pct", "percent", "VAT / PPN (%)", min=0, max=100, default=11),
+        F("mob_demob", "select", "Mobilisation / demobilisation", default="excluded", options=[
+            ("excluded", "Excluded (stated in the quotation)"), ("included", "Priced in the items")]),
         F("subtotal", "money", "Subtotal", readonly=True),
         F("tax", "money", "VAT", readonly=True),
         F("total", "money", "Total", readonly=True, list=True),
+        F("price_check", "text", "Price check", readonly=True, maxlen=1000),
         F("notes", "longtext", "Terms and notes", maxlen=4000),
     ],
 ))
@@ -271,33 +282,56 @@ _add(Entity(
         F("final_depth", "number", "Final depth (m)", min=0, max=200, list=True),
         F("gw_depth", "number", "Groundwater depth (m)", min=0, max=200),
         F("operator", "text", "Operator"),
+        F("qc", "select", "Field QC", default="pending", list=True, options=[
+            ("pending", "Waiting for QC"), ("passed", "QC passed"), ("redo", "Redo / repeat")]),
+        F("checked_by", "user", "Checked by"),
+        F("qc_unit", "select", "Units of qc and fs", default="kgcm2", options=[
+            ("kgcm2", "qc and fs in kg/cm² (mechanical sondir)"), ("mpa_kpa", "qc in MPa, fs in kPa (electric CPT / CPTu)"),
+            ("mpa", "qc and fs in MPa")]),
+        F("area_ratio", "number", "Cone area ratio a", min=0.3, max=1, default=0.8),
+        F("unit_weight", "number", "Average unit weight γ (kN/m³)", min=10, max=25, default=18),
+        F("nkt", "number", "Cone factor Nkt", min=5, max=30, default=15),
         F("readings", "items", "Readings", max_items=3000, fields=[
             F("depth", "number", "Depth (m)", required=True, min=0, max=200),
-            F("qc", "number", "qc (kg/cm²)", required=True, min=0, max=2000),
-            F("fs", "number", "fs (kg/cm²)", min=0, max=100),
+            F("qc", "number", "qc", required=True, min=0, max=2000),
+            F("fs", "number", "fs", min=0, max=5000),
             F("u2", "number", "u2 (kPa)", min=-500, max=10000),
         ]),
+        F("dissipation_depth", "number", "Dissipation test depth (m)", min=0, max=200),
+        F("rigidity_index", "number", "Rigidity index Ir", min=10, max=1000, default=100),
+        F("dissipation", "items", "Dissipation readings", max_items=1000, fields=[
+            F("time", "number", "Time (s)", required=True, min=0, max=1e6),
+            F("u2", "number", "u2 (kPa)", required=True, min=-500, max=10000),
+        ]),
+        F("results", "json", "Interpretation", readonly=True),
+        F("summary", "text", "Result", readonly=True, list=True, maxlen=300),
         F("files", "files", "Files"),
         F("remarks", "longtext", "Remarks", maxlen=2000),
     ],
 ))
 
 _add(Entity(
-    name="field_activities", label="Other field work", label_one="Field activity", title="code", group="field",
+    name="field_activities", label="Field worksheets", label_one="Field worksheet", title="code", group="field",
     sort="-date", write=("admin", "manager"), own_write=("general",),
     fields=[
-        F("code", "text", "Line / point ID", required=True, maxlen=40, list=True),
-        F("type", "select", "Discipline", required=True, list=True, options=[
-            ("geophysics", "Geophysics"), ("geology", "Geology"), ("survey", "Geodesy & mapping")]),
-        F("method", "select", "Method", required=True, list=True, options=FIELD_METHODS, options_filter="type"),
+        F("code", "text", "Document / point ID", required=True, maxlen=60, list=True,
+          help="e.g. the point, line or borehole ID, or DR-2026-10-26 for a daily report."),
+        F("type", "select", "Discipline", required=True, list=True,
+          options=[(value, label) for value, label, _ in sheets.FIELD_GROUPS]),
+        F("method", "select", "Worksheet", required=True, list=True, options=FIELD_METHODS, options_filter="type"),
         F("project_id", "ref", "Project", ref="projects", list=True),
+        F("borehole_id", "text", "Borehole", maxlen=64),
         F("date", "date", "Date", required=True, list=True),
         F("latitude", "number", "Latitude", min=-90, max=90),
         F("longitude", "number", "Longitude", min=-180, max=180),
         F("elevation", "number", "Elevation (mRL)", min=-1000, max=9000),
         F("length", "number", "Line length (m)", min=0, max=100000),
         F("crew", "text", "Crew"),
-        F("results", "longtext", "Results", maxlen=6000,
+        F("standard", "text", "Standard", maxlen=300),
+        F("data", "json", "Worksheet", variants_by="method", variants=_field_variants()),
+        F("results_calc", "json", "Calculated results", readonly=True),
+        F("summary", "text", "Result", readonly=True, list=True, maxlen=300),
+        F("results", "longtext", "Results / interpretation", maxlen=6000,
           help="e.g. layers and velocities, resistivity zones, lithology, strike/dip, coordinates and accuracy."),
         F("values", "items", "Measurements", max_items=500, fields=[
             F("name", "text", "Parameter", required=True, maxlen=60),
@@ -305,6 +339,9 @@ _add(Entity(
             F("unit", "text", "Unit", maxlen=20),
         ]),
         F("files", "files", "Files"),
+        F("qc", "select", "Field QC", default="pending", list=True, options=[
+            ("pending", "Waiting for QC"), ("passed", "QC passed"), ("redo", "Redo / repeat")]),
+        F("checked_by", "user", "Checked by"),
     ],
 ))
 
@@ -318,11 +355,16 @@ _add(Entity(
         F("depth_base", "number", "To (m)", min=0, max=500),
         F("test_type", "select", "Test", required=True, options=LAB_TESTS, list=True),
         F("status", "select", "Status", required=True, default="received", list=True, options=[
-            ("received", "Received"), ("testing", "Testing"), ("done", "Done")]),
+            ("requested", "Requested"), ("received", "Received"), ("testing", "Testing"), ("done", "Done")]),
         F("received", "date", "Received on", list=True),
         F("tested", "date", "Tested on"),
         F("technician", "text", "Technician"),
-        F("standard", "text", "Standard", help="e.g. SNI 1965:2008, ASTM D2216"),
+        F("checked_by", "user", "Checked by"),
+        F("project_id", "ref", "Project", ref="projects"),
+        F("standard", "text", "Standard", maxlen=300, help="e.g. SNI 1965:2008, ASTM D2216"),
+        F("raw", "json", "Test data", variants_by="test_type", variants=_lab_variants()),
+        F("calc", "json", "Calculated results", readonly=True),
+        F("summary", "text", "Result", readonly=True, list=True, maxlen=300),
         F("results", "json", "Results", variants_by="test_type", variants=LAB_RESULTS),
         F("files", "files", "Lab sheets"),
         F("remarks", "longtext", "Remarks", maxlen=2000),
@@ -339,7 +381,9 @@ _add(Entity(
             ("bearing", "Shallow foundation bearing capacity"),
             ("pile", "Pile capacity from SPT (Decourt)"),
             ("settlement", "Consolidation settlement"),
-            ("liquefaction", "Liquefaction (SPT, Idriss & Boulanger)")]),
+            ("liquefaction", "Liquefaction (SPT, Idriss & Boulanger)"),
+            ("bearing_table", "Bearing capacity table (several widths and depths)"),
+            ("site_class", "Seismic site class and design spectrum (SNI 1726:2019)")]),
         F("inputs", "json", "Inputs"),
         F("results", "json", "Results", readonly=True),
         F("summary", "text", "Result", readonly=True, list=True, maxlen=300),

@@ -468,6 +468,7 @@ export type FieldDef = {
   name: string
   type: string
   label: string
+  section?: string
   required: boolean
   options: Array<[string, string] | [string, string, string]> | null
   options_filter: string | null
@@ -557,4 +558,93 @@ export async function userDirectory() {
 
 export async function runAnalysis(type: string, inputs: Record<string, unknown>) {
   return postJson<Record<string, any>>("/api/analyses/run", { type, inputs }, t("Calculation failed"));
+}
+
+// ---------------------------------------------------------------------------
+// Worksheets, sample register, coordinates
+// ---------------------------------------------------------------------------
+
+export type SheetInfo = {
+  key: string; kind: "field" | "lab" | "page"; group: string; code: string; label: string;
+  standards: Array<[string, string]>; example: Record<string, any>; calc: boolean; help: string; link: string;
+};
+
+export type CalcResult = {
+  error?: string;
+  summary?: string;
+  values?: Array<{ label: string; value: any; unit: string }>;
+  tables?: Array<{ title: string; columns: string[]; rows: any[][] }>;
+  charts?: ChartSpec[];
+  notes?: string[];
+  method?: string;
+  lab?: Record<string, any>;
+};
+
+export type ChartAxis = { label: string; log?: boolean; reverse?: boolean };
+export type ChartSpec = {
+  title: string; x: ChartAxis; y: ChartAxis; kind?: "xy" | "value";
+  series?: Array<{ name: string; points: Array<[number, number]>; style?: "line" | "points" | "both"; dash?: boolean }>;
+  points?: Array<[number, number, number]>; value_label?: string; log_value?: boolean;
+};
+
+export type SampleRow = {
+  borehole_id: string; project: string; top: number; base: number | null; type: string; ref: string; remarks: string;
+  tests: Array<{ id: string; test_type: string; status: string }>;
+};
+
+let catalogPromise: Promise<SheetInfo[]> | null = null;
+export function getCatalog(): Promise<SheetInfo[]> {
+  if (!catalogPromise) {
+    catalogPromise = fetch(`${BASE}/api/worksheets`, { headers: buildHeaders() })
+      .then(r => parseJson<SheetInfo[]>(r, t("Failed to load")))
+      .catch(err => { catalogPromise = null; throw err; });
+  }
+  return catalogPromise;
+}
+
+export async function calcWorksheet(kind: "field" | "lab" | "cpt", key: string, data: Record<string, unknown>) {
+  return postJson<CalcResult>("/api/worksheets/calc", { kind, key, data }, t("Calculation failed"));
+}
+
+export async function getSamples(project?: string) {
+  const q = project ? `?project=${encodeURIComponent(project)}` : "";
+  const r = await fetch(`${BASE}/api/samples${q}`, { headers: buildHeaders() });
+  return parseJson<SampleRow[]>(r, t("Failed to load"));
+}
+
+export type CoordRow = {
+  name?: string; latitude?: number | null; longitude?: number | null; easting?: number | null; northing?: number | null;
+  zone?: number | null; hemisphere?: string; elevation?: number | null;
+};
+export type CoordOut = CoordRow & { error?: string; dms?: string };
+
+export async function convertCoordinates(rows: CoordRow[]) {
+  return postJson<CoordOut[]>("/api/tools/coordinates", { rows }, t("Calculation failed"));
+}
+
+async function saveBlob(r: Response, fallbackName: string) {
+  if (!r.ok) {
+    const detail = translateServer(await readErrorDetail(r));
+    throw new Error(`${t("Download failed")}: ${detail || r.status}`);
+  }
+  const cd = r.headers.get("Content-Disposition") || "";
+  const m = /filename="([^"]+)"/.exec(cd);
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = m ? m[1] : fallbackName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function downloadPointsKml(name: string, points: Array<{ name: string; latitude: number; longitude: number; elevation?: number | null; folder?: string; description?: string }>) {
+  const headers = buildHeaders();
+  headers.set("Content-Type", "application/json");
+  const r = await fetch(`${BASE}/api/tools/kml`, { method: "POST", headers, body: JSON.stringify({ name, points }) });
+  await saveBlob(r, "points.kml");
+}
+
+export async function downloadProjectKml(projectId: string) {
+  const r = await fetch(`${BASE}/api/export/kml?project_id=${encodeURIComponent(projectId)}`, { headers: buildHeaders() });
+  await saveBlob(r, "project.kml");
 }

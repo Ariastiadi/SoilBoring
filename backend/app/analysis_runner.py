@@ -5,9 +5,9 @@ laboratory results of its samples, so the analysis follows the field and lab dat
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from . import details, engineering, records, storage
+from . import calcbase, details, engineering, records, seismic, storage
 
 
 def _opt(inputs: Dict[str, Any], key: str) -> Optional[float]:
@@ -138,4 +138,57 @@ def run(kind: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         result["summary"] = (f"{count} SPT liquefiable, shallowest at {shallowest:g} m" if count and shallowest is not None
                              else "No liquefiable SPT")
         return result
+    if kind == "bearing_table":
+        return _bearing_table(inputs)
+    if kind == "site_class":
+        pairs: List[Tuple[float, float]] = []
+        if str(inputs.get("borehole_id") or "").strip():
+            found = _borehole(inputs)
+            pairs = [(float(x["depth"]), float(x.get("n") if x.get("n") is not None else x["inc1"] + (x.get("inc2") or 0)))
+                     for x in found["depth"]["spt"]]
+        return seismic.site_class_analysis(inputs, pairs)
     raise ValueError("Choose an analysis type")
+
+
+def _list(inputs: Dict[str, Any], key: str, label: str) -> List[float]:
+    text = str(inputs.get(key) or "").replace(";", " ").replace(",", " ")
+    values = []
+    for part in text.split():
+        try:
+            values.append(float(part))
+        except ValueError as exc:
+            raise ValueError(f"{label}: enter numbers separated by spaces") from exc
+    if not values or len(values) > 12:
+        raise ValueError(f"{label}: enter 1 to 12 values")
+    return values
+
+
+def _bearing_table(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Allowable bearing pressure for several footing widths and depths at once."""
+    widths = _list(inputs, "B_list", "Footing widths B")
+    depths = _list(inputs, "Df_list", "Founding depths Df")
+    ratio = _opt(inputs, "LB") or 1.0
+    fs = _req(inputs, "fs", 3.0)
+    rows = []
+    best = None
+    for df in depths:
+        row: List[Any] = [df]
+        for b in widths:
+            out = engineering.bearing_capacity_shallow(
+                B=b, L=b * ratio if ratio < 50 else None, Df=df, c=_req(inputs, "c", 0.0), phi_deg=_req(inputs, "phi_deg", 0.0),
+                gamma=_req(inputs, "gamma", 18.0), gw_depth=_opt(inputs, "gw_depth"), gamma_sat=_opt(inputs, "gamma_sat"), fs=fs)
+            row.append(round(out["q_allow"], 1))
+            best = out["q_allow"] if best is None else max(best, out["q_allow"])
+        rows.append(row)
+    notes = ["Each cell is q_allow = qu / FS in kPa for that width (columns) and founding depth (rows).",
+             "L/B = 1 is a square footing; enter a large L/B (e.g. 100) for a strip footing.",
+             "Preliminary estimate only; results must be checked by a qualified geotechnical engineer."]
+    if fs < 3:
+        notes.insert(0, "Factor of safety below 3: SNI 8460:2017 asks for FS ≥ 3 for shallow foundations.")
+    charts = [calcbase.chart("Allowable bearing pressure", calcbase.axis("Footing width B (m)"), calcbase.axis("q_allow (kPa)"),
+                             *[calcbase.series(f"Df = {r[0]:g} m", list(zip(widths, r[1:])), "both") for r in rows])]
+    return calcbase.result(
+        summary=[("q_allow max", round(best or 0, 1), "kPa"), ("FS", fs, "")],
+        values=[("Factor of safety", fs, ""), ("L/B", ratio, "")],
+        tables=[calcbase.table("q_allow (kPa)", ["Df (m) / B (m)"] + [f"{b:g}" for b in widths], rows)],
+        charts=charts, notes=notes, method="Vesic bearing capacity factors with De Beer shape and Hansen depth factors")

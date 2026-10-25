@@ -133,6 +133,11 @@ const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^Input should be a valid (number|integer).*$/, () => t('Must be a number')],
   [/^Input should be a finite number$/, () => t('Must be a number')],
   [/^value is not a valid email address.*$/, () => t('Enter a valid email address (name@domain)')],
+  // pricing
+  [/^Below the internal price, needs approval: (.+)$/, m => t('Below the internal price, needs approval: {list}', { list: m[1] })],
+  [/^(.+): the price is below the minimum selling price$/, m => t('{code}: the price is below the minimum selling price', { code: m[1] })],
+  // worksheet values such as "SD – Medium soil"
+  [/^(S[A-F]) – (.+)$/, m => `${m[1]} – ${t(m[2])}`],
   // general forms, after the specific ones above
   [/^(.+) must be a number$/, m => t('{field} must be a number', { field: where(m[1]) })],
   [/^(.+) must be at least (.+)$/, m => t('{field} must be at least {n}', { field: where(m[1]), n: m[2] })],
@@ -148,6 +153,17 @@ const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
 
 function translateOne(text: string): string | null {
   if (ID[text]) return ID[text]
+  // Calculated summaries: "Label = value unit; Label = value unit"
+  if (/^[^=;]+ = [^=]+(; [^=;]+ = [^=;]+)*$/.test(text) && text.includes(' = ')) {
+    const parts = text.split('; ').map(part => {
+      const i = part.indexOf(' = ')
+      if (i < 0) return part
+      const label = part.slice(0, i)
+      return `${ID[label] ?? label} = ${part.slice(i + 3)}`
+    })
+    const out = parts.join('; ')
+    if (out !== text) return out
+  }
   for (const [re, fn] of PATTERNS) {
     const m = text.match(re)
     if (m) return fn(m)

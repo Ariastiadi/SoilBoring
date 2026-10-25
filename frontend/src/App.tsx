@@ -38,6 +38,12 @@ const InvoicesPage = fromBusiness('InvoicesPage')
 const RatesPage = fromBusiness('RatesPage')
 const SettingsPage = fromBusiness('SettingsPage')
 const AnalysesPage = lazy(() => import('./tabs/Analyses'))
+const worksheetsModule = () => import('./tabs/Worksheets')
+const WorksheetCatalogPage = lazy(() => worksheetsModule().then(m => ({ default: m.WorksheetCatalogPage })))
+const StandardsPage = lazy(() => worksheetsModule().then(m => ({ default: m.StandardsPage })))
+const CoordinatesPage = lazy(() => worksheetsModule().then(m => ({ default: m.CoordinatesPage })))
+const SampleRegisterPage = lazy(() => worksheetsModule().then(m => ({ default: m.SampleRegisterPage })))
+const LabSummaryPage = lazy(() => worksheetsModule().then(m => ({ default: m.LabSummaryPage })))
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
@@ -221,9 +227,14 @@ export default function App() {
     { key: 'boreholes', label: t('Boreholes'), icon: 'boreholes' },
     { key: 'new', label: t('New log'), icon: 'plus' },
     { key: 'cpt', label: t('CPT / sondir'), icon: 'cone', entity: 'cpt' },
-    { key: 'fieldwork', label: t('Other field work'), icon: 'map', entity: 'field_activities' },
+    { key: 'fieldwork', label: t('Field worksheets'), icon: 'sheet', entity: 'field_activities' },
+    { key: 'coordinates', label: t('Coordinates & maps'), icon: 'pin' },
   ]
-  const lab: NavItem[] = [{ key: 'lab', label: t('Laboratory tests'), icon: 'flask', entity: 'lab_tests' }]
+  const lab: NavItem[] = [
+    { key: 'lab', label: t('Laboratory tests'), icon: 'flask', entity: 'lab_tests' },
+    { key: 'samples', label: t('Sample register'), icon: 'sample', entity: 'lab_tests' },
+    { key: 'labsummary', label: t('Results summary'), icon: 'list', entity: 'lab_tests' },
+  ]
   const engineering: NavItem[] = [
     { key: 'analyses', label: t('Engineering analyses'), icon: 'calc', entity: 'analyses' },
     { key: 'reports', label: t('Client reports'), icon: 'summary', entity: 'project_reports' },
@@ -236,6 +247,8 @@ export default function App() {
     { key: 'qa', label: 'Geo AI', icon: 'ai' },
     { key: 'summary', label: t('Summaries'), icon: 'summary' },
     { key: 'dashboard', label: t('Dashboard'), icon: 'chart' },
+    { key: 'worksheets', label: t('Worksheet list'), icon: 'book' },
+    { key: 'standards', label: t('Standards'), icon: 'book' },
   ]
   const admin: NavItem[] = isAdmin ? [
     { key: 'users', label: t('Users'), icon: 'users' },
@@ -244,7 +257,7 @@ export default function App() {
   ] : []
   const groups: Array<[string, NavItem[]]> = [
     ['Commercial operations', comop], ['Field work', field], ['Laboratory', lab], ['Engineering', engineering],
-    ['Finance', finance], ['Data & AI', analysis], ['Administration', admin],
+    ['Finance', finance], ['Data & references', analysis], ['Administration', admin],
   ]
   const about: NavItem = { key: 'about', label: t('About'), icon: 'info' }
   const PAGES: Partial<Record<TabKey, (i?: Intent) => JSX.Element>> = {
@@ -252,6 +265,8 @@ export default function App() {
     contracts: i => <ContractsPage intent={i} />, cpt: i => <CptPage intent={i} />, fieldwork: i => <FieldWorkPage intent={i} />,
     lab: i => <LabPage intent={i} />, analyses: i => <AnalysesPage intent={i} />, reports: i => <ReportsPage intent={i} />,
     invoices: i => <InvoicesPage intent={i} />, rates: i => <RatesPage intent={i} />, settings: () => <SettingsPage />,
+    worksheets: () => <WorksheetCatalogPage />, standards: () => <StandardsPage />, coordinates: () => <CoordinatesPage />,
+    samples: () => <SampleRegisterPage />, labsummary: () => <LabSummaryPage />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)

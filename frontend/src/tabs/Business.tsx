@@ -4,7 +4,7 @@
  */
 import { ReactNode, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { getDepthOverview, listRecords, listReports, type DepthOverview, type FieldDef, type Rec } from '../api'
+import { getDepthOverview, listRecords, listReports, saveRecord, type DepthOverview, type FieldDef, type Rec, type SheetInfo } from '../api'
 import { lang, t, translateServer } from '../i18n'
 import { useNav, type Intent, type TabKey } from '../nav'
 import {
@@ -12,6 +12,7 @@ import {
   useList, useSchemas,
 } from '../records'
 import { Icon, PageHead, formatDate, todayIso } from '../ui'
+import { CptCalcPreview, ResultView, StandardsList, sheetOf, useCatalog, useSheetTools } from '../worksheets'
 
 const COMMERCIAL_ROLES = ['admin', 'manager', 'finance']
 
@@ -314,6 +315,8 @@ function ProjectLine({ projectId }: { projectId: string }) {
 
 function QuoteSheet({ quote, onClose }: { quote: Rec, onClose: () => void }) {
   const settings = useSettings()
+  const rates = useList('rates')
+  const exclusions = [...new Set((quote.items || []).map((i: Rec) => rates?.find(r => r.id === i.rate_id)?.exclusions).filter(Boolean))] as string[]
   return (
     <PrintSheet title={quote.number} onClose={onClose}>
       <Letterhead settings={settings} title={t('Quotation')} number={quote.number} date={quote.date} />
@@ -329,6 +332,15 @@ function QuoteSheet({ quote, onClose }: { quote: Rec, onClose: () => void }) {
       </table>
       <p className="doc-small"><em>{amountInWords(quote.total)}</em></p>
       {quote.valid_until && <p>{t('This quotation is valid until {date}.', { date: formatDate(quote.valid_until) })}</p>}
+      {(quote.mob_demob !== 'included' || exclusions.length > 0) && (
+        <div className="doc-small">
+          <strong>{t('Not included in this price')}:</strong>
+          <ul style={{ margin: '.2rem 0 .5rem', paddingLeft: '1.1rem' }}>
+            {quote.mob_demob !== 'included' && <li>{t('Mobilisation and demobilisation, transport and accommodation of crew and equipment.')}</li>}
+            {exclusions.map(x => <li key={x}>{x}</li>)}
+          </ul>
+        </div>
+      )}
       {quote.notes && <p style={{ whiteSpace: 'pre-wrap' }}>{quote.notes}</p>}
       <Signature settings={settings} />
     </PrintSheet>
@@ -450,9 +462,77 @@ export function InvoicesPage({ intent }: { intent?: Intent }) {
   )
 }
 
+const SERVICE_WORDS: Array<[RegExp, string]> = [
+  [/lab|uji (kadar|batas|berat|geser|triaks|konsol|kuat)|atterberg|triax|consol|proctor|cbr lab/i, 'laboratory'],
+  [/sondir|cpt/i, 'cpt'], [/geolistrik|resistiv|seismi|masw|gpr|geofisik|downhole|crosshole/i, 'geophysics'],
+  [/topograf|survey|survei|gps|benchmark|patok|pemetaan|ukur/i, 'survey'], [/geolog|singkapan/i, 'geology'],
+  [/analisis|analysis|laporan|report/i, 'analysis'], [/bor|drill|spt|uds|sampel/i, 'geotechnical'],
+]
+
+function RateImport({ onDone }: { onDone: () => void }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const run = async () => {
+    setBusy(true); setMsg('')
+    const existing = await listRecords('rates').catch(() => [] as Rec[])
+    let added = 0, updated = 0
+    const errors: string[] = []
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    for (const [i, line] of lines.entries()) {
+      const c = line.split('\t').map(x => x.trim())
+      if (c.length < 4) { errors.push(t('Row {n}: needs code, description, unit and price', { n: i + 1 })); continue }
+      // Prices are whole rupiah: thousand separators (1.402.000 or 1,402,000) are dropped.
+      const toNum = (x: string) => { const d = x.replace(/[.,]\d{1,2}$/, '').replace(/\D/g, ''); return d ? Number(d) : NaN }
+      const [code, description, unit, priceText] = c
+      const price = toNum(priceText)
+      const internal = c[4] && /\d/.test(c[4]) ? toNum(c[4]) : null
+      const lineText = internal !== null ? c[5] : c[4]
+      if (!code || !description || !Number.isFinite(price)) { errors.push(t('Row {n}: needs code, description, unit and price', { n: i + 1 })); continue }
+      const service = lineText && ['geotechnical', 'cpt', 'geophysics', 'geology', 'survey', 'laboratory', 'analysis'].includes(lineText)
+        ? lineText : (SERVICE_WORDS.find(([re]) => re.test(description))?.[1] || '')
+      const found = existing.find(r => String(r.code).toLowerCase() === code.toLowerCase())
+      try {
+        await saveRecord('rates', {
+          ...(found || {}), code, description, unit: unit || 'ls', price, line: service,
+          ...(internal !== null && Number.isFinite(internal) ? { internal_price: internal } : {}),
+          ...(found ? { expected_updated_at: found.updated_at } : {}),
+        }, found?.id)
+        if (found) updated++
+        else added++
+      } catch (e: any) {
+        errors.push(`${code}: ${e.message}`)
+      }
+    }
+    setBusy(false)
+    setMsg(t('{a} added, {u} updated.', { a: added, u: updated }) + (errors.length ? ' ' + errors.slice(0, 5).join('; ') : ''))
+    if (added || updated) { setText(''); onDone() }
+  }
+  return (
+    <section className="card" style={{ marginBottom: '1rem' }}>
+      <h3>{t('Import price list from Excel')}</h3>
+      <p className="help">{t('Copy the rows from Excel with the columns: code, description, unit, client price, and optionally the internal price and the service. Existing codes are updated.')}</p>
+      <textarea rows={6} value={text} onChange={e => setText(e.target.value)} aria-label={t('Rows from Excel')} />
+      <div className="actions" style={{ marginTop: '.5rem' }}>
+        <button type="button" className="primary" disabled={busy || !text.trim()} onClick={() => { void run() }}>{busy ? t('Importing…') : t('Import')}</button>
+      </div>
+      {msg && <p className="notice" role="status">{msg}</p>}
+    </section>
+  )
+}
+
 export function RatesPage({ intent }: { intent?: Intent }) {
-  return <RecordsPage entityName="rates" openId={intent?.open} startNew={intent?.newWith}
-    description={t('Unit prices used in quotations and invoices.')} />
+  const [showImport, setShowImport] = useState(false)
+  const [round, setRound] = useState(0)
+  const schemas = useSchemas()
+  return <RecordsPage key={round} entityName="rates" openId={intent?.open} startNew={intent?.newWith}
+    description={t('Unit prices used in quotations and invoices.')}
+    toolbar={schemas?.rates?.can_create ? <>
+      <div className="actions" style={{ marginBottom: '.75rem' }}>
+        <button type="button" onClick={() => setShowImport(v => !v)}><Icon name="download" />{t('Import from Excel')}</button>
+      </div>
+      {showImport && <RateImport onDone={() => { invalidate('rates'); setRound(r => r + 1) }} />}
+    </> : null} />
 }
 
 export function SettingsPage() {
@@ -485,15 +565,19 @@ function CptPlot({ test }: { test: Rec }) {
   const H = Math.max(360, Math.min(900, depth * 30))
   const top = 34
   const y = (d: number) => top + (d / depth) * H
-  const qcMax = Math.max(...rows.map(r => r.qc), 10)
-  const qcScale = Math.ceil(qcMax / 50) * 50
+  const mpa = test.qc_unit === 'mpa' || test.qc_unit === 'mpa_kpa'
+  const unit = mpa ? 'MPa' : 'kg/cm²'
+  const fsUnit = test.qc_unit === 'mpa_kpa' ? 'kPa' : unit
+  const fsToQc = test.qc_unit === 'mpa_kpa' ? 0.001 : 1
+  const qcMax = Math.max(...rows.map(r => r.qc), mpa ? 1 : 10)
+  const qcScale = mpa ? Math.ceil(qcMax / 5) * 5 : Math.ceil(qcMax / 50) * 50
   const fsRows = rows.filter(r => r.fs !== null && r.fs !== undefined)
   const fsMax = Math.max(...fsRows.map(r => r.fs), 0.5)
-  const fsScale = Math.ceil(fsMax * 2) / 2
-  const rf = fsRows.filter(r => r.qc > 0).map(r => ({ depth: r.depth, rf: (r.fs / r.qc) * 100 }))
+  const fsScale = test.qc_unit === 'mpa_kpa' ? Math.ceil(fsMax / 50) * 50 : mpa ? Math.ceil(fsMax * 20) / 20 : Math.ceil(fsMax * 2) / 2
+  const rf = fsRows.filter(r => r.qc > 0).map(r => ({ depth: r.depth, rf: (r.fs * fsToQc / r.qc) * 100 }))
   const panels = [
-    { title: 'qc (kg/cm²)', x: 50, w: 240, max: qcScale, pts: rows.map(r => [r.qc, r.depth]) },
-    { title: 'fs (kg/cm²)', x: 320, w: 160, max: fsScale, pts: fsRows.map(r => [r.fs, r.depth]) },
+    { title: `qc (${unit})`, x: 50, w: 240, max: qcScale, pts: rows.map(r => [r.qc, r.depth]) },
+    { title: `fs (${fsUnit})`, x: 320, w: 160, max: fsScale, pts: fsRows.map(r => [r.fs, r.depth]) },
     { title: 'Rf (%)', x: 510, w: 140, max: 10, pts: rf.map(r => [Math.min(r.rf, 10), r.depth]) },
   ]
   const ticks: number[] = []
@@ -521,7 +605,9 @@ function CptPlot({ test }: { test: Rec }) {
           <path d={`M${36} ${y(test.gw_depth) - 8} l10 0 l-5 8 z`} fill="#1f5f8b"><title>{t('Groundwater {d} m', { d: test.gw_depth })}</title></path>
         )}
       </svg>
-      <p className="help">{t('Depth in m. Maximum qc {qc} kg/cm² ({mpa} MPa) at {d} m.', {
+      <p className="help">{mpa ? t('Depth in m. Maximum qc {qc} MPa at {d} m.', {
+        qc: number(Math.max(...rows.map(r => r.qc))), d: number(rows.reduce((a, b) => (b.qc > a.qc ? b : a)).depth),
+      }) : t('Depth in m. Maximum qc {qc} kg/cm² ({mpa} MPa) at {d} m.', {
         qc: number(Math.max(...rows.map(r => r.qc))), mpa: number(Math.round(Math.max(...rows.map(r => r.qc)) * KG_CM2_TO_MPA * 100) / 100),
         d: number(rows.reduce((a, b) => (b.qc > a.qc ? b : a)).depth),
       })}</p>
@@ -529,21 +615,123 @@ function CptPlot({ test }: { test: Rec }) {
   )
 }
 
-export function CptPage({ intent }: { intent?: Intent }) {
-  return <RecordsPage entityName="cpt" openId={intent?.open} startNew={intent?.newWith}
-    description={t('Cone penetration tests (sondir): readings of cone resistance qc and sleeve friction fs with depth. Readings can be pasted from Excel.')}
-    defaults={{ date: todayIso(), equipment: 'mechanical' }}
-    extra={r => <section className="card" style={{ marginBottom: '1rem' }}><h3>{t('CPT profile')}</h3><CptPlot test={r} /></section>} />
+/** Reads the CSV a CPT / CPTu data logger writes (header lines "Key:;value", then a table). */
+export function parseCptLogger(text: string): { readings: Array<Record<string, number | null>>, header: Record<string, string> } {
+  const lines = text.split(/\r?\n/)
+  const header: Record<string, string> = {}
+  let i = 0
+  for (; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*depth/i.test(line)) break
+    const m = /^([^:;]+):;([^;]*)/.exec(line)
+    if (m) header[m[1].trim().toLowerCase()] = m[2].trim()
+  }
+  if (i >= lines.length) throw new Error(t('No data table found in the file'))
+  const cols = lines[i].split(';').map(c => c.trim().toLowerCase())
+  const find = (re: RegExp) => cols.findIndex(c => re.test(c))
+  const cActual = find(/^actual depth/), cDepth = find(/^depth/), cQc = find(/^qc/), cFs = find(/^fs/), cU2 = find(/^u2(\s|\(|$)/)
+  if (cQc < 0) throw new Error(t('No data table found in the file'))
+  const n = (x: string | undefined) => { if (x === undefined || x.trim() === '') return null; const v = Number(x.trim().replace(',', '.')); return Number.isFinite(v) ? v : null }
+  // The logger writes depth in cm unless the column says (m).
+  const depthInCm = cActual < 0 && !/\(m\)/.test(cols[cDepth] || '')
+  const rows: Array<Record<string, number | null>> = []
+  for (const line of lines.slice(i + 1)) {
+    const c = line.split(';')
+    if (!/\d/.test(c[0] || '') || /max|min|avg/i.test(line)) continue
+    const z = cActual >= 0 ? n(c[cActual]) : (n(c[cDepth]) ?? NaN) / (depthInCm ? 100 : 1)
+    const qc = n(c[cQc])
+    if (z === null || !Number.isFinite(z) || qc === null) continue
+    rows.push({ depth: Math.round(z * 1000) / 1000, qc, fs: cFs >= 0 ? n(c[cFs]) : null, u2: cU2 >= 0 ? n(c[cU2]) : null })
+  }
+  const step = Math.ceil(rows.length / 3000)
+  return { readings: step > 1 ? rows.filter((_, k) => k % step === 0) : rows, header }
 }
+
+function CptFileImport({ setData }: { setData: (u: (p: Record<string, any>) => Record<string, any>) => void }) {
+  const [msg, setMsg] = useState('')
+  const read = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const { readings, header } = parseCptLogger(await file.text())
+      const date = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(header['date'] || '')
+      const gw = Number((header['hydrostatic line'] || '').replace(',', '.'))
+      setData(prev => ({
+        ...prev, readings, qc_unit: 'mpa_kpa', equipment: readings.some(r => r.u2 !== null) ? 'cptu' : 'electric',
+        ...(header['location'] && !prev.test_id ? { test_id: header['location'] } : {}),
+        ...(date ? { date: `${date[3]}-${date[1]}-${date[2]}` } : {}),
+        ...(gw > 0 ? { gw_depth: gw } : {}),
+        ...(readings.length ? { final_depth: readings[readings.length - 1].depth } : {}),
+      }))
+      setMsg(t('{n} readings read from {file}.', { n: readings.length, file: file.name }))
+    } catch (e: any) {
+      setMsg(e.message)
+    }
+  }
+  return (
+    <div className="ws-head">
+      <div>
+        <strong>{t('Import from the CPT data logger')}</strong>
+        <p className="help" style={{ margin: '.2rem 0 0' }}>{t('CSV file of an electric CPT or CPTu (depth, qc in MPa, fs and u2 in kPa). Readings can also be pasted from Excel below.')}</p>
+        {msg && <p className="help">{msg}</p>}
+      </div>
+      <label className="button-like"><Icon name="download" />{t('Choose file')}
+        <input type="file" accept=".csv,.txt" className="sr-only" onChange={e => { void read(e.target.files?.[0]); e.target.value = '' }} />
+      </label>
+    </div>
+  )
+}
+
+function cptTools(data: Record<string, any>, setData: (u: (p: Record<string, any>) => Record<string, any>) => void, place: 'top' | 'bottom') {
+  if (place === 'top') return <CptFileImport setData={setData} />
+  return (data.readings || []).length >= 2 ? <CptCalcPreview data={data} /> : null
+}
+
+export function CptPage({ intent }: { intent?: Intent }) {
+  const [printing, setPrinting] = useState<Rec | null>(null)
+  return <>
+    <RecordsPage entityName="cpt" openId={intent?.open} startNew={intent?.newWith}
+      description={t('Cone penetration tests (sondir): readings of cone resistance qc and sleeve friction fs with depth. Readings can be pasted from Excel.')}
+      defaults={{ date: todayIso(), equipment: 'mechanical', qc_unit: 'kgcm2', area_ratio: 0.8, unit_weight: 18, nkt: 15, rigidity_index: 100 }}
+      formTools={cptTools}
+      actions={r => <button type="button" onClick={() => setPrinting(r)}><Icon name="print" />{t('Print')}</button>}
+      extra={r => <>
+        <section className="card" style={{ marginBottom: '1rem' }}><h3>{t('CPT profile')}</h3><CptPlot test={r} /></section>
+        {r.results && Object.keys(r.results).length > 0 && <section className="card" style={{ marginBottom: '1rem' }}><h3>{t('Interpretation')}</h3><ResultView result={r.results} /></section>}
+      </>} />
+    {printing && <WorksheetSheet record={printing} kind="cpt" onClose={() => setPrinting(null)} />}
+  </>
+}
+
+const FIELD_GROUP_OPTIONS: Array<[string, string]> = [['all', 'All'], ['general', 'General'], ['survey', 'Geodesy & mapping'], ['geotechnical', 'Geotechnical'], ['geophysics', 'Geophysics'], ['geology', 'Geology']]
 
 export function FieldWorkPage({ intent }: { intent?: Intent }) {
   const [type, setType] = useState('all')
+  const [printing, setPrinting] = useState<Rec | null>(null)
   const filter = useMemo(() => (r: Rec) => type === 'all' || r.type === type, [type])
-  return (
+  const tools = useSheetTools('field', 'data', 'method')
+  const catalog = useCatalog()
+  return <>
     <RecordsPage entityName="field_activities" openId={intent?.open} startNew={intent?.newWith} filter={filter}
-      description={t('Geophysics lines, geological observations and survey points, with their results and files.')}
-      toolbar={<Segments value={type} onChange={setType} label={t('Discipline')} options={[['all', 'All'], ['geophysics', 'Geophysics'], ['geology', 'Geology'], ['survey', 'Geodesy & mapping']]} />}
-      defaults={{ date: todayIso(), type: type === 'all' ? 'geophysics' : type }} />
+      description={t('Daily reports, survey, in-situ tests, geophysics and geology worksheets, calculated and printable with their standards.')}
+      toolbar={<Segments value={type} onChange={setType} label={t('Discipline')} options={FIELD_GROUP_OPTIONS} />}
+      formTools={tools}
+      defaults={{ date: todayIso(), type: type === 'all' ? 'geotechnical' : type }}
+      actions={r => <button type="button" onClick={() => setPrinting(r)}><Icon name="print" />{t('Print')}</button>}
+      extra={r => <SheetResults sheet={sheetOf(catalog, 'field', r.method)} result={r.results_calc} utm={r.utm} />} />
+    {printing && <WorksheetSheet record={printing} kind="field" onClose={() => setPrinting(null)} />}
+  </>
+}
+
+function SheetResults({ sheet, result, utm }: { sheet: SheetInfo | null, result: any, utm?: Rec | null }) {
+  const has = result && Object.keys(result).length > 0
+  if (!has && !sheet?.standards.length && !utm) return null
+  return (
+    <section className="card" style={{ marginBottom: '1rem' }}>
+      {sheet && <p style={{ margin: '0 0 .5rem' }}><span className="ws-code">{sheet.code}</span> <strong>{t(sheet.label)}</strong></p>}
+      {utm && <p className="help" style={{ marginTop: 0 }}>UTM {utm.zone}{utm.hemisphere}: E {number(utm.easting)} · N {number(utm.northing)} · {utm.dms}</p>}
+      {has ? <ResultView result={result} /> : null}
+      {sheet && sheet.standards.length > 0 && <><h4>{t('Standards')}</h4><StandardsList sheet={sheet} /></>}
+    </section>
   )
 }
 
@@ -553,12 +741,75 @@ export function FieldWorkPage({ intent }: { intent?: Intent }) {
 
 export function LabPage({ intent }: { intent?: Intent }) {
   const [status, setStatus] = useState('open')
+  const [printing, setPrinting] = useState<Rec | null>(null)
   const filter = useMemo(() => (r: Rec) => status === 'all' || (status === 'open' ? r.status !== 'done' : r.status === 'done'), [status])
-  return (
+  const sheetTools = useSheetTools('lab', 'raw', 'test_type')
+  const tools = useMemo(() => (data: Record<string, any>, setData: (u: (p: Record<string, any>) => Record<string, any>) => void, place: 'top' | 'bottom') =>
+    place === 'top' ? <><SampleCodeInput setData={setData} />{sheetTools(data, setData, place)}</> : sheetTools(data, setData, place), [sheetTools])
+  const catalog = useCatalog()
+  return <>
     <RecordsPage entityName="lab_tests" openId={intent?.open} startNew={intent?.newWith} filter={filter}
       description={t('Samples from the boreholes and their test results. Results feed the engineering analyses.')}
       toolbar={<Segments value={status} onChange={setStatus} label={t('Show tests')} options={[['open', 'In progress'], ['done', 'Done'], ['all', 'All']]} />}
-      defaults={{ received: todayIso(), status: 'received' }} />
+      formTools={tools}
+      defaults={{ received: todayIso(), status: 'received' }}
+      actions={r => <button type="button" onClick={() => setPrinting(r)}><Icon name="print" />{t('Print')}</button>}
+      extra={r => <SheetResults sheet={sheetOf(catalog, 'lab', r.test_type)} result={r.calc} />} />
+    {printing && <WorksheetSheet record={printing} kind="lab" onClose={() => setPrinting(null)} />}
+  </>
+}
+
+/** Reads the code on a sample label (SB:BH-01/UDS-1/2-2.5) into the lab test form. */
+function SampleCodeInput({ setData }: { setData: (u: (p: Record<string, any>) => Record<string, any>) => void }) {
+  const [code, setCode] = useState('')
+  const [msg, setMsg] = useState('')
+  const apply = () => {
+    const m = /^(?:SB:)?([^/]+)\/([^/]*)\/([\d.,]+)-([\d.,]*)$/.exec(code.trim())
+    if (!m) { setMsg(t('Not a sample label code')); return }
+    const parse = (x: string) => (x ? Number(x.replace(',', '.')) : '')
+    setData(prev => ({ ...prev, borehole_id: m[1], sample_ref: m[2], depth_top: parse(m[3]), depth_base: m[4] ? parse(m[4]) : '' }))
+    setMsg(t('Sample filled in from the label.'))
+  }
+  return (
+    <div className="ws-head">
+      <div className="field" style={{ margin: 0, flex: 1 }}>
+        <label htmlFor="lab-code">{t('Sample label code')}</label>
+        <input id="lab-code" value={code} onChange={e => setCode(e.target.value)} placeholder="SB:BH-01/UDS-1/2-2.5"
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); apply() } }} />
+        {msg && <p className="help">{msg}</p>}
+      </div>
+      <div className="actions"><button type="button" onClick={apply}>{t('Use code')}</button></div>
+    </div>
+  )
+}
+
+function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' | 'lab' | 'cpt', onClose: () => void }) {
+  const settings = useSettings()
+  const schemas = useSchemas()
+  const catalog = useCatalog()
+  const entityName = kind === 'field' ? 'field_activities' : kind === 'lab' ? 'lab_tests' : 'cpt'
+  const entity = schemas?.[entityName]
+  const sheet = kind === 'cpt' ? null : sheetOf(catalog, kind, kind === 'field' ? record.method : record.test_type)
+  const title = kind === 'cpt' ? t('CPT test') : sheet ? `${sheet.code} ${t(sheet.label)}` : t(entity?.label_one || '')
+  const number = kind === 'field' ? record.code : kind === 'lab' ? `${record.borehole_id} · ${record.sample_ref}` : record.test_id
+  const date = kind === 'lab' ? (record.tested || record.received) : record.date
+  const result = kind === 'field' ? record.results_calc : kind === 'lab' ? record.calc : record.results
+  const people: Array<[string, string]> = kind === 'lab'
+    ? [['Tested by', record.technician], ['Checked by', record.checked_by]]
+    : kind === 'field' ? [['Prepared by', record.crew], ['Checked by', record.checked_by]] : [['Operator', record.operator], ['Checked by', '']]
+  return (
+    <PrintSheet title={`${title} ${number || ''}`} onClose={onClose}>
+      <Letterhead settings={settings} title={title} number={number} date={date} />
+      {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} /></div>}
+      {kind === 'cpt' && <CptPlot test={record} />}
+      {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} /></>}
+      {sheet && sheet.standards.length > 0 && <><h3 className="doc-h">{t('Standards')}</h3><StandardsList sheet={sheet} /></>}
+      <div className="doc-approvals">
+        {people.map(([label, who]) => (
+          <div key={label}><div className="doc-small">{t(label)}</div><div className="doc-sign-space" /><div>{who || '……………………'}</div></div>
+        ))}
+      </div>
+    </PrintSheet>
   )
 }
 
