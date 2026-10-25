@@ -9,9 +9,17 @@ Borehole logging for geotechnical field work: logs, strata, SPT, samples, core r
 
 ![Borehole list](docs/assets/screen-boreholes.png)
 
-| Borehole profile | New log | Phone |
-| --- | --- | --- |
-| ![Profile: graphic log and SPT N](docs/assets/screen-profile.png) | ![New log form](docs/assets/screen-new-log.png) | ![Borehole list on a phone](docs/assets/screen-phone.png) |
+**Borehole profile:** graphic log (column width follows grain size) next to SPT N against depth.
+
+![Borehole profile](docs/assets/screen-profile.png)
+
+**New log:** the form in sections, with the required fields checked off beside the submit button.
+
+![New log form](docs/assets/screen-new-log.png)
+
+**On a phone:** bottom navigation; each borehole becomes a compact entry.
+
+<img src="docs/assets/screen-phone.png" alt="Borehole list on a phone" width="320">
 
 ---
 
