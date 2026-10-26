@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Same as the web app: --paper, --sunken, --surface, --ink, --steel -->
+    <!-- Same colours as the web app (styles.css: paper, sunken, surface, ink, steel) -->
     <color name="paper">#EEF0EB</color>
     <color name="sunken">#E3E6DF</color>
     <color name="surface">#FFFFFF</color>
