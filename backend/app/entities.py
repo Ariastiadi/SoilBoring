@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import sheets, sheets_lab
+from . import erp_commercial, sheets, sheets_lab
 from .fields import ALL_ROLES, COMMERCIAL, Entity, F, Option  # noqa: F401
 
 
@@ -78,6 +78,14 @@ ITEM_FIELDS = [
 
 ENTITIES: Dict[str, Entity] = {}
 
+CONTRACT_KINDS: List[Option] = [
+    ("contract", "Contract"), ("spk", "Work order (SPK)"), ("spmk", "Notice to proceed (SPMK)"), ("subcontract", "Subcontract"),
+]
+COLLECTION_ACTIONS: List[Option] = [
+    ("call", "Phone call"), ("email", "Email / letter"), ("visit", "Visit"), ("reminder", "Formal reminder (somasi)"),
+    ("meeting", "Meeting"), ("npar", "Handed to the NPAR committee"), ("promise", "Payment promised"), ("other", "Other"),
+]
+
 
 WF_STATES: List[Option] = [("draft", "Draft"), ("submitted", "Waiting for review"), ("reviewed", "Waiting for approval"),
                            ("approved", "Approved"), ("returned", "Returned for correction")]
@@ -100,10 +108,14 @@ _add(Entity(
         F("pricing_tier", "select", "Price tier", default="client", options=[
             ("client", "Client price"), ("internal", "Internal / group price")]),
         F("contact_person", "text", "Contact person", list=True),
+        F("contact_title", "text", "Contact's position"),
         F("phone", "text", "Phone", maxlen=40, list=True),
         F("email", "email", "Email"),
         F("npwp", "text", "Tax number (NPWP)", maxlen=30),
         F("address", "longtext", "Address", maxlen=500),
+        F("since_year", "int", "Client since (year)", min=1900, max=2100,
+          help="Empty: the year of the client's first project."),
+        F("files", "files", "Documents (e.g. power of attorney for a joint operation)"),
         F("notes", "longtext", "Notes", maxlen=2000),
     ],
 ))
@@ -118,6 +130,9 @@ _add(Entity(
         F("status", "select", "Status", required=True, options=PROJECT_STATUS, default="tender", list=True),
         F("leader", "user", "Project leader", list=True),
         F("location", "text", "Location"),
+        F("province", "select", "Province", options=erp_commercial.PROVINCES, list=True),
+        F("zone", "select", "Region zone", options=erp_commercial.ZONE_OPTIONS, readonly=True,
+          help="Follows the province (company zone table)."),
         F("services", "multiselect", "Services", options=SERVICE_LINES),
         F("start_date", "date", "Start date", list=True),
         F("end_date", "date", "End date"),
@@ -181,6 +196,7 @@ _add(Entity(
     fields=[
         F("number", "text", "Number", maxlen=40, list=True, help="Left empty: assigned automatically."),
         F("project_id", "ref", "Project", required=True, ref="projects", list=True),
+        F("pbd_id", "ref", "From PBD", ref="pbd", help="The Pricing & Budgeting Decision this quotation was converted from."),
         F("date", "date", "Date", required=True, list=True),
         F("valid_until", "date", "Valid until"),
         F("status", "select", "Status", required=True, default="draft", list=True, options=[
@@ -205,15 +221,26 @@ _add(Entity(
     read=COMMERCIAL, sort="-date", workflow=True,
     fields=[
         F("number", "text", "Contract number", required=True, maxlen=60, list=True),
+        F("kind", "select", "Document", default="contract", list=True, options=CONTRACT_KINDS,
+          help="SPMK and subcontracts are not counted in the client's contract value."),
         F("project_id", "ref", "Project", required=True, ref="projects", list=True),
+        F("pbd_id", "ref", "PBD", ref="pbd"),
+        F("parent_contract_id", "ref", "Main contract", ref="contracts", help="For an SPMK, a subcontract or an amendment."),
         F("date", "date", "Signed on", required=True, list=True),
-        F("value", "money", "Contract value (IDR, incl. VAT)", required=True, min=0, max=1e14, list=True),
+        F("value", "money", "Contract value (IDR, incl. VAT)", required=True, min=0, max=1e14, list=True,
+          help="For an SPMK: the value of the contract it starts. For a subcontract: the value paid to the subcontractor."),
         F("status", "select", "Status", required=True, default="draft", list=True, options=[
             ("draft", "Draft"), ("signed", "Signed"), ("amended", "Amended"), ("closed", "Closed")]),
         F("start_date", "date", "Work starts"),
         F("end_date", "date", "Work ends"),
         F("client_signatory", "text", "Signed for the client"),
         F("our_signatory", "text", "Signed for us"),
+        F("subcontractor", "text", "Subcontractor"),
+        F("subcontractor_contact", "text", "Subcontractor contact"),
+        F("subcontract_scope", "longtext", "Subcontracted work", maxlen=4000),
+        F("retention_pct", "percent", "Retention (%)", min=0, max=100, help="Held back from each payment until the maintenance period ends."),
+        F("late_penalty_permille", "number", "Late penalty (‰ of the value per day)", min=0, max=100),
+        F("penalty_cap_pct", "percent", "Penalty cap (% of the value)", min=0, max=100),
         F("terms", "items", "Payment terms", fields=[
             F("name", "text", "Term", required=True, help="e.g. Down payment, Field work done, Final report"),
             F("percent", "percent", "Share (%)", required=True, min=0, max=100),
@@ -389,6 +416,13 @@ _add(Entity(
             F("amount", "money", "Amount", required=True, min=0, max=1e14),
             F("method", "text", "Method / reference", maxlen=80),
         ]),
+        F("collection_notes", "items", "Collection notes", max_items=200, section="Collection", fields=[
+            F("date", "date", "Date", required=True),
+            F("action", "select", "Action", required=True, options=COLLECTION_ACTIONS),
+            F("note", "text", "Note", required=True, maxlen=500),
+            F("next_date", "date", "Follow up on"),
+            F("by", "text", "By", maxlen=254),
+        ]),
         F("status", "select", "Status", required=True, default="draft", list=True, options=[
             ("draft", "Draft"), ("sent", "Sent"), ("cancelled", "Cancelled")]),
         F("subtotal", "money", "Subtotal", readonly=True),
@@ -419,6 +453,33 @@ _add(Entity(
         F("report_footer", "longtext", "Report footer / disclaimer", maxlen=2000),
         F("approval_separation", "bool", "Different people for drafting, review and approval", default=True,
           help="Turn off only when the company is too small for three people in the approval flow."),
+        F("difficulty_factors", "items", "Project difficulty factors", max_items=30, section="Pricing policy", fields=[
+            F("key", "text", "Code", maxlen=30, help="Short code; \"zone\" is scored from the region zone."),
+            F("factor", "text", "Factor", required=True),
+            F("weight", "number", "Weight", min=0, max=100),
+            F("level_1", "text", "1 Very easy"),
+            F("level_2", "text", "2 Easy"),
+            F("level_3", "text", "3 Fairly easy"),
+            F("level_4", "text", "4 Difficult"),
+            F("level_5", "text", "5 Very difficult"),
+        ], help="Empty: the 16 company default factors with equal weights (to be confirmed by the pricing committee)."),
+        F("risk_premium_table", "items", "Risk premium by difficulty index", max_items=5, section="Pricing policy", fields=[
+            F("index", "int", "Difficulty index", required=True, min=1, max=5),
+            F("premium_pct", "percent", "Risk premium (%)", required=True, min=0, max=100),
+        ], help="Empty: company defaults 5, 8, 11, 14 and 17% for index 1 to 5 (to be confirmed by the pricing committee)."),
+        F("default_margin_pct", "percent", "Default margin (% of the ABP)", min=0, max=500,
+          help="Empty: 30% (company default, to be confirmed by the pricing committee)."),
+        F("max_cost_ratio_pct", "percent", "Maximum cost ratio ABP / project revenue (%)", min=1, max=100,
+          help="Empty: 75% (company default, to be confirmed by the pricing committee)."),
+        F("approval_limits", "items", "Approval authority by bid value", max_items=10, section="Pricing policy", fields=[
+            F("up_to", "money", "Bid value below (IDR)", min=0, max=1e15, help="Empty on the last row: no upper limit."),
+            F("level", "text", "Approved by", required=True),
+        ], help="Empty: below 2 bn approver 1; 2–5 bn approvers 1 and 2; 5–10 bn approvers 1, 2 and 3; above 10 bn approvers 1 to 4."),
+        F("npar_days", "int", "Receivables move to the NPAR committee after (days since the invoice)", min=30, max=720,
+          help="Empty: 90 days."),
+        F("default_payment_days", "int", "Payment period when an invoice has no due date (days)", min=0, max=365,
+          help="Empty: 30 days."),
+        F("guarantee_warning_days", "int", "Warn before a guarantee expires (days)", min=1, max=365, help="Empty: 30 days."),
     ],
 ))
 

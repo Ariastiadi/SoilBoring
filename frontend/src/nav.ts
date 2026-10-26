@@ -8,6 +8,7 @@ export type TabKey =
   | 'worksheets' | 'standards' | 'coordinates' | 'samples' | 'labsummary'
   | 'approvals' | 'overview'
   | 'equipment' | 'mobilisations' | 'work_orders' | 'vendors' | 'procurements' | 'purchase_orders' | 'fixed_assets' | 'performance' | 'ops_settings'
+  | 'pbd' | 'client_decisions' | 'work_plans' | 'guarantees' | 'receivables' | 'client_cards' | 'pricing_settings'
 
 /** Where to go, and what to open there: a record, or a new one with values filled in. */
 export type Intent = { open?: string, newWith?: Record<string, unknown>, borehole?: string }
@@ -24,4 +25,5 @@ export const ENTITY_TAB: Record<string, TabKey> = {
   equipment: 'equipment', mobilisations: 'mobilisations', work_orders: 'work_orders', vendors: 'vendors',
   procurements: 'procurements', purchase_orders: 'purchase_orders', fixed_assets: 'fixed_assets',
   performance_cards: 'performance', ops_settings: 'ops_settings',
+  pbd: 'pbd', client_decisions: 'client_decisions', work_plans: 'work_plans', guarantees: 'guarantees',
 }

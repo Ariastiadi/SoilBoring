@@ -2,7 +2,7 @@
  * Commercial operations (projects, clients, quotations, contracts), field work beyond
  * boreholes (CPT, geophysics, geology, survey), laboratory, reports and finance.
  */
-import { ReactNode, useEffect, useMemo, useState } from 'react'
+import { ReactNode, Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getDepthOverview, listRecords, listReports, saveRecord, type DepthOverview, type FieldDef, type Rec, type SheetInfo } from '../api'
 import { lang, t, translateServer } from '../i18n'
@@ -172,9 +172,11 @@ function Segments({ value, onChange, options, label }: { value: string, onChange
   )
 }
 
+const ClientCard = lazy(() => import('./ErpCommercial').then(m => ({ default: m.ClientCard })))
+
 export function ClientsPage({ intent }: { intent?: Intent }) {
   const projects = useList('projects')
-  const { go } = useNav()
+  const { go, role } = useNav()
   const schemas = useSchemas()
   return (
     <RecordsPage entityName="clients" openId={intent?.open} startNew={intent?.newWith}
@@ -182,7 +184,8 @@ export function ClientsPage({ intent }: { intent?: Intent }) {
       extra={r => {
         const mine = (projects || []).filter(p => p.client_id === r.id)
         const entity = schemas?.projects
-        return (
+        return (<>
+          {COMMERCIAL_ROLES.includes(role) && <Suspense fallback={null}><ClientCard clientId={r.id} /></Suspense>}
           <section className="hub-section">
             <div className="hub-head">
               <h3>{t('Projects')} <span className="muted">{mine.length}</span></h3>
@@ -190,7 +193,7 @@ export function ClientsPage({ intent }: { intent?: Intent }) {
             </div>
             {entity && mine.length > 0 && <RecordTable entity={entity} rows={mine} cols={entity.fields.filter(f => ['code', 'name', 'status', 'start_date'].includes(f.name))} onOpen={p => go('projects', { open: p.id })} />}
           </section>
-        )
+        </>)
       }} />
   )
 }

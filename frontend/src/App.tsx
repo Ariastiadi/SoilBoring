@@ -57,6 +57,16 @@ const PurchaseOrdersPage = opsPage('PurchaseOrdersPage')
 const FixedAssetsPage = opsPage('FixedAssetsPage')
 const PerformancePage = opsPage('PerformancePage')
 const OpsSettingsPage = lazy(() => opsModule().then(m => ({ default: m.OpsSettingsPage })))
+const comModule = () => import('./tabs/ErpCommercial')
+const comPage = (name: string) => lazy(() => comModule().then(m => ({ default: (m as any)[name] as (p: PageProps) => JSX.Element })))
+const PbdPage = comPage('PbdPage')
+const ClientDecisionsPage = comPage('ClientDecisionsPage')
+const WorkPlansPage = comPage('WorkPlansPage')
+const GuaranteesPage = comPage('GuaranteesPage')
+const ClientCardsPage = comPage('ClientCardsPage')
+const ReceivablesPage = lazy(() => comModule().then(m => ({ default: m.ReceivablesPage })))
+const PricingSettingsPage = lazy(() => comModule().then(m => ({ default: m.PricingSettingsPage })))
+const OverviewPage = lazy(() => erpModule().then(m => ({ default: m.OverviewPage })))
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
@@ -240,12 +250,18 @@ export default function App() {
 
   const work: NavItem[] = [
     { key: 'approvals', label: t('Approvals'), icon: 'check' },
+    ...(auth.role === 'admin' || auth.role === 'manager' || auth.role === 'finance' ? [{ key: 'overview' as TabKey, label: t('Management overview'), icon: 'chart' }] : []),
   ]
   const comop: NavItem[] = [
     { key: 'projects', label: t('Projects'), icon: 'folder', entity: 'projects' },
     { key: 'clients', label: t('Clients'), icon: 'building', entity: 'clients' },
     { key: 'quotes', label: t('Quotations'), icon: 'tag', entity: 'quotes' },
+    { key: 'pbd', label: t('Pricing & budgeting decisions'), icon: 'calc', entity: 'pbd' },
+    { key: 'client_decisions', label: t('Client decisions'), icon: 'check', entity: 'client_decisions' },
     { key: 'contracts', label: t('Contracts'), icon: 'contract', entity: 'contracts' },
+    { key: 'guarantees', label: t('Bank guarantees & SKBDN'), icon: 'contract', entity: 'guarantees' },
+    { key: 'work_plans', label: t('Weekly work plans'), icon: 'calendar', entity: 'work_plans' },
+    { key: 'client_cards', label: t('Client cards'), icon: 'users', entity: 'clients' },
   ]
   const field: NavItem[] = [
     { key: 'boreholes', label: t('Boreholes'), icon: 'boreholes' },
@@ -265,6 +281,7 @@ export default function App() {
   ]
   const finance: NavItem[] = [
     { key: 'invoices', label: t('Invoices'), icon: 'invoice', entity: 'invoices' },
+    { key: 'receivables', label: t('Receivables'), icon: 'invoice', entity: 'invoices' },
     { key: 'rates', label: t('Price list'), icon: 'tag', entity: 'rates' },
   ]
   const logistics: NavItem[] = [
@@ -292,6 +309,7 @@ export default function App() {
     { key: 'users', label: t('Users'), icon: 'users' },
     { key: 'activity', label: t('Activity'), icon: 'activity' },
     { key: 'settings', label: t('Company settings'), icon: 'settings' },
+    { key: 'pricing_settings', label: t('Pricing policy'), icon: 'settings' },
     { key: 'ops_settings', label: t('Operations settings'), icon: 'settings', entity: 'ops_settings' },
   ] : []
   const groups: Array<[string, NavItem[]]> = [
@@ -312,6 +330,9 @@ export default function App() {
     procurements: i => <ProcurementPage intent={i} />, purchase_orders: i => <PurchaseOrdersPage intent={i} />,
     fixed_assets: i => <FixedAssetsPage intent={i} />, performance: i => <PerformancePage intent={i} />,
     ops_settings: () => <OpsSettingsPage />,
+    pbd: i => <PbdPage intent={i} />, client_decisions: i => <ClientDecisionsPage intent={i} />, work_plans: i => <WorkPlansPage intent={i} />,
+    guarantees: i => <GuaranteesPage intent={i} />, client_cards: i => <ClientCardsPage intent={i} />,
+    receivables: () => <ReceivablesPage />, pricing_settings: () => <PricingSettingsPage />, overview: () => <OverviewPage />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)

@@ -2,7 +2,9 @@
 import { useEffect, useState } from 'react'
 import { getApprovals, type ApprovalItem } from '../api'
 import { t, translateServer } from '../i18n'
-import { ENTITY_TAB, useNav } from '../nav'
+import { ENTITY_TAB, useNav, type Intent, type TabKey } from '../nav'
+import { CommercialOverviewPanel } from './ErpCommercial'
+import { OpsOverviewPanel } from './ErpOps'
 import { PageHead, formatDate } from '../ui'
 
 const GROUPS: Array<[string, string, string]> = [
@@ -47,6 +49,28 @@ export function ApprovalsPage() {
           </section>
         )
       })}
+    </div>
+  )
+}
+
+/** For the directors and commissioners: commercial position, receivables, projects against budget,
+ * equipment and maintenance, purchasing, assets and people, with what waits for approval. */
+export function OverviewPage() {
+  const { go } = useNav()
+  const [items, setItems] = useState<ApprovalItem[] | null>(null)
+  useEffect(() => { getApprovals().then(setItems).catch(() => setItems([])) }, [])
+  const open = (tab: string, intent?: Intent) => go(tab as TabKey, intent)
+  return (
+    <div className="page">
+      <PageHead title={t('Management overview')} description={t('Commercial position, receivables, projects against budget, equipment, purchasing, assets and people in one place.')} />
+      {items && items.length > 0 && (
+        <p className="notice warn">
+          {t('{n} documents are waiting for you in the approval flow.', { n: items.length })}{' '}
+          <button type="button" className="small" onClick={() => go('approvals')}>{t('Open approvals')}</button>
+        </p>
+      )}
+      <CommercialOverviewPanel onOpen={open} />
+      <OpsOverviewPanel onOpen={tab => open(tab)} />
     </div>
   )
 }
