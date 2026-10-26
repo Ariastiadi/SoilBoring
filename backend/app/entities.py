@@ -359,6 +359,9 @@ _add(Entity(
             F("equipment_id", "ref", "Equipment", required=True, ref="equipment"),
             F("note", "text", "Note", maxlen=120),
         ], help="Measuring equipment that affects the result; its calibration on the test date is checked."),
+        F("uncertainty", "text", "Measurement uncertainty", maxlen=200, section="Quality",
+          help="When it matters for the result or the customer asks: expanded uncertainty with its coverage factor, "
+               "e.g. ±0.4 % moisture (k = 2, about 95 %). ISO/IEC 17025 7.6 and 7.8.3.1 c."),
         F("authorised", "bool", "Results reviewed and authorised", section="Quality",
           help="Tick when the results have been reviewed and may be released. Changing the results afterwards clears it."),
         F("authorised_by", "user", "Authorised by", readonly=True),

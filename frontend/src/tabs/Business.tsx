@@ -761,7 +761,7 @@ export function LabPage({ intent }: { intent?: Intent }) {
   const layout = useMemo<FormLayout>(() => ({
     first: ['test_type', 'borehole_id', 'sample_ref', 'depth_top', 'depth_base', 'status'],
     // ISO/IEC 17025: sample receipt, equipment used (calibration checked) and authorisation of the results.
-    groups: [{ title: 'Quality: receipt, equipment and authorisation', fields: LAB_QUALITY_FIELDS }],
+    groups: [{ title: 'Quality: receipt, equipment, uncertainty and authorisation', fields: LAB_QUALITY_FIELDS }],
     // With raw data the results are calculated; the result fields are for tests reported without it.
     hide: data => sheetOf(catalog, 'lab', data.test_type)?.calc && Object.values(data.raw || {}).some(v => Array.isArray(v) ? v.length : v !== '' && v !== null && v !== undefined) ? ['results'] : [],
   }), [catalog])

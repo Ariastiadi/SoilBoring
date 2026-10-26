@@ -1010,7 +1010,7 @@ const CAL_STATUS: Record<string, string> = {
 }
 
 /** Fields of a lab test added for ISO/IEC 17025 (for the form layout of the laboratory page). */
-export const LAB_QUALITY_FIELDS = ['receipt_id', 'equipment_used', 'authorised']
+export const LAB_QUALITY_FIELDS = ['receipt_id', 'equipment_used', 'uncertainty', 'authorised']
 /** Fields shown by LabQualityPanel instead of the plain record view. */
 export const LAB_QUALITY_HIDDEN = ['warning_count', 'report_disclaimer', 'result_status', 'authorised', 'authorised_by', 'authorised_at', 'results_entered_by']
 

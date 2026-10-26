@@ -4426,7 +4426,7 @@ export const ID: Record<string, string> = {
   "Quality": "Mutu",
   "Quality checks": "Pemeriksaan mutu",
   "Quality of goods or work": "Mutu barang atau pekerjaan",
-  "Quality: receipt, equipment and authorisation": "Mutu: penerimaan, peralatan, dan otorisasi",
+  "Quality: receipt, equipment, uncertainty and authorisation": "Mutu: penerimaan, peralatan, ketidakpastian, dan otorisasi",
   "Raise nonconformity": "Buat laporan ketidaksesuaian",
   "Re-evaluate vendors every (months)": "Evaluasi ulang vendor setiap (bulan)",
   "Re-evaluation overdue": "Evaluasi ulang terlambat",
@@ -4551,4 +4551,6 @@ export const ID: Record<string, string> = {
   "{n} repairs completed": "{n} perbaikan selesai",
   "{n} tests in progress": "{n} uji sedang berjalan",
   "{n} with signs of impairment": "{n} dengan indikasi penurunan nilai",
+  "Measurement uncertainty": "Ketidakpastian pengukuran",
+  "When it matters for the result or the customer asks: expanded uncertainty with its coverage factor, e.g. ±0.4 % moisture (k = 2, about 95 %). ISO/IEC 17025 7.6 and 7.8.3.1 c.": "Isi bila berpengaruh pada hasil atau diminta pelanggan: ketidakpastian diperluas beserta faktor cakupannya, mis. ±0,4 % kadar air (k = 2, ±95 %). ISO/IEC 17025 7.6 dan 7.8.3.1 c.",
 }
