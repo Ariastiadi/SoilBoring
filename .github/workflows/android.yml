@@ -119,7 +119,7 @@ jobs:
             sed 's/^/::error::/' "$RUNNER_TEMP/verify.txt" | head -n 20
             exit 1
           fi
-          grep -E 'Verified using|Signer #1 certificate (DN|SHA-256)' "$RUNNER_TEMP/verify.txt" | sed 's/^/::notice::/'
+          grep -E 'Verified using v2|certificate (DN|SHA-256 digest)' "$RUNNER_TEMP/verify.txt" | sed 's/^/::notice::/'
           if [ -n "$TAG" ] && grep -q 'CN=Android Debug' "$RUNNER_TEMP/verify.txt"; then
             echo "::error::The release APK is signed with the debug key."
             exit 1
