@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="offline_title">Tidak ada koneksi</string>
+    <string name="offline_body">SoilBoring belum bisa dibuka. Cek koneksi internet, lalu coba lagi. Log yang disimpan saat offline tetap ada di HP ini dan terkirim begitu koneksi kembali.</string>
+    <string name="retry">Coba lagi</string>
+    <string name="choose_file">Pilih berkas</string>
+    <string name="saved_to">Tersimpan di Download/SoilBoring: %1$s</string>
+    <string name="save_failed">Berkas %1$s gagal disimpan</string>
+    <string name="downloading">Mengunduh %1$s</string>
+    <string name="no_app">Tidak ada aplikasi di HP ini untuk membuka %1$s</string>
+    <string name="storage_denied">Izin menyimpan berkas ditolak</string>
+    <string name="print_job">Dokumen SoilBoring</string>
+</resources>

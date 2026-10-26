@@ -24,3 +24,12 @@ backend/.env
 .schemathesis/
 .ruff_cache/
 .mypy_cache/
+
+# Android app (android/)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.jks
+*.p12
+*.keystore

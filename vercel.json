@@ -7,7 +7,7 @@
   "functions": {
     "backend/app/main.py": {
       "maxDuration": 60,
-      "excludeFiles": "{frontend/node_modules/**,frontend/src/**,frontend/public/**,backend/tests/**,archive/**,docs/**,scripts/**,data/**,.github/**,**/__pycache__/**}"
+      "excludeFiles": "{frontend/node_modules/**,frontend/src/**,frontend/public/**,backend/tests/**,android/**,archive/**,docs/**,scripts/**,data/**,.github/**,**/__pycache__/**}"
     }
   }
 }

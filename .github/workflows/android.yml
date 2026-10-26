@@ -1,0 +1,102 @@
+name: android
+
+# Builds the Android app (android/). On every change it uploads the APK as a workflow artifact;
+# when a release is published it attaches the signed APK to that release, where Obtainium and
+# Komi Store pick it up.
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # needed only to attach the APK to a release
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle (no wrapper needed)
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.7.1"
+
+      - name: Check the release tag against the app version
+        if: github.event_name == 'release'
+        run: |
+          NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          TAG="${{ github.event.release.tag_name }}"
+          if [ "$TAG" != "v$NAME" ]; then
+            echo "::error::Release tag $TAG does not match versionName $NAME in android/app/build.gradle.kts (expected v$NAME)."
+            exit 1
+          fi
+
+      # SIGNING_KEY (repository secret): first line the keystore password, then the keystore
+      # (PKCS12, alias "soilboring") in base64. Without it the APK is signed with a throwaway
+      # debug key, which is fine for testing but never for a release.
+      - name: Build the APK
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            PASS=$(printf '%s\n' "$SIGNING_KEY" | head -n 1 | tr -d '\r')
+            echo "::add-mask::$PASS"
+            printf '%s\n' "$SIGNING_KEY" | tail -n +2 | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/release.p12"
+            export KEYSTORE_FILE="$RUNNER_TEMP/release.p12" KEYSTORE_PASSWORD="$PASS"
+            echo "Release key found."
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            echo "::error::The SIGNING_KEY secret is missing, so the release APK cannot be signed with the release key."
+            exit 1
+          else
+            echo "No SIGNING_KEY secret: the APK is signed with the debug key (testing only)."
+          fi
+          gradle :app:assembleRelease --no-daemon --stacktrace
+          rm -f "$RUNNER_TEMP/release.p12"
+
+      - name: Name and check the APK
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            NAME="soilboring-${{ github.event.release.tag_name }}.apk"
+          else
+            NAME="soilboring-${GITHUB_SHA::7}.apk"
+          fi
+          cp app/build/outputs/apk/release/app-release.apk "$NAME"
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)apksigner
+          "$APKSIGNER" verify --print-certs "$NAME" | grep -E 'Signer #1 certificate (DN|SHA-256)'
+          if [ "${{ github.event_name }}" = "release" ] && "$APKSIGNER" verify --print-certs "$NAME" | grep -q 'CN=Android Debug'; then
+            echo "::error::The release APK is signed with the debug key."
+            exit 1
+          fi
+          sha256sum "$NAME" > "$NAME.sha256"
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soilboring-apk
+          path: |
+            android/${{ env.APK_NAME }}
+            android/${{ env.APK_NAME }}.sha256
+
+      - name: Attach the APK to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "$APK_NAME" "$APK_NAME.sha256" --clobber

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SoilBoring</string>
+    <string name="offline_title">No connection</string>
+    <string name="offline_body">SoilBoring could not be opened. Check the internet connection and try again. Logs saved while offline stay on this phone and are sent once the connection is back.</string>
+    <string name="retry">Try again</string>
+    <string name="choose_file">Choose a file</string>
+    <string name="saved_to">Saved to Download/SoilBoring: %1$s</string>
+    <string name="save_failed">Could not save the file %1$s</string>
+    <string name="downloading">Downloading %1$s</string>
+    <string name="no_app">No app on this phone can open %1$s</string>
+    <string name="storage_denied">Permission to save files was refused</string>
+    <string name="print_job">SoilBoring document</string>
+</resources>

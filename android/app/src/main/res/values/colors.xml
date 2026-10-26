@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same as the web app: --paper, --sunken, --surface, --ink, --steel -->
+    <color name="paper">#EEF0EB</color>
+    <color name="sunken">#E3E6DF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="ink">#23282D</color>
+    <color name="ink2">#545B61</color>
+    <color name="steel">#1F5F8B</color>
+    <color name="yellow">#F5C400</color>
+    <color name="icon_bg">#0369A1</color>
+</resources>
