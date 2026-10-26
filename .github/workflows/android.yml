@@ -1,12 +1,13 @@
 name: android
 
-# Builds the Android app (android/). On every change it uploads the APK as a workflow artifact;
-# when a release is published it attaches the signed APK to that release, where Obtainium and
-# Komi Store pick it up.
+# Builds the Android app (android/). On every change it uploads the APK as a workflow artifact.
+# Pushing a tag vX.Y.Z (equal to versionName) builds the signed APK and publishes a GitHub release
+# with it, where Obtainium and Komi Store pick it up; a release published by hand gets the APK too.
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths: ["android/**", ".github/workflows/android.yml"]
   pull_request:
     paths: ["android/**", ".github/workflows/android.yml"]
@@ -38,11 +39,17 @@ jobs:
         with:
           gradle-version: "9.7.1"
 
+      - name: Which release (if any)
+        run: |
+          TAG=""
+          if [ "${{ github.event_name }}" = "release" ]; then TAG="${{ github.event.release.tag_name }}"; fi
+          if [ "${{ github.ref_type }}" = "tag" ]; then TAG="${{ github.ref_name }}"; fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
       - name: Check the release tag against the app version
-        if: github.event_name == 'release'
+        if: env.TAG != ''
         run: |
           NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          TAG="${{ github.event.release.tag_name }}"
           if [ "$TAG" != "v$NAME" ]; then
             echo "::error::Release tag $TAG does not match versionName $NAME in android/app/build.gradle.kts (expected v$NAME)."
             exit 1
@@ -61,7 +68,7 @@ jobs:
             printf '%s\n' "$SIGNING_KEY" | tail -n +2 | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/release.p12"
             export KEYSTORE_FILE="$RUNNER_TEMP/release.p12" KEYSTORE_PASSWORD="$PASS"
             echo "Release key found."
-          elif [ "${{ github.event_name }}" = "release" ]; then
+          elif [ -n "$TAG" ]; then
             echo "::error::The SIGNING_KEY secret is missing, so the release APK cannot be signed with the release key."
             exit 1
           else
@@ -80,8 +87,8 @@ jobs:
 
       - name: Name and check the APK
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            NAME="soilboring-${{ github.event.release.tag_name }}.apk"
+          if [ -n "$TAG" ]; then
+            NAME="soilboring-$TAG.apk"
           else
             NAME="soilboring-${GITHUB_SHA::7}.apk"
           fi
@@ -93,7 +100,7 @@ jobs:
             exit 1
           fi
           grep -E 'Verified using|Signer #1 certificate (DN|SHA-256)' "$RUNNER_TEMP/verify.txt" | sed 's/^/::notice::/'
-          if [ "${{ github.event_name }}" = "release" ] && grep -q 'CN=Android Debug' "$RUNNER_TEMP/verify.txt"; then
+          if [ -n "$TAG" ] && grep -q 'CN=Android Debug' "$RUNNER_TEMP/verify.txt"; then
             echo "::error::The release APK is signed with the debug key."
             exit 1
           fi
@@ -101,15 +108,27 @@ jobs:
           echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: soilboring-apk
           path: |
             android/${{ env.APK_NAME }}
             android/${{ env.APK_NAME }}.sha256
 
-      - name: Attach the APK to the release
+      - name: Publish the release with the APK (tag push)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_NAME" "$APK_NAME.sha256" --clobber
+          else
+            gh release create "$TAG" "$APK_NAME" "$APK_NAME.sha256" --verify-tag --latest \
+              --title "SoilBoring Android $TAG" --notes-file release-notes.md
+          fi
+
+      - name: Attach the APK to the release (release published by hand)
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "$APK_NAME" "$APK_NAME.sha256" --clobber
+        run: gh release upload "$TAG" "$APK_NAME" "$APK_NAME.sha256" --clobber

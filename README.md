@@ -229,6 +229,22 @@ The app is installable ("Add to home screen") and keeps its own files in the bro
 - **Sign-in lockout:** 5 failed attempts per email in 15 minutes. The counter is stored with the data (file or database), so it holds across several app instances.
 - **Activity log:** admins see every change (logs, depth data, photos, accounts) in the *Activity* tab; other users see the history of a borehole. The newest 5000 events are kept; passwords and codes are never logged.
 
+### Android app
+
+The Android app (`android/`, Kotlin, Android 8.0 or newer) opens https://soilboring.vercel.app in a WebView and adds what a browser tab does poorly in the field:
+
+- photos from the camera or the gallery for any upload field (camera photos are also kept in Pictures/SoilBoring);
+- the GPS position for boreholes and survey points (permission asked when a page first needs it);
+- exports (CSV, KML, AGS4, recovery codes) saved to Download/SoilBoring;
+- *Print / save as PDF* through the Android print dialog, on A4;
+- the back button inside the app, and a retry screen when there is no connection and nothing is stored yet.
+
+Offline logging works as in the browser. Sign-in and offline logs stay on the phone (no cloud backup).
+
+**Install:** download the APK from [Releases](https://github.com/Ariastiadi/SoilBoring/releases/latest), or add `https://github.com/Ariastiadi/SoilBoring` in [Obtainium](https://github.com/ImranR98/Obtainium) or Komi Store to get updates.
+
+**Build and release:** the `android` workflow builds the APK on every change under `android/` (workflow artifact). To release, raise `versionCode` and `versionName` in `android/app/build.gradle.kts`, update `android/release-notes.md`, and push the tag `v<versionName>`: the workflow signs the APK and publishes the release. Signing uses the repository secret `SIGNING_KEY` (first line the keystore password, then the PKCS12 keystore with alias `soilboring` in base64); without it the APK is signed with a debug key and no release is made. A fork pointing at its own deployment changes `HOST` in `MainActivity.kt`.
+
 ### AI without an API key: Qwen on this device
 
 Geo AI works on every deployment, also without any AI server or key: the browser runs a small open model (Qwen 2.5 1.5B or 0.5B, GGUF from Hugging Face) with llama.cpp compiled to WebAssembly ([wllama](https://github.com/ngxson/wllama)), the same approach as the browser engine of [talkdude](https://github.com/Ariastiadi/talkdude).
@@ -310,6 +326,9 @@ frontend/
     localai.ts, LocalAI.tsx  # Qwen in the browser
     api.ts, Login.tsx, Security.tsx, ChangePassword.tsx, unsaved.ts, styles.css
   public/              # sw.js (offline), manifest.webmanifest, icons
+android/
+  app/src/main/java/.../MainActivity.kt  # WebView app: camera, GPS, downloads, printing
+  release-notes.md     # notes of the next release
 scripts/
   seed_demo_data.py    # synthetic demo logs
 archive/               # original templates and spec (not used at runtime)
