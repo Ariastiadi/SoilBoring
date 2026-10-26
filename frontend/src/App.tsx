@@ -46,6 +46,17 @@ const SampleRegisterPage = lazy(() => worksheetsModule().then(m => ({ default: m
 const LabSummaryPage = lazy(() => worksheetsModule().then(m => ({ default: m.LabSummaryPage })))
 const erpModule = () => import('./tabs/Erp')
 const ApprovalsPage = lazy(() => erpModule().then(m => ({ default: m.ApprovalsPage })))
+const opsModule = () => import('./tabs/ErpOps')
+const opsPage = (name: string) => lazy(() => opsModule().then(m => ({ default: (m as any)[name] as (p: PageProps) => JSX.Element })))
+const EquipmentPage = opsPage('EquipmentPage')
+const MobilisationsPage = opsPage('MobilisationsPage')
+const WorkOrdersPage = opsPage('WorkOrdersPage')
+const VendorsPage = opsPage('VendorsPage')
+const ProcurementPage = opsPage('ProcurementPage')
+const PurchaseOrdersPage = opsPage('PurchaseOrdersPage')
+const FixedAssetsPage = opsPage('FixedAssetsPage')
+const PerformancePage = opsPage('PerformancePage')
+const OpsSettingsPage = lazy(() => opsModule().then(m => ({ default: m.OpsSettingsPage })))
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
@@ -256,6 +267,20 @@ export default function App() {
     { key: 'invoices', label: t('Invoices'), icon: 'invoice', entity: 'invoices' },
     { key: 'rates', label: t('Price list'), icon: 'tag', entity: 'rates' },
   ]
+  const logistics: NavItem[] = [
+    { key: 'equipment', label: t('Equipment register'), icon: 'rig', entity: 'equipment' },
+    { key: 'mobilisations', label: t('Mobilisation & demobilisation'), icon: 'truck', entity: 'mobilisations' },
+    { key: 'work_orders', label: t('Maintenance work orders'), icon: 'wrench', entity: 'work_orders' },
+  ]
+  const purchasing: NavItem[] = [
+    { key: 'procurements', label: t('Procurement cards'), icon: 'cart', entity: 'procurements' },
+    { key: 'purchase_orders', label: t('Purchase orders'), icon: 'invoice', entity: 'purchase_orders' },
+    { key: 'vendors', label: t('Vendors'), icon: 'building', entity: 'vendors' },
+    { key: 'fixed_assets', label: t('Fixed assets'), icon: 'tag', entity: 'fixed_assets' },
+  ]
+  const people: NavItem[] = [
+    { key: 'performance', label: t('Work plan & performance cards'), icon: 'target', entity: 'performance_cards' },
+  ]
   const analysis: NavItem[] = [
     { key: 'qa', label: 'Geo AI', icon: 'ai' },
     { key: 'summary', label: t('Summaries'), icon: 'summary' },
@@ -267,10 +292,12 @@ export default function App() {
     { key: 'users', label: t('Users'), icon: 'users' },
     { key: 'activity', label: t('Activity'), icon: 'activity' },
     { key: 'settings', label: t('Company settings'), icon: 'settings' },
+    { key: 'ops_settings', label: t('Operations settings'), icon: 'settings', entity: 'ops_settings' },
   ] : []
   const groups: Array<[string, NavItem[]]> = [
     ['Work queue', work], ['Commercial operations', comop], ['Field work', field], ['Laboratory', lab], ['Engineering', engineering],
-    ['Finance', finance], ['Data & references', analysis], ['Administration', admin],
+    ['Finance', finance], ['Logistics & maintenance', logistics], ['Purchasing & assets', purchasing], ['People', people],
+    ['Data & references', analysis], ['Administration', admin],
   ]
   const about: NavItem = { key: 'about', label: t('About'), icon: 'info' }
   const PAGES: Partial<Record<TabKey, (i?: Intent) => JSX.Element>> = {
@@ -280,6 +307,11 @@ export default function App() {
     invoices: i => <InvoicesPage intent={i} />, rates: i => <RatesPage intent={i} />, settings: () => <SettingsPage />,
     worksheets: () => <WorksheetCatalogPage />, standards: () => <StandardsPage />, coordinates: () => <CoordinatesPage />,
     samples: () => <SampleRegisterPage />, labsummary: () => <LabSummaryPage />, approvals: () => <ApprovalsPage />,
+    equipment: i => <EquipmentPage intent={i} />, mobilisations: i => <MobilisationsPage intent={i} />,
+    work_orders: i => <WorkOrdersPage intent={i} />, vendors: i => <VendorsPage intent={i} />,
+    procurements: i => <ProcurementPage intent={i} />, purchase_orders: i => <PurchaseOrdersPage intent={i} />,
+    fixed_assets: i => <FixedAssetsPage intent={i} />, performance: i => <PerformancePage intent={i} />,
+    ops_settings: () => <OpsSettingsPage />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)

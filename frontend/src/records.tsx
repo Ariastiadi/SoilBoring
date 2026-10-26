@@ -700,6 +700,13 @@ export const STATUS_TONE: Record<string, string> = {
   unpaid: 'warn', partial: 'warn', paid: 'ok', overdue: 'bad',
   requested: 'active', pending: 'warn', passed: 'ok', redo: 'bad',
   submitted: 'active', reviewed: 'warn', returned: 'bad',
+  available: 'ok', mobilised: 'active', maintenance: 'warn', broken: 'bad', disposed: '',
+  planned: '', in_transit: 'active', on_site: 'active', demobilising: 'warn',
+  open: 'warn', scheduled: '', in_progress: 'active', waiting_parts: 'warn',
+  issued: 'active', ordered: 'active', partly_received: 'warn', invoiced: 'warn',
+  active: 'ok', fully_depreciated: '', not_depreciated: '',
+  outstanding: 'ok', very_good: 'ok', good: 'ok', needs_improvement: 'warn', unsatisfactory: 'bad',
+  due_soon: 'warn', missing: 'bad',
 }
 
 export function Labeled({ label, children }: { label: string, children: ReactNode }) {

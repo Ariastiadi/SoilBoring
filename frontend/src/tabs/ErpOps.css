@@ -1,0 +1,41 @@
+/* Operations ERP pages (ErpOps.tsx). Uses the shared colour tokens from styles.css only. */
+
+.ops-board { margin-bottom: 1rem; }
+.ops-board .kpis { margin-bottom: .75rem; }
+
+.ops-attention { margin-bottom: 1rem; padding: .75rem 1rem; }
+.ops-attention > summary { cursor: pointer; font-family: var(--head); font-weight: 600; font-size: 1.05rem; }
+.ops-attention[open] > summary { margin-bottom: .6rem; }
+
+.ops-checks ul { margin: .35rem 0 0; padding-left: 1.2rem; }
+.ops-checks li + li { margin-top: .2rem; }
+
+.ops-live { margin-bottom: 1rem; }
+.ops-live-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+.ops-live-head .card-title { margin: 0 0 .35rem; }
+.ops-live-head .help { margin: .35rem 0 0; }
+.ops-asof { min-width: 11rem; margin: 0; }
+
+.ops-plain { list-style: none; margin: 0; padding: 0; }
+.ops-plain li { padding: .35rem 0; border-bottom: 1px solid var(--line-soft); }
+.ops-plain li:last-child { border-bottom: 0; }
+.ops-plain button.quiet { padding: 0; min-height: 0; font-weight: 600; }
+
+.ops-pipeline { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0; margin: 0 0 1rem; padding: 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.ops-pipeline li { display: flex; flex-direction: column; gap: .1rem; padding: .6rem .85rem; border-right: 1px solid var(--line-soft); font-size: .85rem; color: var(--ink-2); }
+.ops-pipeline li:last-child { border-right: 0; }
+.ops-pipeline-n { font-family: var(--head); font-size: 1.45rem; font-weight: 600; line-height: 1.1; color: var(--ink); }
+
+.data-table tr.ops-chosen td, .scroll-x .data-table tr.ops-chosen td:first-child { background: var(--yellow-soft); }
+.data-table tr.ops-chosen td:first-child, .scroll-x.moved .data-table tr.ops-chosen td:first-child { box-shadow: inset 3px 0 0 var(--yellow-press); }
+
+.ops-suggest { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin: 0 0 1rem; }
+
+.ops-overview .kpis { margin-top: .25rem; }
+
+@media (max-width: 640px) {
+  .ops-pipeline { grid-template-columns: repeat(2, 1fr); }
+  .ops-pipeline li { border-bottom: 1px solid var(--line-soft); }
+  .ops-live-head { flex-direction: column; }
+}
