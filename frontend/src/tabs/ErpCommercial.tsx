@@ -2,7 +2,10 @@
  * Commercial ERP pages (blueprint A.1): Pricing & Budgeting Decision with the project difficulty
  * index, client decision, weekly work plan with Gantt chart and S-curve, bank guarantee / SKBDN
  * requests, receivables with aging and NPAR, client cards, the pricing policy in the company
- * settings, and the commercial part of the management dashboard.
+ * settings, and the commercial part of the management dashboard. Earned value (PMI / ANSI-EIA-748)
+ * on the weekly work plans, the government cost references on the PBD (AHSP, Permen PUPR 8/2023
+ * Art. 11(3); consultancy direct cost, INKINDO 2025) and an indicative expected credit loss on the
+ * receivables (PSAK 109 simplified approach) are calculated on the server.
  *
  * The server calculates (backend/app/erp_commercial.py, /api/erp/commercial); these pages show
  * the results and give a live preview while a document is drafted.
@@ -49,6 +52,9 @@ export type PricingConfig = {
   premiums: Array<{ index: number, premium_pct: number }>, premiums_source: 'settings' | 'default'
   approval_limits: Array<{ up_to: number | null, level: string }>
   max_cost_ratio_pct: number, default_margin_pct: number, npar_days: number, payment_days: number, guarantee_warning_days: number
+  evm_warning_index: number, evm_watch_index: number
+  ecl_rates: Array<{ key: string, label: string, rate_pct: number }>, ecl_source: 'settings' | 'default'
+  ahsp_indirect_pct: [number, number], consultancy_direct_max_pct: number
   zones: Array<{ zone: string, no: number, provinces: string, index: number, codes: string[] }>
   province_zone: Record<string, string>, provinces: Array<[string, string]>, sections: Array<[string, string]>
 }
@@ -245,7 +251,38 @@ function pbdPreview(data: Record<string, any>, rates: Rec[] | null, config: Pric
   const raw = abp + Math.round(abp * r / 100) + Math.round(abp * m / 100)
   const step = Number(data.rounding || 1000)
   const bid = raw > 0 ? Math.ceil(raw / step - 1e-9) * step : 0
-  return { abp, r, m, bid, index, minPrice: Math.round(minPrice), ratio: bid ? Math.round(abp / bid * 10000) / 100 : null, missing }
+  const labour = (Array.isArray(data.costs) ? data.costs : []).filter((line: Rec) => line.section === 'labour')
+    .reduce((sum: number, line: Rec) => sum + (n(line.qty) || 0) * (n(line.days) ?? 1) * (n(line.unit_cost) ?? n(rates?.find(x => x.id === line.rate_id)?.cost_unit) ?? 0), 0)
+  return {
+    abp, r, m, bid, index, minPrice: Math.round(minPrice), ratio: bid ? Math.round(abp / bid * 10000) / 100 : null, missing,
+    indirect: abp ? Math.round((Math.round(abp * r / 100) + Math.round(abp * m / 100)) / abp * 10000) / 100 : null,
+    nonPersonnel: bid ? Math.round((abp - labour) / bid * 10000) / 100 : null,
+  }
+}
+
+/** The government cost reference of a PBD: AHSP indirect cost range, or the consultancy direct-cost guide. */
+function GovernmentReference({ reference, indirect, nonPersonnel, config }: {
+  reference: string, indirect: number | null, nonPersonnel: number | null, config: PricingConfig
+}) {
+  const [lo, hi] = config.ahsp_indirect_pct
+  if (reference === 'ahsp' && indirect !== null) {
+    const tone = indirect > hi ? 'warn' : ''
+    return (
+      <p className={`notice ${tone}`}>
+        {t('Risk premium and margin: {pct} % of the ABP. Owner\'s estimates for construction work add {lo}–{hi} % indirect cost (overhead and profit) to the direct cost (Permen PUPR 8/2023 Art. 11(3)).', { pct: number(indirect), lo, hi })}
+        {indirect > hi && <> {t('The bid may exceed the HPS.')}</>}
+      </p>
+    )
+  }
+  if (reference === 'consultancy' && nonPersonnel !== null) {
+    const max = config.consultancy_direct_max_pct
+    return (
+      <p className={`notice ${nonPersonnel > max ? 'warn' : ''}`}>
+        {t('Non-personnel cost: {pct} % of the bid price. Consultancy guidance (INKINDO 2025) expects at most {max} % for most work; survey, measurement and mapping work may exceed it.', { pct: number(nonPersonnel), max })}
+      </p>
+    )
+  }
+  return null
 }
 
 function PbdPreview({ data, setData, config }: { data: Record<string, any>, setData: (u: (p: Record<string, any>) => Record<string, any>) => void, config: PricingConfig }) {
@@ -276,6 +313,7 @@ function PbdPreview({ data, setData, config }: { data: Record<string, any>, setD
       {p.bid > 0 && p.bid < p.minPrice && <p className="notice error">{t('The bid price is below the minimum client price.')} ({money(p.minPrice)})</p>}
       {p.ratio !== null && p.ratio > config.max_cost_ratio_pct && <p className="notice warn">{t('The cost ratio is above the company maximum.')}</p>}
       {p.missing.length > 0 && <p className="notice warn">{t('No unit cost yet for: {items}', { items: p.missing.slice(0, 6).join(', ') })}</p>}
+      <GovernmentReference reference={data.cost_reference || ''} indirect={p.indirect} nonPersonnel={p.nonPersonnel} config={config} />
       <p className="help">{t('A preview while you type; the saved PBD is calculated on the server.')}</p>
     </section>
   )
@@ -295,6 +333,8 @@ function PbdDetail({ record, config }: { record: Rec, config: PricingConfig | nu
         <Kpi label={t('Minimum client price')} value={money(record.min_client_price)} wide />
         <Kpi label={t('Cost ratio ABP/revenue')} value={pctText(record.cost_ratio_pct)} sub={t('maximum {max} %', { max: number(record.max_cost_ratio_pct) })} />
         <Kpi label={t('Approval authority')} value={<span className="ec-text-value">{record.approval_level ? t(record.approval_level) : '–'}</span>} />
+        {record.cost_reference === 'ahsp' && <Kpi label={t('Risk premium and margin (% of the ABP)')} value={pctText(record.indirect_pct)}
+          sub={config ? t('AHSP {lo}–{hi} %', { lo: config.ahsp_indirect_pct[0], hi: config.ahsp_indirect_pct[1] }) : undefined} />}
       </div>
       <CheckList checks={record.checks} />
       {linked.length > 0 && (
@@ -315,13 +355,14 @@ const PBD_LAYOUT: FormLayout = {
   first: ['date', 'project_id', 'procurement', 'scope', 'services', 'duration_weeks', 'margin_pct', 'risk_pct_override', 'costs'],
   groups: [
     { title: 'Proposal and location', fields: ['amendment', 'proposal_number', 'project_manager', 'province', 'zone', 'location', 'start_date'] },
-    { title: 'Price settings', fields: ['tax_pct', 'rounding', 'conversion'] },
+    { title: 'Price settings', fields: ['tax_pct', 'rounding', 'conversion', 'cost_reference'] },
     { title: 'Committee reviews', fields: ['technical_review', 'legal_review', 'risk_review'] },
   ],
   hide: () => ['difficulty'],
 }
 const PBD_HIDE_VIEW = ['difficulty', 'costs', 'result', 'checks', 'abp', 'risk_amount', 'margin_amount', 'bid_price', 'bid_with_vat',
-  'min_client_price', 'cost_ratio_pct', 'max_cost_ratio_pct', 'approval_level', 'difficulty_score', 'difficulty_index', 'risk_premium_pct', 'margin_pct']
+  'min_client_price', 'cost_ratio_pct', 'max_cost_ratio_pct', 'approval_level', 'difficulty_score', 'difficulty_index', 'risk_premium_pct', 'margin_pct',
+  'indirect_pct']
 
 const DEFAULT_TERMS = () => [
   { name: t('Down payment'), percent: 30 }, { name: t('Field work completed'), percent: 30 }, { name: t('Final report accepted'), percent: 40 },
@@ -565,12 +606,56 @@ function GanttTools({ data, setData }: { data: Record<string, any>, setData: (u:
   )
 }
 
+/** Tone of a CPI or SPI: below the company threshold is a warning, below 0.95 is to watch. */
+function indexTone(value: unknown, config: PricingConfig | null): 'ok' | 'warn' | 'bad' | '' {
+  const v = n(value)
+  if (v === null) return ''
+  const warn = config?.evm_warning_index ?? 0.9
+  const watch = config?.evm_watch_index ?? 0.95
+  return v < warn ? 'bad' : v < watch ? 'warn' : 'ok'
+}
+
+const INDEX_WORD: Record<string, string> = { ok: 'On track', warn: 'Watch', bad: 'Below threshold' }
+
+function IndexKpi({ label, value, config, sub }: { label: string, value: unknown, config: PricingConfig | null, sub: string }) {
+  const tone = indexTone(value, config)
+  return (
+    <Kpi label={label} value={n(value) === null ? '–' : number(n(value))}
+      sub={<>{tone && <Tone value={tone === 'bad' ? 'expired' : tone === 'warn' ? 'expiring' : 'ok'}>{t(INDEX_WORD[tone])}</Tone>} {sub}</>} />
+  )
+}
+
+/** Earned value at the reporting week (server figures). */
+function EarnedValue({ record, config }: { record: Rec, config: PricingConfig | null }) {
+  if (n(record.bac) === null) return null
+  const vac = n(record.vac)
+  return (
+    <section className="card ec-evm" aria-label={t('Earned value')}>
+      <div className="ec-head">
+        <div>
+          <h3 className="card-title">{t('Earned value')}</h3>
+          <p className="help">{t('Week {w}. EV = BAC × actual progress; PV = BAC × planned progress; AC = realised cost. Above 1 is favourable.', { w: record.report_week ?? '–' })}</p>
+        </div>
+      </div>
+      <div className="kpis">
+        <IndexKpi label={t('CPI (cost)')} value={record.cpi} config={config} sub={t('CV {amount}', { amount: money(record.cv) })} />
+        <IndexKpi label={t('SPI (schedule)')} value={record.spi} config={config} sub={t('SV {amount}', { amount: money(record.sv) })} />
+        <Kpi label={t('EV / PV / AC')} value={money(record.ev)} wide sub={`${t('PV')} ${money(record.pv)} · ${t('AC')} ${money(record.ac)}`} />
+        <Kpi label={t('Estimate at completion (EAC)')} value={money(record.eac)} wide
+          sub={vac === null ? t('BAC / CPI') : <span className={vac < 0 ? 'ec-bad' : undefined}>{t('VAC {amount}', { amount: money(vac) })}</span>} />
+        <Kpi label={t('TCPI')} value={n(record.tcpi) === null ? '–' : number(n(record.tcpi))} sub={t('needed to finish within {amount}', { amount: money(record.bac) })} />
+      </div>
+    </section>
+  )
+}
+
 const WP_LAYOUT: FormLayout = {
   first: ['date', 'project_id', 'pbd_id', 'start_date', 'activities', 'weeks'],
   groups: [{ title: 'More details', fields: ['site_manager', 'files', 'notes'] }],
 }
 
 export function WorkPlansPage({ intent }: { intent?: Intent }) {
+  const config = useConfig()
   const tools: FormTools = (data, setData, place) => place === 'bottom' ? <GanttTools data={data} setData={setData} /> : null
   return (
     <RecordsPage entityName="work_plans" openId={intent?.open} startNew={intent?.newWith}
@@ -578,7 +663,8 @@ export function WorkPlansPage({ intent }: { intent?: Intent }) {
       defaults={{ date: todayIso(), activities: [], weeks: [] }}
       formTools={tools} formLayout={WP_LAYOUT}
       hideInView={['result', 'checks', 'activities', 'weeks', 'total_plan', 'total_drawdown', 'total_realised', 'pbd_budget', 'planned_to_date',
-        'actual_to_date', 'deviation', 'cost_ratio_pct', 'revenue', 'duration_weeks', 'pbd_weeks', 'report_week']}
+        'actual_to_date', 'deviation', 'cost_ratio_pct', 'revenue', 'duration_weeks', 'pbd_weeks', 'report_week',
+        'bac', 'bac_source', 'pv', 'ev', 'ac', 'cv', 'sv', 'cpi', 'spi', 'eac', 'etc', 'vac', 'tcpi']}
       extra={r => (
         <>
           <div className="kpis ec-kpis">
@@ -592,12 +678,13 @@ export function WorkPlansPage({ intent }: { intent?: Intent }) {
             <Kpi label={t('Cost ratio ABP/revenue')} value={pctText(r.cost_ratio_pct)} />
           </div>
           <CheckList checks={r.checks} />
+          <EarnedValue record={r} config={config} />
           <section className="card" style={{ marginBottom: '1rem' }}>
             <h3 className="card-title">{t('Gantt chart')}</h3>
             <GanttChart activities={r.activities || []} startDate={r.start_date} reportWeek={r.report_week} />
           </section>
           <section className="card" style={{ marginBottom: '1rem' }}>
-            <h3 className="card-title">{t('S-curve and budget')}</h3>
+            <h3 className="card-title">{t('S-curve, budget and earned value')}</h3>
             <ResultView result={withoutTables(r.result, ['Activities (Gantt)'])} />
           </section>
         </>
@@ -681,13 +768,42 @@ type ArInvoice = {
   id: string, number: string, project_id: string, project: string, client_id: string, client: string, date: string, due_date: string,
   term: string, total: number, paid: number, outstanding: number, days_since_invoice: number, days_past_due: number,
   bucket: string, age_bucket: string, owner: 'npar' | 'commercial', last_note: Rec | null, notes_count: number
+  ecl_bucket: string, ecl_rate_pct: number, ecl: number
 }
+type Ecl = { buckets: Array<Bucket & { rate_pct: number, ecl: number }>, total: number, coverage_pct: number | null, source: 'settings' | 'default' }
 export type Receivables = {
   as_of: string, npar_days: number
-  totals: { invoiced: number, paid: number, outstanding: number, overdue: number, npar: number, open_invoices: number }
+  totals: { invoiced: number, paid: number, outstanding: number, overdue: number, npar: number, open_invoices: number, ecl: number }
+  ecl: Ecl
   buckets: Bucket[], age_buckets: Bucket[]
-  by_client: Array<{ client_id: string, client: string, outstanding: number, npar: number } & Record<string, number | string>>
+  by_client: Array<{ client_id: string, client: string, outstanding: number, npar: number, ecl: number } & Record<string, number | string>>
   invoices: ArInvoice[], npar: ArInvoice[]
+}
+
+/** Indicative expected credit loss by days overdue (provision matrix, PSAK 109 simplified approach). */
+function EclMatrix({ ecl }: { ecl: Ecl }) {
+  return (
+    <section className="card ec-ecl">
+      <h3 className="card-title">{t('Expected credit loss (indicative)')}</h3>
+      <p className="help">{t('Lifetime expected credit loss on the receivables by days overdue (provision matrix, PSAK 109 simplified approach). For management; the allowance in the accounts is set by finance.')}</p>
+      <ScrollTable>
+        <table className="data-table">
+          <thead><tr><th>{t('Days overdue')}</th><th className="num">{t('Outstanding')}</th><th className="num">{t('Loss rate')}</th><th className="num">{t('Expected credit loss')}</th></tr></thead>
+          <tbody>
+            {ecl.buckets.map(b => (
+              <tr key={b.key}><td>{t(b.label)}<div className="bh-sub">{t('{n} invoices', { n: b.count })}</div></td>
+                <td className="num nowrap">{money(b.amount)}</td><td className="num">{number(b.rate_pct)} %</td><td className="num nowrap">{money(b.ecl)}</td></tr>
+            ))}
+          </tbody>
+          <tfoot><tr><th>{t('Total')}</th><th className="num nowrap">{money(ecl.buckets.reduce((a, b) => a + b.amount, 0))}</th>
+            <th className="num">{pctText(ecl.coverage_pct)}</th><th className="num nowrap">{money(ecl.total)}</th></tr></tfoot>
+        </table>
+      </ScrollTable>
+      <p className="help">{ecl.source === 'default'
+        ? t('Example rates, not company figures: finance sets the rates in the pricing policy from the company\'s own loss history and the current outlook.')
+        : t('Rates from the pricing policy.')}</p>
+    </section>
+  )
 }
 
 function AgingBars({ title, buckets, note }: { title: string, buckets: Bucket[], note?: string }) {
@@ -825,11 +941,15 @@ export function ReceivablesPage() {
             <Kpi label={t('Overdue')} value={money(data.totals.overdue)} wide />
             <Kpi label={t('NPAR (more than {n} days)', { n: data.npar_days })} value={money(data.totals.npar)} wide sub={t('{n} invoices', { n: data.npar.length })} />
             <Kpi label={t('Invoiced')} value={money(data.totals.invoiced)} wide sub={t('Paid {amount}', { amount: money(data.totals.paid) })} />
+            <Kpi label={t('Expected credit loss (indicative)')} value={money(data.totals.ecl)} wide
+              sub={t('{p} % of the outstanding', { p: number(data.ecl.coverage_pct ?? 0) })} />
           </div>
           <div className="ec-two">
             <AgingBars title={t('Aging by due date')} buckets={data.buckets} />
             <AgingBars title={t('Aging since the invoice date')} buckets={data.age_buckets} note={t('The matrix of the receivables policy: who handles the collection follows this age.')} />
           </div>
+          <EclMatrix ecl={data.ecl} />
+          <p className="help">{t('NPAR here counts days since the invoice date (company rule). Banks count days past due: OJK puts loans more than 90 days past due in the non-performing grades (POJK 40/POJK.03/2019), and PSAK 109 presumes default after 90 days past due.')}</p>
           <div className="segmented ec-tabs" role="group" aria-label={t('Show')}>
             <button type="button" aria-pressed={view === 'open'} onClick={() => setView('open')}>{t('Open invoices')} <span className="count">{data.invoices.length}</span></button>
             <button type="button" aria-pressed={view === 'npar'} onClick={() => setView('npar')}>{t('NPAR list')} <span className="count">{data.npar.length}</span></button>
@@ -840,7 +960,7 @@ export function ReceivablesPage() {
           {view === 'clients' && (
             <ScrollTable>
               <table className="data-table">
-                <thead><tr><th>{t('Client')}</th><th className="num">{t('Outstanding')}</th>{Object.keys(AGING_LABELS).map(k => <th key={k} className="num">{t(AGING_LABELS[k])}</th>)}<th className="num">{t('NPAR')}</th></tr></thead>
+                <thead><tr><th>{t('Client')}</th><th className="num">{t('Outstanding')}</th>{Object.keys(AGING_LABELS).map(k => <th key={k} className="num">{t(AGING_LABELS[k])}</th>)}<th className="num">{t('NPAR')}</th><th className="num">{t('Expected credit loss')}</th></tr></thead>
                 <tbody>
                   {data.by_client.map(c => (
                     <tr key={c.client_id} className="clickable" onClick={() => go('client_cards', { open: c.client_id })}>
@@ -848,6 +968,7 @@ export function ReceivablesPage() {
                       <td className="num nowrap">{money(c.outstanding)}</td>
                       {Object.keys(AGING_LABELS).map(k => <td key={k} className="num nowrap">{money(c[k])}</td>)}
                       <td className="num nowrap">{money(c.npar)}</td>
+                      <td className="num nowrap">{money(c.ecl)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -869,7 +990,7 @@ export type ClientCardData = {
   client: Rec & { since_year: number | null }
   stats: {
     projects: number, projects_by_status: Record<string, number>, contract_value: number, invoiced: number, paid: number,
-    outstanding: number, overdue: number, npar: number, avg_days_to_pay: number | null, paid_invoices: number,
+    outstanding: number, overdue: number, npar: number, ecl: number, avg_days_to_pay: number | null, paid_invoices: number,
     on_time_rate_pct: number | null, invoices_due: number, late_open: number, rating: string
   }
   services: Record<string, number>, provinces: Record<string, number>
@@ -913,7 +1034,8 @@ export function ClientCard({ clientId }: { clientId: string }) {
         <Kpi label={t('Projects')} value={s.projects} sub={Object.entries(s.projects_by_status).map(([k, v]) => `${statusLabel(k)} ${v}`).join(' · ')} />
         <Kpi label={t('Contract value')} value={money(s.contract_value)} wide />
         <Kpi label={t('Invoiced')} value={money(s.invoiced)} wide sub={t('Paid {amount}', { amount: money(s.paid) })} />
-        <Kpi label={t('Outstanding')} value={money(s.outstanding)} wide sub={s.npar ? t('NPAR {amount}', { amount: money(s.npar) }) : undefined} />
+        <Kpi label={t('Outstanding')} value={money(s.outstanding)} wide
+          sub={[s.npar ? t('NPAR {amount}', { amount: money(s.npar) }) : '', s.ecl ? t('ECL {amount}', { amount: money(s.ecl) }) : ''].filter(Boolean).join(' · ') || undefined} />
         <Kpi label={t('Average days to pay')} value={s.avg_days_to_pay === null ? '–' : number(s.avg_days_to_pay)} sub={t('{n} invoices paid', { n: s.paid_invoices })} />
         <Kpi label={t('Paid on time')} value={pctText(s.on_time_rate_pct)} sub={t('of {n} invoices due', { n: s.invoices_due })} />
       </div>
@@ -1031,7 +1153,7 @@ export function ClientCardsPage({ intent }: { intent?: Intent }) {
 // ---------------------------------------------------------------------------
 
 const PRICING_FIELDS = ['difficulty_factors', 'risk_premium_table', 'default_margin_pct', 'max_cost_ratio_pct', 'approval_limits', 'npar_days',
-  'default_payment_days', 'guarantee_warning_days']
+  'default_payment_days', 'guarantee_warning_days', 'evm_warning_index', 'ecl_rates']
 
 export function PricingSettingsPage() {
   const schemas = useSchemas()
@@ -1052,12 +1174,13 @@ export function PricingSettingsPage() {
         })),
         risk_premium_table: (prev.risk_premium_table || []).length ? prev.risk_premium_table : config.premiums.map(p => ({ index: p.index, premium_pct: p.premium_pct })),
         approval_limits: (prev.approval_limits || []).length ? prev.approval_limits : config.approval_limits.map(a => ({ up_to: a.up_to ?? '', level: t(a.level) })),
+        ecl_rates: (prev.ecl_rates || []).length ? prev.ecl_rates : config.ecl_rates.map(r => ({ bucket: r.key, rate_pct: r.rate_pct })),
       }))}>{t('Copy the company defaults into the empty tables')}</button>
     </div>
   ) : null
   return (
     <div className="page" style={{ maxWidth: 980 }}>
-      <PageHead title={t('Pricing policy')} description={t('Project difficulty factors, risk premium by difficulty index, margin, maximum cost ratio, approval authority and receivables rules.')} />
+      <PageHead title={t('Pricing policy')} description={t('Project difficulty factors, risk premium by difficulty index, margin, maximum cost ratio, approval authority, receivables rules, expected credit loss rates and the earned value threshold.')} />
       {saved && <p className="notice ok" role="status">{t('Saved.')}</p>}
       {!rows[0] && <p className="notice warn">{t('Enter the company name in the company settings first.')}</p>}
       {entity.can_create ? (
@@ -1076,6 +1199,16 @@ export function PricingSettingsPage() {
               <h4>{t('Approval authority by bid value')}</h4>
               <ul className="ec-plain">{config.approval_limits.map((a, i) => <li key={i}>{a.up_to ? t('below {amount}', { amount: money(a.up_to) }) : t('above that')}: <strong>{t(a.level)}</strong></li>)}</ul>
               <p className="help">{t('Margin {m} % · maximum cost ratio {r} % · NPAR after {d} days', { m: number(config.default_margin_pct), r: number(config.max_cost_ratio_pct), d: config.npar_days })}</p>
+              <h4>{t('Expected credit loss rates')}</h4>
+              <table className="data-table"><thead><tr><th>{t('Days overdue')}</th><th className="num">{t('Loss rate')}</th></tr></thead>
+                <tbody>{config.ecl_rates.map(r => <tr key={r.key}><td>{t(r.label)}</td><td className="num">{number(r.rate_pct)} %</td></tr>)}</tbody></table>
+              <p className="help">{config.ecl_source === 'default' ? t('Example rates, to be set by finance.') : t('From the company settings.')}</p>
+              <h4>{t('Earned value and government references')}</h4>
+              <ul className="ec-plain small">
+                <li>{t('CPI or SPI below {w}: warning; below {v}: to watch.', { w: number(config.evm_warning_index), v: number(config.evm_watch_index) })}</li>
+                <li>{t('AHSP construction work: indirect cost (overhead and profit) {lo}–{hi} % of the direct cost (Permen PUPR 8/2023 Art. 11(3)).', { lo: config.ahsp_indirect_pct[0], hi: config.ahsp_indirect_pct[1] })}</li>
+                <li>{t('Consultancy: direct cost normally at most {max} % of the contract value excl. VAT (INKINDO 2025, after LKPP Reg. 12/2021); expert pay not below Kepmen PU 33/KPTS/M/2025.', { max: config.consultancy_direct_max_pct })}</li>
+              </ul>
             </div>
             <div>
               <h4>{t('Region zones')}</h4>
@@ -1101,11 +1234,12 @@ export type CommercialOverview = {
   pipeline: { pbd: Record<string, { count: number, value: number }>, client_decisions: Record<string, { count: number, value: number }>,
     quotes: Record<string, { count: number, value: number }>, projects: Record<string, number> }
   contracts: { count: number, value: number, by_kind: Record<string, { count: number, value: number }> }
-  receivables: Receivables['totals'], aging: Bucket[], age_buckets: Bucket[], npar: ArInvoice[]
+  receivables: Receivables['totals'], aging: Bucket[], age_buckets: Bucket[], npar: ArInvoice[], ecl: Ecl, evm_warning_index: number
   by_client: Receivables['by_client']
   projects_budget: Array<{ id: string, number: string, project_id: string, project: string, wf_status: string, pbd_budget: number | null,
     plan_budget: number, drawdown: number, realised: number, report_week: number | null, duration_weeks: number | null,
-    planned_pct: number, actual_pct: number, deviation_pct: number | null, cost_ratio_pct: number | null }>
+    planned_pct: number, actual_pct: number, deviation_pct: number | null, cost_ratio_pct: number | null,
+    bac: number | null, cpi: number | null, spi: number | null, eac: number | null, vac: number | null }>
   clients_by_service: Array<{ key: string, label: string, clients: number, projects: number, contract_value: number }>
   clients_by_province: Array<{ key: string, label: string, zone: string, clients: number, projects: number, contract_value: number }>
   guarantees: { active: number, amount: number, expiring: Array<{ id: string, number: string, type: string, direction: string, project_id: string,
@@ -1166,6 +1300,8 @@ export function CommercialOverviewPanel({ onOpen }: { onOpen?: (tab: string, int
           <Kpi label={t('Invoiced')} value={money(r.invoiced)} wide sub={t('Paid {amount}', { amount: money(r.paid) })} />
           <Kpi label={t('Outstanding')} value={money(r.outstanding)} wide sub={t('overdue {amount}', { amount: money(r.overdue) })} />
           <Kpi label={t('NPAR')} value={money(r.npar)} wide sub={t('{n} invoices', { n: data.npar.length })} />
+          <Kpi label={t('Expected credit loss (indicative)')} value={money(r.ecl)} wide
+            sub={data.ecl.source === 'default' ? t('example rates') : t('{p} % of the outstanding', { p: number(data.ecl.coverage_pct ?? 0) })} />
           <Kpi label={t('Average cost ratio ABP/revenue')} value={pctText(data.cost_ratio.average_pct)} sub={t('maximum {max} % · {n} approved PBD', { max: number(data.cost_ratio.max_pct), n: data.cost_ratio.approved_pbd })} />
         </div>
       </section>
@@ -1187,7 +1323,8 @@ export function CommercialOverviewPanel({ onOpen }: { onOpen?: (tab: string, int
           <ScrollTable>
             <table className="data-table">
               <thead><tr><th>{t('Project')}</th><th className="num">{t('PBD budget')}</th><th className="num">{t('Budget plan')}</th><th className="num">{t('Realised cost')}</th>
-                <th className="num">{t('Planned')}</th><th className="num">{t('Actual')}</th><th className="num">{t('Deviation')}</th><th className="num">{t('Cost ratio')}</th></tr></thead>
+                <th className="num">{t('Planned')}</th><th className="num">{t('Actual')}</th><th className="num">{t('Deviation')}</th>
+                <th className="num">{t('CPI')}</th><th className="num">{t('SPI')}</th><th className="num">{t('EAC')}</th><th className="num">{t('Cost ratio')}</th></tr></thead>
               <tbody>
                 {data.projects_budget.map(p => (
                   <tr key={p.id} className={onOpen ? 'clickable' : undefined} onClick={() => onOpen?.('work_plans', { open: p.id })}>
@@ -1198,6 +1335,9 @@ export function CommercialOverviewPanel({ onOpen }: { onOpen?: (tab: string, int
                     <td className="num">{pctText(p.planned_pct)}</td>
                     <td className="num">{pctText(p.actual_pct)}</td>
                     <td className={`num${(p.deviation_pct ?? 0) < -5 ? ' ec-bad' : ''}`}>{p.deviation_pct === null ? '–' : number(p.deviation_pct)}</td>
+                    <td className={`num${p.cpi !== null && p.cpi < data.evm_warning_index ? ' ec-bad' : ''}`}>{p.cpi === null ? '–' : number(p.cpi)}</td>
+                    <td className={`num${p.spi !== null && p.spi < data.evm_warning_index ? ' ec-bad' : ''}`}>{p.spi === null ? '–' : number(p.spi)}</td>
+                    <td className={`num nowrap${(p.vac ?? 0) < 0 ? ' ec-bad' : ''}`}>{money(p.eac)}</td>
                     <td className="num">{pctText(p.cost_ratio_pct)}</td>
                   </tr>
                 ))}

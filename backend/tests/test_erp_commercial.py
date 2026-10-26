@@ -249,11 +249,36 @@ def test_work_plan(client, people):
     assert s_curve["series"][1]["points"] == [[0, 0], [1, 15], [2, 50]]
     row1 = wp["result"]["tables"][0]["rows"][0]
     assert row1[:4] == [1, "2026-10-12", 20, 20]
+    # Earned value at week 2: BAC = weekly budget 50 M; PV = 50 M × 60 % = 30 M; EV = 50 M × 50 % = 25 M;
+    # AC = 9 + 22 = 31 M. CV = 25 − 31 = −6 M; SV = 25 − 30 = −5 M; CPI = 25/31 = 0.806; SPI = 25/30 = 0.833;
+    # EAC = BAC / CPI = 50 × 31 / 25 = 62 M; ETC = 62 − 31 = 31 M; VAC = 50 − 62 = −12 M; TCPI = 25 / 19 = 1.316.
+    assert (wp["bac"], wp["bac_source"], wp["pv"], wp["ev"], wp["ac"]) == (50_000_000, "plan", 30_000_000, 25_000_000, 31_000_000)
+    assert (wp["cv"], wp["sv"], wp["cpi"], wp["spi"]) == (-6_000_000, -5_000_000, 0.806, 0.833)
+    assert (wp["eac"], wp["etc"], wp["vac"], wp["tcpi"]) == (62_000_000, 31_000_000, -12_000_000, 1.316)
+    assert any(x["level"] == "warn" and x["vars"].get("index") == "CPI" for x in wp["checks"])
+    assert any(x["level"] == "warn" and x["vars"].get("index") == "SPI" for x in wp["checks"])
+    assert any("TCPI" in x["text"] for x in wp["checks"]) and any("EAC = BAC / CPI" in x["text"] for x in wp["checks"])
+    ev_chart = wp["result"]["charts"][2]
+    assert ev_chart["title"] == "Earned value: PV, EV and AC"
+    # PV = 50 M × cumulative plan 20/60/80/100 %; EV = 50 M × 15/50 %; AC = 9/31 M (IDR million).
+    assert [s_["points"] for s_ in ev_chart["series"]] == [[[0, 0], [1, 10], [2, 30], [3, 40], [4, 50]],
+                                                           [[0, 0], [1, 7.5], [2, 25]], [[0, 0], [1, 9], [2, 31]]]
+    ev_table = {r[0]: r[1] for r in wp["result"]["tables"][2]["rows"]}
+    assert ev_table["Reporting week"] == 2 and ev_table["EAC if the overrun does not recur"] == 56_000_000  # 31 + (50 − 25)
+    assert ev_table["EAC with cost and schedule pressure"] == 68_200_000  # 31 + 25 / (25/31 × 25/30) = 31 + 37.2
     # The budget no longer matches the PBD and the plan runs longer than the PBD.
     weeks2 = weeks + [{"week": 7, "budget_plan": 5_000_000}]
     wp2 = _post(client, h, "work_plans", {"date": "2026-10-10", "project_id": p["id"], "pbd_id": pbd["id"], "activities": acts, "weeks": weeks2})
     texts = [x["text"] for x in wp2["checks"]]
     assert any("PBD budget is" in t for t in texts) and any("longer than" in t for t in texts)
+    # Without a weekly budget the PBD budget (50 M) is the BAC; without any budget there is no earned value.
+    wp3 = _post(client, h, "work_plans", {"date": "2026-10-10", "project_id": p["id"], "pbd_id": pbd["id"], "activities": acts,
+                                          "weeks": [{"week": 1, "realised": 9_000_000, "actual_pct": 20}]})
+    # PV = EV = 50 M × 20 % = 10 M; CPI = 10 / 9 = 1.111; SPI = 1.
+    assert wp3["bac_source"] == "pbd" and wp3["ev"] == 10_000_000 and wp3["cpi"] == 1.111 and wp3["spi"] == 1.0
+    wp4 = _post(client, h, "work_plans", {"date": "2026-10-10", "project_id": p["id"], "activities": acts,
+                                          "weeks": [{"week": 1, "realised": 9_000_000, "actual_pct": 20}]})
+    assert wp4["cpi"] is None and wp4["bac"] is None and any("earned value" in x["text"] for x in wp4["checks"])
     bad = client.post("/api/records/work_plans", json={"date": "2026-10-10", "project_id": p["id"],
                                                          "activities": [{"activity": "x", "start_week": 3, "end_week": 2}]}, headers=h)
     assert bad.status_code == 422
@@ -332,6 +357,9 @@ def test_receivables_card_and_overview(client, people):
     assert ar["totals"]["invoiced"] == 5 * 11_100_000 and ar["totals"]["paid"] == 2 * 10_900_000
     assert [x["id"] for x in ar["npar"]] == [cc["id"]] and ar["npar"][0]["owner"] == "npar" and ar["npar"][0]["days_since_invoice"] == 147
     assert {x["id"]: x["owner"] for x in ar["invoices"]}[b["id"]] == "commercial"
+    # Indicative ECL with the example rates: not due 1 % × 10.9 M = 109,000; 56 days overdue 5 % = 545,000;
+    # 117 days overdue (91–180) 25 % = 2,725,000 → 3,379,000 = 10.33 % of 32.7 M.
+    assert ar["totals"]["ecl"] == 3_379_000 and ar["ecl"]["coverage_pct"] == 10.33
 
     # Collection note by a manager (who cannot edit invoices otherwise).
     res = client.post(f"/api/erp/commercial/invoices/{cc['id']}/collection-notes",
@@ -369,6 +397,9 @@ def test_receivables_card_and_overview(client, people):
     assert ov["receivables"]["npar"] == 10_900_000 and len(ov["npar"]) == 1
     plan = ov["projects_budget"][0]
     assert plan["pbd_budget"] == 50_000_000 and plan["realised"] == 20_000_000 and plan["planned_pct"] == 50 and plan["actual_pct"] == 40
+    # BAC 50 M, PV 25 M, EV 20 M, AC 20 M → CPI 1.0, SPI 0.8; EAC = BAC.
+    assert (plan["cpi"], plan["spi"], plan["eac"], plan["vac"]) == (1.0, 0.8, 50_000_000, 0)
+    assert ov["ecl"]["total"] == 3_379_000 and ov["receivables"]["ecl"] == 3_379_000 and ov["evm_warning_index"] == 0.9
     assert ov["clients_by_province"] == [{"key": "JT", "clients": 1, "projects": 1, "contract_value": 111_000_000,
                                           "label": "Jawa Tengah", "zone": "C"}]
     assert {r["key"] for r in ov["clients_by_service"]} == {"geotechnical", "laboratory"}
@@ -383,14 +414,21 @@ def test_pricing_config_defaults_and_settings(client, people):
     cfg = client.get("/api/erp/commercial/config", headers=people["mgr"]).json()
     assert cfg["factors_source"] == "default" and len(cfg["factors"]) == 16 and cfg["max_cost_ratio_pct"] == 75
     assert [x["premium_pct"] for x in cfg["premiums"]] == [5, 8, 11, 14, 17] and cfg["province_zone"]["BT"] == "A"
+    assert cfg["ecl_source"] == "default" and [x["rate_pct"] for x in cfg["ecl_rates"]] == [1, 2, 5, 10, 25, 50, 100]
+    assert cfg["evm_warning_index"] == 0.9 and cfg["ahsp_indirect_pct"] == [10, 15] and cfg["consultancy_direct_max_pct"] == 40
     _post(client, people["admin"], "settings", {
         "company_name": "Perusahaan Uji", "max_cost_ratio_pct": 65, "default_margin_pct": 25,
+        "evm_warning_index": 0.85, "ecl_rates": [{"bucket": "over_360", "rate_pct": 80}],
         "difficulty_factors": [{"key": "zone", "factor": "Region zone", "weight": 1}, {"factor": "Access", "weight": 1}],
         "risk_premium_table": [{"index": 1, "premium_pct": 4}],
         "approval_limits": [{"up_to": 1_000_000, "level": "Manager"}, {"level": "Director"}]}, status=201)
     cfg = client.get("/api/erp/commercial/config", headers=people["mgr"]).json()
     assert cfg["factors_source"] == "settings" and [f["key"] for f in cfg["factors"]] == ["zone", "access"]
     assert cfg["premiums"][0]["premium_pct"] == 4 and cfg["default_margin_pct"] == 25
+    assert cfg["evm_warning_index"] == 0.85 and cfg["ecl_source"] == "settings" and cfg["ecl_rates"][-1]["rate_pct"] == 80
+    bad = client.put("/api/records/settings/" + client.get("/api/records/settings", headers=people["admin"]).json()[0]["id"],
+                     json={"company_name": "Perusahaan Uji", "evm_warning_index": 1.5}, headers=people["admin"])
+    assert bad.status_code == 422  # the threshold is an index between 0.5 and 1
     _, p, rate = _base(client, people["mgr"])
     # Zone C scores 1, access 1 → index 1 → 4 %; margin 25 % by default; bid above 1 M → "Director".
     pbd = _post(client, people["mgr"], "pbd", {"date": "2026-10-01", "project_id": p["id"], "difficulty": [{"key": "access", "score": 1}],
@@ -412,3 +450,79 @@ def test_contract_values_and_gantt_rounding():
     weeks = calc.weeks_from_gantt([{"activity": "x", "start_week": 1, "end_week": 3, "weight_pct": 100}], 1_000_000)
     assert [w["planned_pct"] for w in weeks] == [33.33, 33.33, 33.34]
     assert [w["budget_plan"] for w in weeks] == [333_333, 333_333, 333_334]
+
+
+def test_earned_value_bands_and_edge_cases():
+    # CPI = SPI = 47 / 50 = 0.94: between 0.90 and 0.95 → only "watch" remarks.
+    # EAC = 100 M × 50 / 47 = 106,382,978.7 → 106,382,979; TCPI = 53 / 50 = 1.06 (not above 1.10).
+    out = calc.earned_value(100_000_000, 50, 47, 50_000_000)
+    assert out["cpi"] == 0.94 and out["spi"] == 0.94 and out["eac"] == 106_382_979 and out["vac"] == -6_382_979 and out["tcpi"] == 1.06
+    assert [c["level"] for c in out["checks"]] == ["info", "info"]
+    # A company threshold of 0.80 turns the 0.806 CPI of the work plan test into a "watch" remark.
+    out = calc.earned_value(50_000_000, 60, 50, 31_000_000, warning_index=0.80)
+    assert [c["level"] for c in out["checks"] if c["vars"].get("index") == "CPI"] == ["info"]
+    # Budget used up with 40 % of the work left: TCPI cannot be met (BAC − AC = 0).
+    out = calc.earned_value(10_000_000, 80, 60, 10_000_000)
+    assert out["tcpi"] is None and out["eac"] == 16_666_667 and any(c["level"] == "error" for c in out["checks"])  # 10 M / 0.6
+    # No cost reported yet: no CPI and no EAC; TCPI = (100 − 30) / 100 = 0.7.
+    out = calc.earned_value(100_000_000, 30, 30, 0)
+    assert out["cpi"] is None and out["eac"] is None and out["spi"] == 1.0 and out["tcpi"] == 0.7 and out["checks"] == []
+
+
+def test_pbd_government_cost_reference(client, people):
+    h = people["mgr"]
+    _, p, rate = _base(client, h)
+    # AHSP: risk 11 % + margin 30 % = 41 % of the ABP, above the 10–15 % of Permen PUPR 8/2023 Art. 11(3).
+    pbd = _post(client, h, "pbd", _pbd_data(p, rate, cost_reference="ahsp"))
+    assert pbd["indirect_pct"] == 41 and pbd["bid_price"] == 70_500_000
+    assert any(x["level"] == "warn" and "Art. 11(3)" in x["text"] for x in pbd["checks"])
+    values = {v["label"]: v["value"] for v in pbd["result"]["values"]}
+    assert values["ABP + 15% indirect cost (AHSP reference)"] == 57_500_000  # 50 M × 1.15
+    # 0 % + 12 % sits inside the range: no remark; 0 % + 8 % is below it.
+    ok = _post(client, h, "pbd", _pbd_data(p, rate, cost_reference="ahsp", risk_pct_override=0, margin_pct=12))
+    assert ok["indirect_pct"] == 12 and not any("Art. 11(3)" in x["text"] for x in ok["checks"])
+    low = _post(client, h, "pbd", _pbd_data(p, rate, cost_reference="ahsp", risk_pct_override=0, margin_pct=8))
+    assert any(x["level"] == "info" and "below the 10–15%" in x["text"] for x in low["checks"])
+    # Consultancy without personnel lines: non-personnel = 50 M / 70.5 M = 70.92 % of the bid.
+    cons = _post(client, h, "pbd", _pbd_data(p, rate, cost_reference="consultancy"))
+    texts = [x["text"] for x in cons["checks"]]
+    assert any("personnel (labour) lines" in t for t in texts) and any("INKINDO 2025" in t for t in texts)
+    assert {v["label"]: v["value"] for v in cons["result"]["values"]}["Non-personnel cost (% of the bid price)"] == 70.92
+    # Personnel 30 M + equipment 10 M, margin 50 %: bid 60 M, non-personnel 10 / 60 = 16.67 % → no remark.
+    cons2 = _post(client, h, "pbd", {"date": "2026-10-01", "project_id": p["id"], "cost_reference": "consultancy",
+                                     "risk_pct_override": 0, "margin_pct": 50, "costs": [
+                                         {"section": "labour", "description": "Geotechnical engineer", "qty": 3, "unit_cost": 10_000_000},
+                                         {"section": "equipment", "description": "Rig rental", "qty": 1, "unit_cost": 10_000_000}]})
+    assert cons2["bid_price"] == 60_000_000 and not any("INKINDO" in x["text"] for x in cons2["checks"])
+    assert {v["label"]: v["value"] for v in cons2["result"]["values"]}["Non-personnel cost (% of the bid price)"] == 16.67
+    # A government client without a reference gets a reminder; a private client does not.
+    gov = _post(client, h, "clients", {"name": "Dinas Uji", "type": "government"})
+    gp = _post(client, h, "projects", {"code": "P-G", "name": "Proyek Pemerintah", "client_id": gov["id"], "status": "tender"})
+    g = _post(client, h, "pbd", _pbd_data(gp, rate))
+    assert any("Government client" in x["text"] for x in g["checks"])
+    assert not any("Government client" in x["text"] for x in pbd["checks"])
+
+
+def test_expected_credit_loss_provision_matrix():
+    projects = [{"id": "p", "client_id": "c", "name": "P"}]
+    clients = [{"id": "c", "name": "C"}]
+
+    def inv(i, issued, due, amount):
+        return {"id": i, "number": i, "project_id": "p", "status": "sent", "date": issued, "due_date": due,
+                "total": amount, "paid": 0, "outstanding": amount}
+
+    invoices = [inv("a", "2026-10-01", "2026-10-31", 10_000_000),   # not yet due on 26 Oct
+                inv("b", "2026-08-01", "2026-09-15", 10_000_000),   # 41 days overdue
+                inv("c", "2026-03-01", "2026-04-01", 10_000_000),   # 208 days overdue
+                inv("d", "2025-01-01", "2025-02-01", 4_000_000)]    # 632 days overdue
+    ar = calc.receivables(invoices, projects, clients, None, "2026-10-26")
+    # Example rates: 1 % × 10 M + 5 % × 10 M + 50 % × 10 M + 100 % × 4 M = 0.1 + 0.5 + 5 + 4 = 9.6 M of 34 M (28.24 %).
+    by = {b["key"]: (b["amount"], b["rate_pct"], b["ecl"]) for b in ar["ecl"]["buckets"]}
+    assert by["current"] == (10_000_000, 1.0, 100_000) and by["d31_60"] == (10_000_000, 5.0, 500_000)
+    assert by["d181_360"] == (10_000_000, 50.0, 5_000_000) and by["over_360"] == (4_000_000, 100.0, 4_000_000)
+    assert ar["ecl"]["total"] == 9_600_000 and ar["totals"]["ecl"] == 9_600_000 and ar["ecl"]["coverage_pct"] == 28.24
+    assert ar["ecl"]["source"] == "default" and ar["by_client"][0]["ecl"] == 9_600_000
+    # Finance sets its own rate for 181–360 days: 40 % → 4 M instead of 5 M.
+    ar = calc.receivables(invoices, projects, clients, {"ecl_rates": [{"bucket": "d181_360", "rate_pct": 40}]}, "2026-10-26")
+    assert ar["ecl"]["total"] == 8_600_000 and ar["ecl"]["source"] == "settings"
+    assert {r["id"]: r["ecl"] for r in ar["invoices"]} == {"a": 100_000, "b": 500_000, "c": 4_000_000, "d": 4_000_000}

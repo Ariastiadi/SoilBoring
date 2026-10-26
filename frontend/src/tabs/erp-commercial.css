@@ -32,6 +32,14 @@
 .ec-scale button:disabled:not([aria-pressed=true]) { color: var(--none); background: var(--paper); }
 .ec-level { margin: 0; }
 
+/* Earned value */
+.ec-evm { margin: 0 0 1rem; }
+.ec-evm .kpis { margin: 0; }
+
+/* Expected credit loss */
+.ec-ecl { margin: 0 0 1rem; }
+.ec-ecl tfoot th { border-top: 2px solid var(--line); }
+
 /* Price preview */
 .ec-preview { margin: 1rem 0; }
 .ec-preview .kpis { margin-bottom: .5rem; }

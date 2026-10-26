@@ -6,9 +6,13 @@
   priced at the unit cost (HPJ) of the price list, risk premium and margin on the ABP, bid price,
   minimum client price, ratio ABP / revenue.
 * Conversion to client rates (A.1.5): quotation items from an approved PBD.
-* Client decision (A.1.2), weekly work plan and budget drawdown (A.1.6), bank guarantees and
-  SKBDN (A.1.9), client card, receivable aging and NPAR (A.1.10–A.1.12), commercial overview
-  for the management dashboard (A.1.14).
+* PBD check against the government cost references: AHSP indirect cost of 10–15% (Permen PUPR
+  8/2023 Art. 11(3)) and the consultancy direct-cost guide of 40% (INKINDO 2025).
+* Client decision (A.1.2), weekly work plan and budget drawdown (A.1.6) with earned value
+  management (PMI / ANSI-EIA-748: PV, EV, AC, CV, SV, CPI, SPI, EAC, ETC, VAC, TCPI), bank
+  guarantees and SKBDN (A.1.9), client card, receivable aging, NPAR and an indicative expected
+  credit loss by days past due (PSAK 109 simplified approach) (A.1.10–A.1.12), commercial
+  overview for the management dashboard (A.1.14).
 
 The functions work on plain records (dicts) and never read the store themselves: the hooks in
 entities_commercial.py and the router pass in what they need. Labels are English; the
@@ -125,9 +129,61 @@ DEFAULT_APPROVAL_LIMITS: List[Tuple[Optional[float], str]] = [
 
 DEFAULT_MAX_COST_RATIO = 75.0   # ABP / project revenue, %
 DEFAULT_MARGIN = 30.0           # % of the ABP
+# NPAR: company rule, days since the invoice date. For comparison, banks classify loans by days
+# past due (POJK 40/POJK.03/2019: Dalam Perhatian Khusus 1–90, Kurang Lancar 91–120, Diragukan
+# 121–180, Macet > 180 days), and PSAK 109 / IFRS 9 presumes default after 90 days past due. Those
+# rules are for banks and financial reporting; this one only decides who handles the collection.
 DEFAULT_NPAR_DAYS = 90          # days since the invoice date
 DEFAULT_PAYMENT_DAYS = 30       # due date when an invoice has none
 DEFAULT_GUARANTEE_WARNING_DAYS = 30
+
+# --- Earned value management (weekly work plan) -----------------------------------------------
+# Formulas as in the PMI Practice Standard for Earned Value Management and the US DOE "EVMS Gold
+# Card" (energy.gov, 10 Jul 2019: CV = EV − AC, SV = EV − PV, CPI = EV / AC, SPI = EV / PV,
+# EAC = BAC / CPI, VAC = BAC − EAC, "favorable is > 1.0, unfavorable is < 1.0"); TCPI = (BAC − EV)
+# ÷ (BAC − AC) as in "TCPI: the tower of power" (PMI Global Congress 2012 paper). ANSI/EIA-748
+# asks for the variances (guideline 22), their analysis (23) and a maintained EAC (27); it does
+# not fix thresholds. The tolerance band below follows the one a US federal programme dashboard
+# publishes (FEMA MIP: green 0.95–1.05, yellow 0.90–0.95, red below 0.90); the company sets its own.
+DEFAULT_EVM_WARNING_INDEX = 0.90   # CPI or SPI below this: warning (company setting)
+EVM_WATCH_INDEX = 0.95             # CPI or SPI below this: to watch
+
+# --- Government cost references for the PBD -----------------------------------------------------
+# Permen PUPR No. 8 Tahun 2023 (Pedoman Penyusunan Perkiraan Biaya Pekerjaan Konstruksi Bidang
+# PUPR; BN 2023 No. 683; revokes Permen PUPR No. 1 Tahun 2022, Art. 25), Art. 11(1): indirect cost
+# = Biaya Umum + keuntungan; Art. 11(3): "dihitung sebesar 10% (sepuluh persen) hingga 15% (lima
+# belas persen) dari biaya langsung". Art. 2: binding for estimates financed from state finances,
+# a reference otherwise. Applied through SE Dirjen Bina Konstruksi No. 47/SE/Dk/2026 (AHSP tables,
+# Lampiran IV–VI), which replaced SE No. 182/SE/Dk/2025.
+# https://peraturan.go.id/files/permen-pupr-no-8-tahun-2023.pdf
+AHSP_INDIRECT_MIN_PCT = 10.0
+AHSP_INDIRECT_MAX_PCT = 15.0
+# INKINDO, Pedoman Standar Minimal Tahun 2025 (Keputusan DPN No. 05/SK.DPN/I/2025), section II.6:
+# estimated direct (non-personnel) cost "tidak lebih dari 40% dari total biaya" (contract value
+# excl. VAT) for most kinds of work, except survey, measurement and mapping work where direct cost
+# dominates; it cites Peraturan LKPP No. 12 Tahun 2021. Section I: billing rate REM = GD + BBS +
+# BBU + K (basic salary, social charges, overhead, profit). Expert pay must not be below Kepmen PU
+# No. 33/KPTS/M/2025 (minimum remuneration for experts in construction consultancy).
+CONSULTANCY_DIRECT_MAX_PCT = 40.0
+COST_REFERENCES: List[Tuple[str, str]] = [
+    ("ahsp", "Government construction work: AHSP (Permen PUPR 8/2023)"),
+    ("consultancy", "Government consultancy: billing rates and direct cost (INKINDO, LKPP)"),
+]
+
+# --- Expected credit loss on client receivables --------------------------------------------------
+# PSAK 109 (renumbered from PSAK 71 on 1 January 2024; IFRS 9) para. 5.5.15: for trade receivables
+# the loss allowance is always lifetime expected credit loss (simplified approach); a provision
+# matrix by days past due is the usual practical way to measure it. The rates below are EXAMPLES
+# only; finance sets them from the company's own loss history adjusted for current and forward-
+# looking conditions (para. 5.5.17). Entities on SAK Entitas Privat (from 1 January 2025, based on
+# IFRS for SMEs 2015) measure impairment differently; the figure is then for management only.
+ECL_BUCKETS: List[Tuple[str, str]] = [
+    ("current", "Not yet due"), ("d1_30", "1–30 days overdue"), ("d31_60", "31–60 days overdue"),
+    ("d61_90", "61–90 days overdue"), ("d91_180", "91–180 days overdue"), ("d181_360", "181–360 days overdue"),
+    ("over_360", "More than 360 days overdue"),
+]
+DEFAULT_ECL_RATES: Dict[str, float] = {"current": 1.0, "d1_30": 2.0, "d31_60": 5.0, "d61_90": 10.0, "d91_180": 25.0,
+                                       "d181_360": 50.0, "over_360": 100.0}
 
 SECTIONS: List[Tuple[str, str]] = [
     ("work", "Work items (price list)"), ("pre_project", "Pre-project (solicitation) cost"), ("labour", "Labour"),
@@ -214,6 +270,17 @@ def approval_limits(settings: Optional[Rec]) -> List[Tuple[Optional[float], str]
     return sorted([x for x in limits if x[0] is not None], key=lambda x: x[0] or 0) + [x for x in limits if x[0] is None]
 
 
+def ecl_rates(settings: Optional[Rec]) -> Dict[str, float]:
+    """Loss rates (%) by days past due: the company settings over the example defaults."""
+    rates = dict(DEFAULT_ECL_RATES)
+    keys = {k for k, _ in ECL_BUCKETS}
+    for r in (settings or {}).get("ecl_rates") or []:
+        rate = num(r.get("rate_pct"))
+        if r.get("bucket") in keys and rate is not None:
+            rates[str(r["bucket"])] = max(0.0, min(100.0, rate))
+    return rates
+
+
 def config(settings: Optional[Rec]) -> Rec:
     s = settings or {}
 
@@ -221,6 +288,7 @@ def config(settings: Optional[Rec]) -> Rec:
         v = num(s.get(name))
         return default if v is None else v
 
+    ecl = ecl_rates(s)
     return {
         "factors": effective_factors(s),
         "factors_source": "settings" if any(str(r.get("factor") or "").strip() for r in s.get("difficulty_factors") or []) else "default",
@@ -232,6 +300,13 @@ def config(settings: Optional[Rec]) -> Rec:
         "npar_days": int(value("npar_days", DEFAULT_NPAR_DAYS)),
         "payment_days": int(value("default_payment_days", DEFAULT_PAYMENT_DAYS)),
         "guarantee_warning_days": int(value("guarantee_warning_days", DEFAULT_GUARANTEE_WARNING_DAYS)),
+        "evm_warning_index": value("evm_warning_index", DEFAULT_EVM_WARNING_INDEX),
+        "evm_watch_index": EVM_WATCH_INDEX,
+        "ecl_rates": [{"key": k, "label": label, "rate_pct": ecl[k]} for k, label in ECL_BUCKETS],
+        "ecl_source": "settings" if any(r.get("bucket") and num(r.get("rate_pct")) is not None for r in s.get("ecl_rates") or [])
+        else "default",
+        "ahsp_indirect_pct": [AHSP_INDIRECT_MIN_PCT, AHSP_INDIRECT_MAX_PCT],
+        "consultancy_direct_max_pct": CONSULTANCY_DIRECT_MAX_PCT,
         "zones": [{"zone": z[0], "no": z[1], "provinces": z[2], "index": z[3], "codes": list(z[4])} for z in ZONES],
         "province_zone": dict(PROVINCE_ZONE),
         "provinces": [list(p) for p in PROVINCES],
@@ -293,7 +368,53 @@ def _units(row: Rec) -> float:
     return (num(row.get("qty")) or 0.0) * (days if days is not None else 1.0)
 
 
-def pbd_compute(record: Rec, rates: Dict[str, Rec], settings: Optional[Rec], project: Optional[Rec]) -> None:
+def government_reference(record: Rec, abp: float, markup: float, bid: float, labour: float,
+                         client: Optional[Rec]) -> Tuple[List[Rec], List[Tuple[str, Any, str]], List[str]]:
+    """Checks, result values and notes of the PBD against the government cost references.
+
+    * AHSP (construction work, Permen PUPR 8/2023 Art. 11(3)): the owner's estimate (HPS) adds an
+      indirect cost (overhead + profit) of 10–15% to the direct cost. Here risk premium + margin
+      are compared with that range as a percentage of the ABP. The ABP also holds costs that AHSP
+      would count as overhead (pre-project, accommodation …), so the real markup is, if anything,
+      higher than shown.
+    * Consultancy (INKINDO 2025 section II.6 after LKPP Reg. 12/2021): direct (non-personnel) cost
+      normally at most 40% of the contract value excl. VAT; survey, measurement and mapping work
+      is an exception. Personnel = the labour lines; the markup is taken as loaded on them."""
+    checks: List[Rec] = []
+    values: List[Tuple[str, Any, str]] = []
+    notes: List[str] = []
+    ref = record.get("cost_reference") or ""
+    indirect = pct(markup, abp) if abp else None
+    if ref == "ahsp":
+        values.append(("Risk premium and margin (% of the ABP)", indirect, "%"))
+        values.append(("ABP + 15% indirect cost (AHSP reference)", idr(abp * (1 + AHSP_INDIRECT_MAX_PCT / 100)) if abp else None, "Rp"))
+        if indirect is not None and indirect > AHSP_INDIRECT_MAX_PCT:
+            checks.append(check("warn", "Risk premium and margin come to {pct}% of the ABP, above the 10–15% indirect cost (overhead and profit) "
+                                        "on direct cost that owner's estimates use under Permen PUPR 8/2023 Art. 11(3): the bid may exceed the HPS.",
+                                pct=indirect))
+        elif indirect is not None and indirect < AHSP_INDIRECT_MIN_PCT:
+            checks.append(check("info", "Risk premium and margin come to {pct}% of the ABP, below the 10–15% indirect cost of Permen PUPR 8/2023 Art. 11(3).",
+                                pct=indirect))
+        notes.append("AHSP reference: Permen PUPR 8/2023 Art. 11(3) sets indirect cost (overhead and profit) at 10–15% of the direct cost "
+                     "for owner's estimates of construction work financed by the state; the ABP here also holds costs AHSP counts as overhead.")
+    elif ref == "consultancy":
+        share = pct(abp - labour, bid) if bid else None
+        values.append(("Non-personnel cost (% of the bid price)", share, "%"))
+        if not labour:
+            checks.append(check("info", "Add the personnel (labour) lines: consultancy prices are built from personnel billing rates and direct costs."))
+        if share is not None and share > CONSULTANCY_DIRECT_MAX_PCT:
+            checks.append(check("info", "Non-personnel cost is {pct}% of the bid price. Consultancy guidance (INKINDO 2025, after LKPP Reg. 12/2021) "
+                                        "expects at most 40% for most work, except survey, measurement and mapping work where direct cost dominates: "
+                                        "explain the share in the proposal.", pct=share))
+        notes.append("Consultancy reference: billing rate = basic salary + social charges + overhead + profit (INKINDO 2025); "
+                     "expert pay not below Kepmen PU 33/KPTS/M/2025; direct cost normally at most 40% of the contract value excl. VAT.")
+    elif (client or {}).get("type") == "government":
+        checks.append(check("info", "Government client: choose the government cost reference to check the price against the AHSP or consultancy rules."))
+    return checks, values, notes
+
+
+def pbd_compute(record: Rec, rates: Dict[str, Rec], settings: Optional[Rec], project: Optional[Rec],
+                client: Optional[Rec] = None) -> None:
     cfg = config(settings)
     if project:
         record["client_id"] = project.get("client_id") or ""
@@ -387,6 +508,10 @@ def pbd_compute(record: Rec, rates: Dict[str, Rec], settings: Optional[Rec], pro
         checks.append(check("info", "No mobilisation or demobilisation line: the quotation must state that it is excluded."))
     if not num(record.get("duration_weeks")):
         checks.append(check("info", "Enter the duration in weeks; the weekly work plan is checked against it."))
+    gov_checks, gov_values, gov_notes = government_reference(record, abp_i, risk_amount + margin_amount, bid,
+                                                             groups.get("labour", 0.0), client)
+    checks += gov_checks
+    record["indirect_pct"] = pct(risk_amount + margin_amount, abp_i) if abp_i else None
     record["checks"] = checks
 
     group_rows = [[label, idr(groups[key]), pct(groups[key], abp) or 0.0] for key, label in SECTIONS if key in groups]
@@ -409,7 +534,7 @@ def pbd_compute(record: Rec, rates: Dict[str, Rec], settings: Optional[Rec], pro
                 ("Bid price incl. VAT", idr(bid + vat), "Rp"), ("Minimum client price", idr(min_price), "Rp"),
                 ("Price-list value of the work items", idr(list_value) if list_value else None, "Rp"),
                 ("Difficulty score (weighted average)", diff["score"], ""),
-                ("Duration (weeks)", num(record.get("duration_weeks")), "")],
+                ("Duration (weeks)", num(record.get("duration_weeks")), "")] + gov_values,
         tables=[
             table("Price build-up", ["Item", "Rate (%)", "Amount (IDR)"], build),
             table("Cost budget by group", ["Cost group", "Amount (IDR)", "Share (%)"], group_rows),
@@ -422,7 +547,7 @@ def pbd_compute(record: Rec, rates: Dict[str, Rec], settings: Optional[Rec], pro
             "Risk premium and margin are percentages of the ABP; bid price = ABP + risk premium + margin, rounded up.",
             "Minimum client price = lines from the price list at their minimum selling price, other lines at cost.",
             "Difficulty index = weighted average of the factor scores, rounded half up; the region zone scores itself.",
-        ],
+        ] + gov_notes,
         method="Pricing & Budgeting Decision (blueprint A.1.1, A.1.3, A.1.4)",
     )
 
@@ -527,6 +652,56 @@ def client_decision_compute(record: Rec, pbd: Optional[Rec], project: Optional[R
 # A.1.6 Weekly work plan and budget drawdown
 # --------------------------------------------------------------------------- #
 
+def _ratio(a: float, b: float) -> Optional[float]:
+    return round(a / b, 3) if b > 0 else None
+
+
+def earned_value(bac: float, planned_pct: float, actual_pct: float, ac: float, warning_index: float = DEFAULT_EVM_WARNING_INDEX) -> Rec:
+    """Earned value figures at the reporting week (PMI / ANSI-EIA-748 terms, IDR).
+
+    BAC = budget at completion; PV = BAC × planned progress to date; EV = BAC × actual progress to
+    date (physical % complete, weighted like the plan); AC = realised cost to date.
+    CV = EV − AC, SV = EV − PV, CPI = EV / AC, SPI = EV / PV, EAC = BAC / CPI (the current cost
+    efficiency continues), ETC = EAC − AC, VAC = BAC − EAC, TCPI = (BAC − EV) / (BAC − AC) (the cost
+    efficiency the remaining work needs to finish within the BAC). Also EAC = AC + (BAC − EV) for a
+    one-off overrun and EAC = AC + (BAC − EV) / (CPI × SPI) when the schedule pressure persists."""
+    pv, ev = bac * planned_pct / 100, bac * actual_pct / 100
+    cpi, spi = _ratio(ev, ac), _ratio(ev, pv)
+    eac = bac / (ev / ac) if ac > 0 and ev > 0 else None
+    out: Rec = {
+        "bac": idr(bac), "pv": idr(pv), "ev": idr(ev), "ac": idr(ac), "cv": idr(ev - ac), "sv": idr(ev - pv),
+        "cpi": cpi, "spi": spi, "eac": idr(eac) if eac is not None else None,
+        "etc": idr(eac - ac) if eac is not None else None, "vac": idr(bac - eac) if eac is not None else None,
+        "eac_atypical": idr(ac + bac - ev),
+        "eac_composite": idr(ac + (bac - ev) / ((ev / ac) * (ev / pv))) if ac > 0 and ev > 0 and pv > 0 else None,
+        "tcpi": _ratio(bac - ev, bac - ac),
+        "pct_complete": round(actual_pct, 2), "pct_spent": pct(ac, bac) if bac else None,
+    }
+    checks: List[Rec] = []
+    for key, name in (("cpi", "CPI"), ("spi", "SPI")):
+        value = out[key]
+        if value is None:
+            continue
+        if value < warning_index:
+            checks.append(check("warn", "{index} {value} is below {limit}." if key == "spi" else
+                                "{index} {value} is below {limit}: each rupiah spent earned {value} rupiah of budgeted work.",
+                                index=name, value=value, limit=warning_index))
+        elif value < EVM_WATCH_INDEX:
+            checks.append(check("info", "{index} {value} is between {limit} and {watch}: watch it.",
+                                index=name, value=value, limit=warning_index, watch=EVM_WATCH_INDEX))
+    if out["vac"] is not None and out["vac"] < 0 and out["cpi"] is not None and out["cpi"] < warning_index:
+        checks.append(check("warn", "At this cost efficiency the work will cost {eac_idr} (EAC = BAC / CPI), {over_idr} over the budget.",
+                            eac_idr=out["eac"], over_idr=-out["vac"]))
+    if ev < bac - 0.5 and bac - ac <= 0:
+        checks.append(check("error", "The realised cost has used up the budget (BAC) with {left}% of the work still to do.",
+                            left=round(100 - actual_pct, 2)))
+    elif out["tcpi"] is not None and out["tcpi"] > 2 - warning_index:
+        checks.append(check("warn", "TCPI {value}: the remaining work must be done {pct}% more cost-efficiently than planned to stay within the budget.",
+                            value=out["tcpi"], pct=round((out["tcpi"] - 1) * 100, 1)))
+    out["checks"] = checks
+    return out
+
+
 def work_plan_compute(record: Rec, pbd: Optional[Rec], settings: Optional[Rec]) -> None:
     cfg = config(settings)
     acts = [a for a in record.get("activities") or [] if num(a.get("start_week")) is not None]
@@ -595,6 +770,18 @@ def work_plan_compute(record: Rec, pbd: Optional[Rec], settings: Optional[Rec]) 
         checks.append(check("warn", "The projected cost ratio ABP/revenue of {ratio}% is above the company maximum of {max}%.",
                             ratio=ratio, max=cfg["max_cost_ratio_pct"]))
 
+    # Earned value: BAC is the weekly budget plan, or the PBD budget while no weekly budget is entered.
+    bac = float(total_plan) if total_plan > 0 else (pbd_budget or 0.0)
+    bac_source = "plan" if total_plan > 0 else "pbd" if bac > 0 else ""
+    evm = earned_value(bac, planned_to_date, actual_to_date, cum(realised, last), cfg["evm_warning_index"]) if last and bac > 0 else None
+    if evm:
+        checks += evm["checks"]
+    elif last:
+        checks.append(check("info", "Enter the weekly budget plan, or link the PBD, to calculate the earned value."))
+    for key in EVM_FIELDS:
+        record[key] = (evm or {}).get(key)
+    record["bac_source"] = bac_source if evm else None
+
     record.update({
         "duration_weeks": n or None, "pbd_budget": pbd_budget, "pbd_weeks": pbd_weeks, "revenue": revenue,
         "total_plan": float(total_plan), "total_drawdown": float(total_draw), "total_realised": float(total_real),
@@ -607,6 +794,7 @@ def work_plan_compute(record: Rec, pbd: Optional[Rec], settings: Optional[Rec]) 
     cp = ca = cb = cr = 0.0
     s_plan, s_act, s_budget, s_draw, s_real = [(0.0, 0.0)], [(0.0, 0.0)], [(0.0, 0.0)], [(0.0, 0.0)], [(0.0, 0.0)]
     cd = 0.0
+    s_pv, s_ev, s_ac = [(0.0, 0.0)], [(0.0, 0.0)], [(0.0, 0.0)]
     for k in range(1, n + 1):
         cp += planned[k]
         cb += budget[k]
@@ -614,11 +802,14 @@ def work_plan_compute(record: Rec, pbd: Optional[Rec], settings: Optional[Rec]) 
         s_plan.append((k, cp))
         s_budget.append((k, cb / 1e6))
         s_draw.append((k, cd / 1e6))
+        s_pv.append((k, bac * cp / 100 / 1e6))
         if k <= last:
             ca += actual[k] or 0.0
             cr += realised[k]
             s_act.append((k, ca))
             s_real.append((k, cr / 1e6))
+            s_ev.append((k, bac * ca / 100 / 1e6))
+            s_ac.append((k, cr / 1e6))
         table_rows.append([k, (start + timedelta(days=7 * (k - 1))).isoformat() if start else "", round(planned[k], 2), round(cp, 2),
                            actual[k], round(ca, 2) if k <= last else None, idr(budget[k]), idr(cb), idr(drawdown[k]),
                            idr(realised[k]) if k <= last else None, idr(cr) if k <= last else None,
@@ -640,18 +831,50 @@ def work_plan_compute(record: Rec, pbd: Optional[Rec], settings: Optional[Rec]) 
                    "Realised, cumulative (IDR)", "Notes"], table_rows,
                   key=["Week", "Planned, cumulative (%)", "Actual, cumulative (%)", "Realised cost (IDR)"], note="Notes"),
             table("Activities (Gantt)", ["Activity", "Start week", "End week", "Weight (%)", "Done (%)"], gantt),
-        ],
+        ] + ([evm_table(evm, last, bac_source)] if evm else []),
         charts=[c for c in [
             chart("S-curve: planned and actual progress", axis("Week"), axis("Cumulative progress (%)"),
                   series("Planned", s_plan, "line"), series("Actual", s_act if last else [], "both")),
             chart("Budget and realisation", axis("Week"), axis("Cumulative cost (IDR million)"),
                   series("Budget plan", s_budget, "line"), series("Drawdown requested", s_draw if total_draw else [], "line", dash=True),
                   series("Realised cost", s_real if last else [], "both")),
-        ] if n],
+        ] if n] + ([chart("Earned value: PV, EV and AC", axis("Week"), axis("Cumulative (IDR million)"),
+                          series("Planned value (PV)", s_pv, "line"), series("Earned value (EV)", s_ev, "both"),
+                          series("Actual cost (AC)", s_ac, "both", dash=True))] if evm else []),
         notes=["Planned progress per week is taken from the weekly rows; when none is entered it is spread evenly over the weeks of each activity in the Gantt chart."
-               if plan_source == "gantt" else "Planned progress per week as entered in the weekly rows."],
-        method="Weekly work plan and budget drawdown (blueprint A.1.6)",
+               if plan_source == "gantt" else "Planned progress per week as entered in the weekly rows."] + (EVM_NOTES if evm else []),
+        method="Weekly work plan and budget drawdown (blueprint A.1.6); earned value management (PMI, ANSI/EIA-748)",
     )
+
+
+EVM_FIELDS = ("bac", "pv", "ev", "ac", "cv", "sv", "cpi", "spi", "eac", "etc", "vac", "tcpi")
+EVM_NOTES = [
+    "Earned value: PV = BAC × planned progress to date, EV = BAC × actual progress to date, AC = realised cost to date.",
+    "CPI = EV / AC and SPI = EV / PV: above 1 is favourable, below 1 unfavourable. EAC = BAC / CPI assumes the cost efficiency so far continues.",
+    "TCPI = (BAC − EV) / (BAC − AC): the cost efficiency the remaining work needs to finish within the budget.",
+]
+
+
+def evm_table(evm: Rec, week: int, bac_source: str) -> Dict[str, Any]:
+    rows: List[List[Any]] = [
+        ["Budget at completion (BAC)", evm["bac"], "IDR", "Weekly budget plan" if bac_source == "plan" else "PBD budget (ABP)"],
+        ["Planned value (PV)", evm["pv"], "IDR", "BAC × planned progress"],
+        ["Earned value (EV)", evm["ev"], "IDR", "BAC × actual progress"],
+        ["Actual cost (AC)", evm["ac"], "IDR", "Realised cost to date"],
+        ["Cost variance (CV)", evm["cv"], "IDR", "EV − AC"],
+        ["Schedule variance (SV)", evm["sv"], "IDR", "EV − PV"],
+        ["Cost performance index (CPI)", evm["cpi"], "", "EV / AC"],
+        ["Schedule performance index (SPI)", evm["spi"], "", "EV / PV"],
+        ["Estimate at completion (EAC)", evm["eac"], "IDR", "BAC / CPI"],
+        ["Estimate to complete (ETC)", evm["etc"], "IDR", "EAC − AC"],
+        ["Variance at completion (VAC)", evm["vac"], "IDR", "BAC − EAC"],
+        ["To-complete performance index (TCPI)", evm["tcpi"], "", "(BAC − EV) / (BAC − AC)"],
+        ["EAC if the overrun does not recur", evm["eac_atypical"], "IDR", "AC + (BAC − EV)"],
+        ["EAC with cost and schedule pressure", evm["eac_composite"], "IDR", "AC + (BAC − EV) / (CPI × SPI)"],
+    ]
+    rows.insert(0, ["Reporting week", week, "", ""])
+    return table("Earned value at the reporting week", ["Indicator", "Value", "Unit", "Formula"], rows,
+                 key=["Indicator", "Value"], note="Formula")
 
 
 def weeks_from_gantt(activities: List[Rec], budget: Optional[float]) -> List[Rec]:
@@ -753,6 +976,12 @@ def _overdue_bucket(days_past_due: int) -> str:
     return "d1_30" if days_past_due <= 30 else "d31_60" if days_past_due <= 60 else "d61_90" if days_past_due <= 90 else "over_90"
 
 
+def _ecl_bucket(days_past_due: int) -> str:
+    if days_past_due <= 90:
+        return _overdue_bucket(days_past_due)
+    return "d91_180" if days_past_due <= 180 else "d181_360" if days_past_due <= 360 else "over_360"
+
+
 def _age_bucket(days: int) -> str:
     return "lt30" if days < 30 else "d30_90" if days <= 90 else "d91_180" if days <= 180 else "d181_360" if days <= 360 else "over_360"
 
@@ -779,7 +1008,7 @@ def invoice_row(inv: Rec, today: date, cfg: Rec, project: Optional[Rec], client:
         "client": (client or {}).get("name") or "", "date": inv.get("date"), "due_date": due.isoformat(),
         "term": inv.get("term") or "", "total": num(inv.get("total")) or 0.0, "paid": num(inv.get("paid")) or 0.0,
         "outstanding": num(inv.get("outstanding")) or 0.0, "days_since_invoice": since, "days_past_due": max(0, past_due),
-        "bucket": _overdue_bucket(past_due), "age_bucket": _age_bucket(since),
+        "bucket": _overdue_bucket(past_due), "age_bucket": _age_bucket(since), "ecl_bucket": _ecl_bucket(past_due),
         "owner": "npar" if since > cfg["npar_days"] else "commercial", "last_note": notes[-1] if notes else None,
         "notes_count": len(notes),
     }
@@ -799,6 +1028,17 @@ def receivables(invoices: List[Rec], projects: List[Rec], clients: List[Rec], se
         p = proj.get(inv.get("project_id") or "")
         rows.append(invoice_row(inv, as_of, cfg, p, cli.get((p or {}).get("client_id") or "")))
     open_rows = [r for r in rows if r["outstanding"] > 0]
+    # Indicative expected credit loss (PSAK 109 simplified approach): outstanding × rate of its days-past-due band.
+    rates = ecl_rates(settings)
+    ecl_buckets: Dict[str, Rec] = {k: {"key": k, "label": label, "amount": 0.0, "count": 0, "rate_pct": rates[k], "ecl": 0.0}
+                                   for k, label in ECL_BUCKETS}
+    for r in open_rows:
+        r["ecl_rate_pct"] = rates[r["ecl_bucket"]]
+        r["ecl"] = float(idr(r["outstanding"] * rates[r["ecl_bucket"]] / 100))
+        slot = ecl_buckets[r["ecl_bucket"]]
+        slot["amount"] += r["outstanding"]
+        slot["count"] += 1
+        slot["ecl"] += r["ecl"]
     buckets: Dict[str, Rec] = {k: {"key": k, "label": label, "amount": 0.0, "count": 0} for k, label in AGING_BUCKETS}
     ages: Dict[str, Rec] = {k: {"key": k, "label": label, "amount": 0.0, "count": 0} for k, label in AGE_BUCKETS}
     per_client: Dict[str, Rec] = {}
@@ -807,19 +1047,24 @@ def receivables(invoices: List[Rec], projects: List[Rec], clients: List[Rec], se
             target[key]["amount"] += r["outstanding"]
             target[key]["count"] += 1
         c = per_client.setdefault(r["client_id"], {"client_id": r["client_id"], "client": r["client"], "outstanding": 0.0, "npar": 0.0,
-                                                   **{k: 0.0 for k, _ in AGING_BUCKETS}})
+                                                   "ecl": 0.0, **{k: 0.0 for k, _ in AGING_BUCKETS}})
         c["outstanding"] += r["outstanding"]
+        c["ecl"] += r["ecl"]
         c[r["bucket"]] += r["outstanding"]
         if r["owner"] == "npar":
             c["npar"] += r["outstanding"]
     open_rows.sort(key=lambda r: -r["days_since_invoice"])
     npar = [r for r in open_rows if r["owner"] == "npar"]
+    outstanding = sum(r["outstanding"] for r in open_rows)
+    ecl_total = sum(r["ecl"] for r in open_rows)
     return {
         "as_of": as_of.isoformat(), "npar_days": cfg["npar_days"],
         "totals": {"invoiced": sum(r["total"] for r in rows), "paid": sum(r["paid"] for r in rows),
-                   "outstanding": sum(r["outstanding"] for r in open_rows),
+                   "outstanding": outstanding,
                    "overdue": sum(r["outstanding"] for r in open_rows if r["bucket"] != "current"),
-                   "npar": sum(r["outstanding"] for r in npar), "open_invoices": len(open_rows)},
+                   "npar": sum(r["outstanding"] for r in npar), "open_invoices": len(open_rows), "ecl": ecl_total},
+        "ecl": {"buckets": list(ecl_buckets.values()), "total": ecl_total, "coverage_pct": pct(ecl_total, outstanding),
+                "source": cfg["ecl_source"]},
         "buckets": list(buckets.values()), "age_buckets": list(ages.values()),
         "by_client": sorted(per_client.values(), key=lambda c: -c["outstanding"]),
         "invoices": open_rows, "npar": npar,
@@ -912,7 +1157,7 @@ def client_card(client: Rec, projects: List[Rec], contracts: List[Rec], invoices
                                               "email", "npwp", "address")} | {"since_year": int(since) if since else None},
         "stats": {"projects": len(mine), "projects_by_status": by_status, "contract_value": sum(values.values()),
                   "invoiced": ar["totals"]["invoiced"], "paid": ar["totals"]["paid"], "outstanding": ar["totals"]["outstanding"],
-                  "overdue": ar["totals"]["overdue"], "npar": npar_amount, **behaviour, "rating": rating},
+                  "overdue": ar["totals"]["overdue"], "npar": npar_amount, "ecl": ar["totals"]["ecl"], **behaviour, "rating": rating},
         "services": services, "provinces": provinces, "projects": rows,
         "aging": ar["buckets"], "age_buckets": ar["age_buckets"], "invoices": ar["invoices"], "npar": ar["npar"],
         "pipeline": {
@@ -970,7 +1215,8 @@ def overview(data: Dict[str, List[Rec]], settings: Optional[Rec], service_labels
                       "realised": fresh.get("total_realised"), "report_week": fresh.get("report_week"),
                       "duration_weeks": fresh.get("duration_weeks"), "planned_pct": fresh.get("planned_to_date"),
                       "actual_pct": fresh.get("actual_to_date"), "deviation_pct": fresh.get("deviation"),
-                      "cost_ratio_pct": fresh.get("cost_ratio_pct")})
+                      "cost_ratio_pct": fresh.get("cost_ratio_pct"), "bac": fresh.get("bac"), "cpi": fresh.get("cpi"),
+                      "spi": fresh.get("spi"), "eac": fresh.get("eac"), "vac": fresh.get("vac")})
 
     def group_stats(key_of: Callable[[Rec], List[str]]) -> List[Rec]:
         clients_of: Dict[str, set] = {}
@@ -1024,7 +1270,8 @@ def overview(data: Dict[str, List[Rec]], settings: Optional[Rec], service_labels
         },
         "contracts": {"count": sum(1 for c in signed if c.get("kind") in VALUE_KINDS),
                       "value": sum(num(c.get("value")) or 0.0 for c in signed if c.get("kind") in VALUE_KINDS), "by_kind": by_kind},
-        "receivables": ar["totals"], "aging": ar["buckets"], "age_buckets": ar["age_buckets"], "npar": ar["npar"],
+        "receivables": ar["totals"], "aging": ar["buckets"], "age_buckets": ar["age_buckets"], "npar": ar["npar"], "ecl": ar["ecl"],
+        "evm_warning_index": cfg["evm_warning_index"],
         "by_client": ar["by_client"][:10],
         "projects_budget": plans,
         "clients_by_service": by_service, "clients_by_province": by_province,

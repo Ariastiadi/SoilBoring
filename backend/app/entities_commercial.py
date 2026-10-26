@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from . import erp_commercial as calc
-from .entities import COMMERCIAL, SERVICE_LINES, Entity, F, _add
+from .entities import COMMERCIAL, ENTITIES, SERVICE_LINES, Entity, F, _add
 from .fields import COMPUTE_HOOKS
 
 REVIEWERS = ("admin", "manager")
@@ -58,6 +58,10 @@ _add(Entity(
         F("margin_pct", "percent", "Margin (% of the ABP)", min=0, max=500),
         F("tax_pct", "percent", "VAT / PPN (%)", min=0, max=100, default=11),
         F("rounding", "select", "Round the bid price up to", options=ROUNDING, default="1000"),
+        F("cost_reference", "select", "Government cost reference", options=calc.COST_REFERENCES,
+          help="Checks the price against the government rules: AHSP construction work adds 10–15% indirect cost "
+               "(overhead and profit) to the direct cost; consultancy keeps direct cost at most 40% of the contract value. "
+               "Empty: company pricing only."),
         F("conversion", "select", "Conversion to client rates", default="spread", options=[
             ("spread", "Spread project costs over the work items"), ("separate", "Each budget line as its own item")],
           help="How the quotation is built from this PBD. Mobilisation and demobilisation are always separate items."),
@@ -88,6 +92,7 @@ _add(Entity(
         F("price_list_value", "money", "Price-list value of the work items", readonly=True),
         F("cost_ratio_pct", "percent", "Cost ratio ABP/revenue (%)", readonly=True),
         F("max_cost_ratio_pct", "percent", "Company maximum ratio (%)", readonly=True),
+        F("indirect_pct", "percent", "Risk premium and margin (% of the ABP)", readonly=True),
         F("approval_level", "text", "Approval authority", readonly=True),
         F("checks", "json", "Checks", readonly=True),
         F("result", "json", "Calculation", readonly=True),
@@ -194,6 +199,21 @@ _add(Entity(
         F("actual_to_date", "percent", "Actual progress to date (%)", readonly=True, list=True),
         F("deviation", "number", "Deviation (percentage points)", readonly=True),
         F("cost_ratio_pct", "percent", "Cost ratio ABP/revenue (%)", readonly=True),
+        # Earned value at the reporting week (see erp_commercial.earned_value).
+        F("bac", "money", "Budget at completion (BAC)", readonly=True),
+        F("bac_source", "select", "BAC taken from", readonly=True, options=[
+            ("plan", "Weekly budget plan"), ("pbd", "PBD budget (ABP)")]),
+        F("pv", "money", "Planned value (PV)", readonly=True),
+        F("ev", "money", "Earned value (EV)", readonly=True),
+        F("ac", "money", "Actual cost (AC)", readonly=True),
+        F("cv", "money", "Cost variance (CV)", readonly=True),
+        F("sv", "money", "Schedule variance (SV)", readonly=True),
+        F("cpi", "number", "CPI", readonly=True, list=True),
+        F("spi", "number", "SPI", readonly=True, list=True),
+        F("eac", "money", "Estimate at completion (EAC)", readonly=True),
+        F("etc", "money", "Estimate to complete (ETC)", readonly=True),
+        F("vac", "money", "Variance at completion (VAC)", readonly=True),
+        F("tcpi", "number", "TCPI", readonly=True),
         F("checks", "json", "Checks", readonly=True),
         F("result", "json", "Calculation", readonly=True),
     ],
@@ -279,7 +299,8 @@ def _pbd(record: Dict[str, Any]) -> None:
     from . import records
 
     rates = {r["id"]: r for r in records.list_records("rates")}
-    _guard(calc.pbd_compute, record, rates, _settings(), _get("projects", record.get("project_id")))
+    project = _get("projects", record.get("project_id"))
+    _guard(calc.pbd_compute, record, rates, _settings(), project, _get("clients", (project or {}).get("client_id")))
 
 
 def _client_decision(record: Dict[str, Any]) -> None:
@@ -307,6 +328,21 @@ def _guarantee(record: Dict[str, Any]) -> None:
 def _project(record: Dict[str, Any]) -> None:
     record["zone"] = calc.PROVINCE_ZONE.get(str(record.get("province") or ""), "")
 
+
+# Commercial policy fields of the company settings (the settings entity itself is in entities.py).
+_SETTINGS_EXTRA = [
+    F("evm_warning_index", "number", "Warn when CPI or SPI falls below", min=0.5, max=1, section="Pricing policy",
+      help="Earned value of the weekly work plans. Empty: 0.90 (values between this and 0.95 are flagged to watch)."),
+    F("ecl_rates", "items", "Expected credit loss rates by days overdue", max_items=7, section="Pricing policy", fields=[
+        F("bucket", "select", "Days overdue", required=True, options=calc.ECL_BUCKETS),
+        F("rate_pct", "percent", "Loss rate (%)", required=True, min=0, max=100),
+    ], help="Indicative loss allowance on client receivables (PSAK 109 simplified approach, provision matrix). "
+            "Empty: example rates 1, 2, 5, 10, 25, 50 and 100%, to be set by finance from the company's own loss history."),
+]
+_settings_entity = ENTITIES["settings"]
+for _f in _SETTINGS_EXTRA:
+    if not _settings_entity.field(_f.name):
+        _settings_entity.fields.append(_f)
 
 COMPUTE_HOOKS.update({"pbd": _pbd, "client_decisions": _client_decision, "work_plans": _work_plan,
                       "guarantees": _guarantee, "projects": _project})
