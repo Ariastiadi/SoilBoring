@@ -86,9 +86,14 @@ jobs:
             NAME="soilboring-${GITHUB_SHA::7}.apk"
           fi
           cp app/build/outputs/apk/release/app-release.apk "$NAME"
-          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n 1)apksigner
-          "$APKSIGNER" verify --print-certs "$NAME" | grep -E 'Signer #1 certificate (DN|SHA-256)'
-          if [ "${{ github.event_name }}" = "release" ] && "$APKSIGNER" verify --print-certs "$NAME" | grep -q 'CN=Android Debug'; then
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          echo "apksigner: $APKSIGNER"
+          if ! "$APKSIGNER" verify --verbose --print-certs "$NAME" > "$RUNNER_TEMP/verify.txt" 2>&1; then
+            sed 's/^/::error::/' "$RUNNER_TEMP/verify.txt" | head -n 20
+            exit 1
+          fi
+          grep -E 'Verified using|Signer #1 certificate (DN|SHA-256)' "$RUNNER_TEMP/verify.txt" | sed 's/^/::notice::/'
+          if [ "${{ github.event_name }}" = "release" ] && grep -q 'CN=Android Debug' "$RUNNER_TEMP/verify.txt"; then
             echo "::error::The release APK is signed with the debug key."
             exit 1
           fi
