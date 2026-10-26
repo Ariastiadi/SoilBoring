@@ -756,16 +756,25 @@ def _spt_gamma(n: float) -> float:
 
 
 def _cb(diameter: Optional[float]) -> float:
-    """Borehole diameter correction (Skempton 1986): 65–115 mm 1.00, 150 mm 1.05, 200 mm 1.15."""
+    """Borehole diameter correction (Skempton 1986, as tabled by Youd et al. 2001): 65–115 mm 1.00,
+    150 mm 1.05, 200 mm 1.15. The sources give only these points; between them the factor is
+    interpolated linearly so there is no step at 115/116 mm. Holes under 65 mm are outside the table
+    and take 1.00 (a small hole does not relieve the soil around the sampler)."""
     if diameter is None or diameter <= 115:
         return 1.0
     if diameter <= 150:
-        return 1.05
+        return round(1.0 + 0.05 * (diameter - 115) / 35, 4)
+    if diameter < 200:
+        return round(1.05 + 0.10 * (diameter - 150) / 50, 4)
     return 1.15
 
 
+DEFAULT_STICK_UP = 1.5  # m of rod above the ground when not recorded (Idriss & Boulanger 2010)
+
+
 def _cr(rod: float) -> float:
-    """Rod length correction (Youd et al. 2001)."""
+    """Rod length correction, Youd et al. (2001) Table 2: < 3 m 0.75, 3–4 m 0.80, 4–6 m 0.85, 6–10 m 0.95,
+    10–30 m 1.00. Rod length = test depth + stick-up. No published value above 30 m: 1.00."""
     if rod < 3:
         return 0.75
     if rod < 4:
@@ -809,10 +818,15 @@ def spt_correction(header: Dict[str, Any], rows: List[Dict[str, Any]]) -> Dict[s
     ce = er / 60
     cb = _cb(num(header.get("borehole_diameter")))
     cs = 1.2 if _txt(header.get("sampler")).lower() in ("no_liner", "non-standard", "non_standard") else 1.0
-    stick = num(header.get("stick_up")) or 0.0
+    diameter = num(header.get("borehole_diameter"))
+    stick = num(header.get("stick_up"))
+    stick_default = stick is None
+    if stick is None:
+        stick = DEFAULT_STICK_UP
     gw = num(header.get("groundwater"))
     gamma_w = num(header.get("gamma_w")) or 9.81
     template = header.get("cn_method") == "template"
+    high_stress = 0.0
     tests = []
     for r in rows:
         depth = num(r.get("depth"))
@@ -852,6 +866,8 @@ def spt_correction(header: Dict[str, Any], rows: List[Dict[str, Any]]) -> Dict[s
             elif coarse:
                 cn = min(1.7, math.sqrt(100 / sv_eff))
         cr = _cr(depth + stick)
+        if coarse and sv_eff > 200:
+            high_stress = max(high_stress, sv_eff)
         n60 = n * ce * cb * cs * cr
         n160 = n60 * cn if coarse and cn is not None else None
         ncorr = n160 if coarse else n60
@@ -866,7 +882,8 @@ def spt_correction(header: Dict[str, Any], rows: List[Dict[str, Any]]) -> Dict[s
             prof["N corrected"].append((ncorr, depth))
     notes = [
         "N60 = N × CE × CB × CS × CR with CE = ER / 60; (N1)60 = N60 × CN for sand; N corrected is N60 for clay and (N1)60 for sand.",
-        "CB after Skempton (1986): up to 115 mm 1.00, up to 150 mm 1.05, larger 1.15; CR by rod length (depth + stick-up) after Youd et al. (2001).",
+        "CB after Skempton (1986) / Youd et al. (2001): 1.00 up to 115 mm, 1.05 at 150 mm, 1.15 from 200 mm, interpolated between; CR by rod length (depth + stick-up) after Youd et al. (2001): < 3 m 0.75, 3–4 m 0.80, 4–6 m 0.85, 6–10 m 0.95, 10–30 m 1.00.",
+        "CE, CB, CS and CR are applied in every soil to give N60; CN only in sand. EN ISO 22476-3 gives the rod length factor for sands, with 0.75 for 3–4 m.",
         "Unit weight is taken from the row or estimated from N; total stress is summed from the ground surface and pore pressure is hydrostatic below the groundwater level.",
         "Classes from N corrected: sand very loose to loose, medium dense, dense, very dense; clay very soft to soft, medium stiff, stiff, very stiff, hard.",
     ]
@@ -876,6 +893,14 @@ def spt_correction(header: Dict[str, Any], rows: List[Dict[str, Any]]) -> Dict[s
         notes.append("CN = (Pa/σ'v)^0.5 ≤ 1.7 (Liao and Whitman 1986), applied to sand only.")
     if n_refusal:
         notes.append("At refusal N is extrapolated to 300 mm of penetration; treat these values with care.")
+    if stick_default:
+        notes.append("Stick-up not recorded: 1.5 m of rod above the ground is assumed for the rod length (Idriss and Boulanger 2010).")
+    if diameter is not None and diameter < 65:
+        notes.append("Borehole diameter below the 65–115 mm range of the standard test; CB = 1.00 is used. Note it in the log.")
+    if last + stick > 30:
+        notes.append("Rods longer than 30 m: CR = 1.00 is used; very long rods may lose some energy, which only a measured energy ratio captures.")
+    if high_stress and not template:
+        notes.append("σ'v above 200 kPa in sand: CN is uncertain at such stresses, and Youd et al. (2001) advise against the equation above 300 kPa.")
     return result(
         summary=[("Tests", len(out_rows), ""), ("CE", round(ce, 4), ""), ("Refusals", n_refusal or None, "")],
         values=[("Tests", len(out_rows), ""), ("Energy ratio", er, "%"), ("CE", round(ce, 4), ""), ("CB", cb, ""),

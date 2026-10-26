@@ -285,8 +285,11 @@ GRAIN_FIELDS = [
     _s("hydro_method", "Hydrometer calculation", [
         ("astm", "ASTM D422: percent finer from the corrected reading"),
         ("template", "Template: percent finer from the uncorrected reading")], "Hydrometer", default="astm"),
-    _n("zero_corr", "Correction subtracted from each reading", "Hydrometer", min=-100, max=100,
-       help="Zero and meniscus correction. 0 when the readings are already reduced."),
+    _n("zero_corr", "Composite correction subtracted from each reading", "Hydrometer", min=-100, max=100,
+       help="Reading in water with the same dispersant, at the top of the meniscus, minus 1 (151H) or minus 0 (152H). "
+            "About 0.003 (151H) or 5 g/L (152H) with 5 g of sodium hexametaphosphate per litre. 0 when the readings are already reduced."),
+    _n("meniscus", "Meniscus correction Cm, added for the effective depth", "Hydrometer", min=0, max=5,
+       help="Top of the meniscus to the true water level in clear water. Empty: 0.0005 (151H) or 1 g/L (152H)."),
     _items("hydrometer", "Hydrometer readings", [
         _n("t_min", "Time (min)", min=0, max=100000),
         _n("temp", "Temperature (°C)", min=0, max=60),
@@ -617,8 +620,9 @@ EXAMPLES: Dict[str, Dict[str, Any]] = {
             ('2"', 50.8, 0.0), ('1.5"', 38.1, 0.0), ('1"', 25.4, 0.0), ('3/4"', 19.0, 0.0), ('3/8"', 9.51, 0.0),
             ("#4", 4.76, 0.0), ("#10", 2.0, 0.0), ("#16", 1.19, 0.0), ("#30", 0.595, 0.0), ("#50", 0.297, 0.08),
             ("#100", 0.149, 0.53), ("#200", 0.074, 1.26)]],
-        "hydrometer_type": "151H", "hydro_method": "astm", "zero_corr": 0.0,
-        "hydrometer": [{"t_min": t, "temp": tc, "reading": r, "k": k} for t, tc, r, k in [
+        # Readings as read (template column N); the template subtracts 0.003 from each.
+        "hydrometer_type": "151H", "hydro_method": "astm", "zero_corr": 0.003, "meniscus": 0.0005,
+        "hydrometer": [{"t_min": t, "temp": tc, "reading": round(r + 0.003, 4), "k": k} for t, tc, r, k in [
             (0.5, 26.0, 1.026, 0.0009), (1.0, 26.0, 1.0235, 0.0009), (2.0, 26.0, 1.021, 0.0009), (5.0, 26.0, 1.018, 0.0009),
             (15.0, 26.0, 1.015, 0.0009), (30.0, 26.0, 1.013, 0.0009), (60.0, 26.0, 1.011, 0.0009), (120.0, 26.0, 1.009, 0.0009),
             (250.0, 26.0, 1.0075, 0.0009), (1440.0, 25.0, 1.005, 0.0007)]],

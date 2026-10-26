@@ -504,32 +504,43 @@ def grain_size(data: Dict[str, Any]) -> Dict[str, Any]:
         kind = _choice(data, "hydrometer_type", "151H")
         mode = _choice(data, "hydro_method", "astm")
         zero = _opt(data, "zero_corr", 0.0) or 0.0
+        meniscus = _opt(data, "meniscus")
+        if meniscus is None:
+            meniscus = 1.0 if kind == "152H" else 0.0005
+            if mode != "template":
+                notes.append("Meniscus correction not entered; the typical value is used (0.0005 for 151H, 1 g/L for 152H).")
         if mode == "template":
             notes.append("Template method: percent finer from the reading, effective depth from the temperature-corrected reading, viscosity at 27 °C.")
         else:
-            notes.append("ASTM D422: percent finer from the corrected reading, effective depth from the reading, viscosity at the test temperature.")
+            notes.append("ASTM D422: percent finer from the reading less the composite correction plus the temperature correction; "
+                         "effective depth from the reading plus the meniscus correction (L = 16.295 − 264.5 (R − 1) for 151H, "
+                         "16.295 − 0.164 R for 152H); viscosity at the test temperature.")
         for r in sorted(hydro, key=lambda r: float(r["t_min"])):
             t = float(r["t_min"])
             if t <= 0:
                 continue
-            reading = float(r["reading"]) - zero
+            raw = float(r["reading"])
+            reading = raw - zero
             k = num(r.get("k")) or 0.0
             corrected = reading + k
             temp = num(r.get("temp"))
             if mode == "template":
                 eta, rho_w = 0.00855, 0.9968
                 r_pct, r_depth = reading, corrected
+                depth = 16.3 - 0.164 * r_depth if kind == "152H" else 281.29 - 265 * r_depth
             else:
                 if temp is None:
                     raise CalcError("Temperature is required for each hydrometer reading")
                 eta, rho_w = water_viscosity(temp), water_density(temp)
-                r_pct, r_depth = corrected, reading
+                r_pct = corrected
+                # The effective depth depends on where the hydrometer floats, not on the dispersant:
+                # it uses the reading at the true water level (top of the meniscus + Cm).
+                r_depth = raw + meniscus
+                depth = 16.295 - 0.164 * r_depth if kind == "152H" else 16.295 - 264.5 * (r_depth - 1)
             if kind == "152H":
-                depth = 16.3 - 0.164 * r_depth
                 a = 1.65 * gs / ((gs - 1) * 2.65)
                 p_sub = r_pct * a / w_h * 100
             else:
-                depth = 281.29 - 265 * r_depth
                 p_sub = gs / (gs - 1) * 100000 / w_h * (r_pct - 1)
             if depth <= 0:
                 raise CalcError("A hydrometer reading is outside the range of the hydrometer")
@@ -537,7 +548,7 @@ def grain_size(data: Dict[str, Any]) -> Dict[str, Any]:
             d = kk * math.sqrt(depth / t)
             p_total = max(0.0, p_sub * p_split / 100)
             hydro_pts.append((d, p_total))
-            hydro_rows.append([t, temp, _r(reading, 4), _r(corrected, 4), _r(depth, 3), _r(kk, 5), _r(d, 5), _r(p_total)])
+            hydro_rows.append([t, temp, _r(raw, 4), _r(corrected, 4), _r(depth, 3), _r(kk, 5), _r(d, 5), _r(p_total)])
     curve = sorted(sieve_pts + hydro_pts)
     # Fractions (ASTM D2487 sizes): gravel > 4.75 mm, sand 4.75–0.075 mm, silt 0.075–0.002 mm, clay < 0.002 mm.
     f475 = _finer_at(curve, 4.75)

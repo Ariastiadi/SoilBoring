@@ -149,9 +149,13 @@ def test_grain_size_template_method_matches_the_laboratory():
 def test_grain_size_astm_method_and_classification():
     out = calc_lab.grain_size(ex("grain_size", ll=27.0, pi=11.2))
     hyd = {r[0]: r for r in rows_of(out, "Hydrometer analysis")}
-    # ASTM D422: percent finer from R + k, depth from R, viscosity and water density at 26 °C.
+    # ASTM D422: percent finer from R − composite (0.003) + k; depth from R + Cm (0.0005) with Table 2.
+    assert hyd[0.5][2] == pytest.approx(1.029)
     assert hyd[0.5][7] == pytest.approx(2.63 / 1.63 * 2000 * 0.0269, abs=0.01)
-    assert hyd[0.5][4] == pytest.approx(281.29 - 265 * 1.026, abs=0.002)
+    assert hyd[0.5][4] == pytest.approx(16.295 - 264.5 * 0.0295, abs=0.002)
+    # Without Cm the typical 0.0005 is used and said so; 152H uses its own scale.
+    out2 = calc_lab.grain_size(ex("grain_size", meniscus=None))
+    assert {r[0]: r for r in rows_of(out2, "Hydrometer analysis")}[0.5][4] == pytest.approx(hyd[0.5][4]) and any("Meniscus" in n for n in out2["notes"])
     assert out["lab"]["uscs"] == "CL"
     # Sieve-only analysis of a sand, no fine specimen: cumulative on the whole sample.
     sand = {"m_dry_total": 1000.0, "sieves": [

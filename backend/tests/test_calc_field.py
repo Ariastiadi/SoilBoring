@@ -259,12 +259,16 @@ def test_spt_default_corrections_hand_checked():
     clay = next(g for g in got if g["Depth (m)"] == 10)
     assert clay["CN"] is None and clay["Consistency / density"] == "Medium stiff"
     # Corrections fixed against the template: small holes are CB = 1.0, short rods CR = 0.75, long rods CR = 1.0.
-    assert cf._cb(60) == 1.0 and cf._cb(130) == 1.05 and cf._cb(200) == 1.15
-    assert cf._cr(0.5) == 0.75 and cf._cr(3.5) == 0.80 and cf._cr(35) == 1.0
+    assert cf._cb(60) == 1.0 and cf._cb(115) == 1.0 and cf._cb(150) == 1.05 and cf._cb(200) == 1.15
+    assert cf._cb(132.5) == pytest.approx(1.025) and cf._cb(175) == pytest.approx(1.10) and cf._cb(250) == 1.15
+    assert cf._cr(0.5) == 0.75 and cf._cr(3.5) == 0.80 and cf._cr(5) == 0.85 and cf._cr(8) == 0.95 and cf._cr(35) == 1.0
     # Borehole-page style rows: depth, n, uscs, penetration in mm.
-    out = cf.spt_correction({"energy_ratio": 60}, [{"depth": 2, "n": 10, "uscs": "SM"}, {"depth": 4, "n": 50, "penetration_mm": 150, "uscs": "CL"}])
+    out = cf.spt_correction({"energy_ratio": 60, "stick_up": 0}, [{"depth": 2, "n": 10, "uscs": "SM"}, {"depth": 4, "n": 50, "penetration_mm": 150, "uscs": "CL"}])
     r = rows_of(out, "SPT corrections")
     assert r[0]["Soil"] == "Sand" and r[0]["N60"] == pytest.approx(7.5) and r[1]["N (300 mm)"] == 100
+    # Stick-up not recorded: 1.5 m is assumed, so the 2 m test has 3.5 m of rod (CR 0.80).
+    out = cf.spt_correction({"energy_ratio": 60}, [{"depth": 2, "n": 10, "uscs": "SM"}])
+    assert rows_of(out, "SPT corrections")[0]["N60"] == pytest.approx(8.0) and any("1.5 m" in n for n in out["notes"])
     from backend.app import sheets_field
     assert sheets_field.spt_correction is cf.spt_correction
     with pytest.raises(CalcError):
