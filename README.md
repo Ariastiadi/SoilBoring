@@ -91,7 +91,7 @@ Environment variables:
 | `OLLAMA_URL` | *(empty = server AI off)* | e.g. `http://localhost:11434/api/chat`, or `https://ollama.com/api/chat` with `OLLAMA_API_KEY` and a cloud model such as `gpt-oss:120b`. Without it, Geo AI runs Qwen in the browser. |
 | `OLLAMA_MODEL` | `gpt-oss:120b-cloud` | Model name. |
 | `OLLAMA_API_KEY` | – | Bearer token for hosted/proxied Ollama endpoints. |
-| `ORG_NAME` | – | Organisation name shown in the title bar and login page and used in AGS4 exports (e.g. `Soilens`). |
+| `ORG_NAME` | – | Organisation name shown in the title bar and login page and used in AGS4 exports (e.g. `PT Geoteknik Nusantara`). |
 | `APP_TIMEZONE` | `Asia/Jakarta` | Time zone for "today", report timestamps and the last-7/30-days views. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
 
