@@ -67,7 +67,15 @@ jobs:
           else
             echo "No SIGNING_KEY secret: the APK is signed with the debug key (testing only)."
           fi
-          gradle :app:assembleRelease --no-daemon --stacktrace
+          set -o pipefail
+          if ! gradle :app:assembleRelease --no-daemon 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+            rm -f "$RUNNER_TEMP/release.p12"
+            # Show the cause as annotations on the run page
+            grep -E '^e: |^ERROR|error:' "$RUNNER_TEMP/gradle.log" | head -n 30 | sed 's/^/::error::/' || true
+            awk '/What went wrong/{f=1} f && n < 12 {printf "%s %%0A", $0; n++}' "$RUNNER_TEMP/gradle.log" | sed 's/^/::error::/'; echo
+            find . -name 'lint-results*.txt' -exec grep -hE ': Error:' {} + 2>/dev/null | head -n 20 | sed 's/^/::error::/' || true
+            exit 1
+          fi
           rm -f "$RUNNER_TEMP/release.p12"
 
       - name: Name and check the APK
