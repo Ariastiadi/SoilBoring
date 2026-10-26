@@ -9,6 +9,7 @@ import {
 } from './api'
 import { lang, locale, t, translateServer } from './i18n'
 import { DateInput, Icon, PageHead, ScrollTable, formatDate } from './ui'
+import { WorkflowPanel } from './workflowui'
 
 export const SchemaContext = createContext<Schemas | null>(null)
 export const useSchemas = () => useContext(SchemaContext)
@@ -625,12 +626,13 @@ export function RecordsPage({ formLayout, hideInView, entityName, description, d
           </>} />
         {notice && <p className="notice ok" role="status">{notice}</p>}
         {error && <p className="notice error">{error}</p>}
+        {entity.workflow && <WorkflowPanel entity={entityName} record={open} onChanged={r => { setOpen({ ...open, ...r }); reload() }} />}
         {extra?.(open, reload)}
         <section className="card">
           {extra && <h3 className="card-title">{t('Data entered')}</h3>}
           <RecordFields entity={entity} record={open} hide={typeof hideInView === 'function' ? hideInView(open) : hideInView} hideEmpty />
         </section>
-        {open._can_edit && (
+        {open._can_edit && (!entity.workflow || ['draft', 'returned', undefined].includes(open.wf_status)) && (
           <div className="detail-foot">
             <button type="button" className="quiet danger-quiet" onClick={remove}><Icon name="trash" />{t('Delete {what}', { what: t(entity.label_one).toLowerCase() })}</button>
           </div>
@@ -697,6 +699,7 @@ export const STATUS_TONE: Record<string, string> = {
   received: '', testing: 'warn', done: 'ok', review: 'warn', approved: 'ok',
   unpaid: 'warn', partial: 'warn', paid: 'ok', overdue: 'bad',
   requested: 'active', pending: 'warn', passed: 'ok', redo: 'bad',
+  submitted: 'active', reviewed: 'warn', returned: 'bad',
 }
 
 export function Labeled({ label, children }: { label: string, children: ReactNode }) {

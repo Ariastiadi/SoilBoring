@@ -497,6 +497,9 @@ export type EntityDef = {
   group: string
   can_read: boolean
   can_create: boolean
+  workflow?: boolean
+  reviewers?: string[]
+  approvers?: string[]
 }
 export type Schemas = Record<string, EntityDef>
 export type Rec = Record<string, any> & { id: string, _can_edit?: boolean, updated_at?: string }
@@ -650,4 +653,37 @@ export async function downloadPointsKml(name: string, points: Array<{ name: stri
 export async function downloadProjectKml(projectId: string) {
   const r = await fetch(`${BASE}/api/export/kml?project_id=${encodeURIComponent(projectId)}`, { headers: buildHeaders() });
   await saveBlob(r, "project.kml");
+}
+
+// ---------------------------------------------------------------------------
+// Generic calls for the ERP modules, and the approval flow
+// ---------------------------------------------------------------------------
+
+export async function apiGet<T>(path: string): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, { headers: buildHeaders() });
+  return parseJson<T>(r, t("Failed to load"));
+}
+
+export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  return parseJson<T>(r, t("Could not save"));
+}
+
+export type WorkflowStep = { action: string; from: string; to: string; by: string; role: string; note: string; at: string };
+export type ApprovalItem = { entity: string; id: string; title: string; label_one: string; state: string; since: string; by: string; note: string };
+
+export function getApprovals() {
+  return apiGet<ApprovalItem[]>("/api/approvals");
+}
+
+export function getWorkflowActions(entity: string, id: string) {
+  return apiGet<{ actions: string[] }>(`/api/records/${entity}/${encodeURIComponent(id)}/workflow`);
+}
+
+export function workflowStep(entity: string, id: string, action: string, note: string) {
+  return apiPost<Rec & { _actions: string[] }>(`/api/records/${entity}/${encodeURIComponent(id)}/workflow`, { action, note });
 }

@@ -51,13 +51,13 @@ def list_records(entity_name: str, project_id: Optional[str] = Query(default=Non
     entity = _entity(entity_name)
     _readable(entity, user)
     role = user.get("role", "general")
-    items = records.list_records(entity_name)
+    items = [r for r in records.list_records(entity_name) if records.can_see(entity, user.get("role", "general"), r, user["email"])]
     if project_id:
         items = [r for r in items if r.get("project_id") == project_id]
     key = entity.sort.lstrip("-")
     items.sort(key=lambda r: str(r.get(key) or ""), reverse=entity.sort.startswith("-"))
     return [
-        {**records.for_viewer(entity, r, role), "_can_edit": records.can_write(entity, role, r, user["email"])}
+        {**records.for_viewer(entity, r, role), "_can_edit": _editable(entity, role, r, user["email"])}
         for r in items
     ]
 
@@ -71,7 +71,14 @@ def get_record(entity_name: str, record_id: str, user=Depends(get_current_user))
     except records.NotFound:
         raise HTTPException(status_code=404, detail="Not Found")
     role = user.get("role", "general")
-    return {**records.for_viewer(entity, record, role), "_can_edit": records.can_write(entity, role, record, user["email"])}
+    if not records.can_see(entity, role, record, user["email"]):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return {**records.for_viewer(entity, record, role), "_can_edit": _editable(entity, role, record, user["email"])}
+
+
+def _editable(entity: Entity, role: str, record: Dict[str, Any], email: str) -> bool:
+    return (records.can_write(entity, role, record, email) or (entity.workflow and role in entity.reviewers + entity.approvers)) \
+        and records.locked_by_workflow(entity, record, role) is None
 
 
 def _store(entity: Entity, user: dict, data: Dict[str, Any], record_id: Optional[str]):
@@ -84,8 +91,14 @@ def _store(entity: Entity, user: dict, data: Dict[str, Any], record_id: Optional
             raise HTTPException(status_code=404, detail="Not Found")
     elif entity.singleton:
         existing = records.get_singleton(entity.name)
-    if not records.can_write(entity, role, existing, user["email"]):
+    lock = records.locked_by_workflow(entity, existing, role)
+    if lock:
+        raise HTTPException(status_code=409, detail=lock)
+    in_flow = existing is not None and entity.workflow and (existing.get("wf_status") or "draft") not in ("draft", "returned")
+    if not records.can_write(entity, role, existing, user["email"]) and not in_flow:
         raise HTTPException(status_code=403, detail="Your role cannot change this record")
+    if existing is not None and not records.can_see(entity, role, existing, user["email"]):
+        raise HTTPException(status_code=404, detail="Not Found")
     if existing is not None and role not in ("admin", "manager", "finance"):
         # Private (money) fields the viewer never saw are kept as they are.
         for f in entity.fields:
@@ -113,7 +126,7 @@ def _store(entity: Entity, user: dict, data: Dict[str, Any], record_id: Optional
     action = "record.updated" if existing else "record.created"
     audit.record(user["email"], f"{entity.name}.{action.split('.')[1]}", str(record.get(entity.title) or record["id"]),
                  _changes(entity, existing or {}, record))
-    return {**records.for_viewer(entity, record, role), "_can_edit": True}
+    return {**records.for_viewer(entity, record, role), "_can_edit": _editable(entity, role, record, user["email"])}
 
 
 @router.post("/records/{entity_name}", status_code=201)
@@ -133,8 +146,11 @@ def delete_record(entity_name: str, record_id: str, user=Depends(get_current_use
         existing = records.get_record(entity_name, record_id)
     except records.NotFound:
         raise HTTPException(status_code=404, detail="Not Found")
-    if not records.can_write(entity, user.get("role", "general"), existing, user["email"]):
+    if not records.can_write(entity, user.get("role", "general"), existing, user["email"]) \
+            or not records.can_see(entity, user.get("role", "general"), existing, user["email"]):
         raise HTTPException(status_code=403, detail="Your role cannot change this record")
+    if entity.workflow and (existing.get("wf_status") or "draft") not in ("draft", "returned"):
+        raise HTTPException(status_code=409, detail="Records in the approval flow cannot be deleted")
     try:
         removed = records.remove(entity_name, record_id)
     except records.ConflictError as exc:

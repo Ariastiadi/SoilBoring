@@ -18,7 +18,7 @@ import type { Role, Session } from './api'
 import { BrandMark, Icon, PageHead, ROLE_LABELS } from './ui'
 import { NavContext, type Intent, type TabKey } from './nav'
 import { SchemaContext, invalidate } from './records'
-import { getSchemas, type Schemas } from './api'
+import { getApprovals, getSchemas, type Schemas } from './api'
 import type { Intent as PageIntent } from './nav'
 
 // Business modules load when first opened, so the field log starts fast on a phone.
@@ -44,6 +44,8 @@ const StandardsPage = lazy(() => worksheetsModule().then(m => ({ default: m.Stan
 const CoordinatesPage = lazy(() => worksheetsModule().then(m => ({ default: m.CoordinatesPage })))
 const SampleRegisterPage = lazy(() => worksheetsModule().then(m => ({ default: m.SampleRegisterPage })))
 const LabSummaryPage = lazy(() => worksheetsModule().then(m => ({ default: m.LabSummaryPage })))
+const erpModule = () => import('./tabs/Erp')
+const ApprovalsPage = lazy(() => erpModule().then(m => ({ default: m.ApprovalsPage })))
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
@@ -161,6 +163,14 @@ export default function App() {
   }, [])
 
   const isAdmin = auth?.role === 'admin'
+  // Documents waiting for this user in the approval flow, refreshed on every page change.
+  const [approvalCount, setApprovalCount] = useState(0)
+  useEffect(() => {
+    if (!auth) return
+    let live = true
+    getApprovals().then(list => { if (live) setApprovalCount(list.length) }).catch(() => {})
+    return () => { live = false }
+  }, [auth?.token, tab, navCount]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!auth) { setSchemas(null); invalidate(); return }
     let active = true
@@ -217,6 +227,9 @@ export default function App() {
   const can = (entity?: string) => !entity || !schemas || !!schemas[entity]?.can_read
   const switchLanguage = () => { if (confirmLeave()) setLang(lang() === 'id' ? 'en' : 'id') }
 
+  const work: NavItem[] = [
+    { key: 'approvals', label: t('Approvals'), icon: 'check' },
+  ]
   const comop: NavItem[] = [
     { key: 'projects', label: t('Projects'), icon: 'folder', entity: 'projects' },
     { key: 'clients', label: t('Clients'), icon: 'building', entity: 'clients' },
@@ -256,7 +269,7 @@ export default function App() {
     { key: 'settings', label: t('Company settings'), icon: 'settings' },
   ] : []
   const groups: Array<[string, NavItem[]]> = [
-    ['Commercial operations', comop], ['Field work', field], ['Laboratory', lab], ['Engineering', engineering],
+    ['Work queue', work], ['Commercial operations', comop], ['Field work', field], ['Laboratory', lab], ['Engineering', engineering],
     ['Finance', finance], ['Data & references', analysis], ['Administration', admin],
   ]
   const about: NavItem = { key: 'about', label: t('About'), icon: 'info' }
@@ -266,7 +279,7 @@ export default function App() {
     lab: i => <LabPage intent={i} />, analyses: i => <AnalysesPage intent={i} />, reports: i => <ReportsPage intent={i} />,
     invoices: i => <InvoicesPage intent={i} />, rates: i => <RatesPage intent={i} />, settings: () => <SettingsPage />,
     worksheets: () => <WorksheetCatalogPage />, standards: () => <StandardsPage />, coordinates: () => <CoordinatesPage />,
-    samples: () => <SampleRegisterPage />, labsummary: () => <LabSummaryPage />,
+    samples: () => <SampleRegisterPage />, labsummary: () => <LabSummaryPage />, approvals: () => <ApprovalsPage />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)
@@ -277,6 +290,7 @@ export default function App() {
       aria-current={tab === item.key ? 'page' : undefined} onClick={() => go(item.key, undefined)}>
       <Icon name={item.icon} />{item.label}
       {item.key === 'boreholes' && outbox.length > 0 && <span className="count">{t('{n} waiting', { n: outbox.length })}</span>}
+      {item.key === 'approvals' && approvalCount > 0 && <span className="count">{approvalCount}</span>}
     </button>
   )
   const accountButtons = (

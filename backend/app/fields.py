@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ALL_ROLES = ("admin", "manager", "general", "lab", "finance")
 COMMERCIAL = ("admin", "manager", "finance")
@@ -49,6 +49,18 @@ class Entity:
     singleton: bool = False
     group: str = ""
     sort: str = "-created_at"
+    # Approval flow (Konseptor → Pengulas → Pemutus): draft → submitted → reviewed → approved.
+    workflow: bool = False
+    reviewers: Tuple[str, ...] = ("admin", "manager")
+    approvers: Tuple[str, ...] = ("admin",)
+    # Roles that see only their own records: created by them, or naming them in owner_field.
+    own_read: Tuple[str, ...] = ()
+    owner_field: str = ""
 
     def field(self, name: str) -> Optional[F]:
         return next((f for f in self.fields if f.name == name), None)
+
+
+# Calculations of the ERP modules, registered by their entity files: entity name -> function(record).
+# Called by records.compute() on every save, inside the entity lock; a hook may read other records.
+COMPUTE_HOOKS: Dict[str, Callable[[Dict[str, Any]], None]] = {}

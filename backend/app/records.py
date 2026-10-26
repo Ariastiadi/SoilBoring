@@ -19,6 +19,7 @@ from . import docstore
 from . import cpt_calc, geo, sheets
 from .calcbase import CalcError
 from .entities import ENTITIES, Entity, F
+from .fields import COMPUTE_HOOKS
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
 FILE_TYPES = {
@@ -318,6 +319,12 @@ def _price_check(record: Dict[str, Any]) -> None:
 
 
 def compute(entity: str, record: Dict[str, Any], today: Optional[str] = None) -> Dict[str, Any]:
+    if ENTITIES[entity].workflow and not record.get("wf_status"):
+        record["wf_status"] = "draft"
+        record.setdefault("wf_history", [])
+    hook = COMPUTE_HOOKS.get(entity)
+    if hook is not None:
+        hook(record)
     if entity == "quotes":
         _totals(record, discount=True)
         _price_check(record)
@@ -576,6 +583,37 @@ def delete_file(file_id: str) -> None:
 
 def can_read(entity: Entity, role: str) -> bool:
     return role in entity.read
+
+
+def owns(entity: Entity, record: Dict[str, Any], user_email: str) -> bool:
+    me = user_email.lower()
+    if str(record.get("created_by") or "").lower() == me:
+        return True
+    return bool(entity.owner_field) and str(record.get(entity.owner_field) or "").lower() == me
+
+
+def can_see(entity: Entity, role: str, record: Dict[str, Any], user_email: str) -> bool:
+    """Roles in own_read see only their own records (e.g. a staff member's performance card)."""
+    if not can_read(entity, role):
+        return False
+    return role not in entity.own_read or owns(entity, record, user_email)
+
+
+def locked_by_workflow(entity: Entity, record: Optional[Dict[str, Any]], role: str) -> Optional[str]:
+    """Why a record in the approval flow cannot be changed now, or None.
+    The reviewer may correct a submitted record and the approver a reviewed one (blueprint A.1)."""
+    if not entity.workflow or record is None:
+        return None
+    state = record.get("wf_status") or "draft"
+    if state in ("draft", "returned"):
+        return None
+    if state == "submitted" and role in entity.reviewers:
+        return None
+    if state == "reviewed" and role in entity.approvers:
+        return None
+    if state == "approved":
+        return "Approved records cannot be changed; an approver can reopen it"
+    return "This record is waiting for review or approval"
 
 
 def can_write(entity: Entity, role: str, record: Optional[Dict[str, Any]], user_email: str) -> bool:

@@ -6,6 +6,7 @@ export type TabKey =
   | 'analyses' | 'reports' | 'invoices' | 'rates'
   | 'qa' | 'summary' | 'dashboard' | 'about' | 'users' | 'activity' | 'settings' | 'account'
   | 'worksheets' | 'standards' | 'coordinates' | 'samples' | 'labsummary'
+  | 'approvals' | 'overview'
 
 /** Where to go, and what to open there: a record, or a new one with values filled in. */
 export type Intent = { open?: string, newWith?: Record<string, unknown>, borehole?: string }
@@ -14,3 +15,9 @@ export type Nav = { go: (tab: TabKey, intent?: Intent) => void, role: string, em
 
 export const NavContext = createContext<Nav>({ go: () => {}, role: 'general', email: '' })
 export const useNav = () => useContext(NavContext)
+
+/** The page that opens a record of each entity (approvals inbox, dashboard links). */
+export const ENTITY_TAB: Record<string, TabKey> = {
+  clients: 'clients', projects: 'projects', quotes: 'quotes', contracts: 'contracts', invoices: 'invoices', rates: 'rates',
+  cpt: 'cpt', field_activities: 'fieldwork', lab_tests: 'lab', analyses: 'analyses', project_reports: 'reports',
+}

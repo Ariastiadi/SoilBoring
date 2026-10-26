@@ -79,7 +79,14 @@ ITEM_FIELDS = [
 ENTITIES: Dict[str, Entity] = {}
 
 
+WF_STATES: List[Option] = [("draft", "Draft"), ("submitted", "Waiting for review"), ("reviewed", "Waiting for approval"),
+                           ("approved", "Approved"), ("returned", "Returned for correction")]
+
+
 def _add(entity: Entity) -> None:
+    if entity.workflow and not entity.field("wf_status"):
+        entity.fields.append(F("wf_status", "select", "Approval", readonly=True, list=True, options=WF_STATES))
+        entity.fields.append(F("wf_history", "json", "Approval history", readonly=True))
     ENTITIES[entity.name] = entity
 
 
@@ -195,7 +202,7 @@ _add(Entity(
 
 _add(Entity(
     name="contracts", label="Contracts", label_one="Contract", title="number", group="commercial",
-    read=COMMERCIAL, sort="-date",
+    read=COMMERCIAL, sort="-date", workflow=True,
     fields=[
         F("number", "text", "Contract number", required=True, maxlen=60, list=True),
         F("project_id", "ref", "Project", required=True, ref="projects", list=True),
@@ -410,6 +417,8 @@ _add(Entity(
         F("signatory", "text", "Signatory name"),
         F("signatory_title", "text", "Signatory title"),
         F("report_footer", "longtext", "Report footer / disclaimer", maxlen=2000),
+        F("approval_separation", "bool", "Different people for drafting, review and approval", default=True,
+          help="Turn off only when the company is too small for three people in the approval flow."),
     ],
 ))
 
@@ -421,3 +430,7 @@ def public_schema() -> Dict[str, Any]:
         data = asdict(entity)
         out[name] = data
     return out
+
+
+# ERP modules (blueprint A.1–A.5): each file adds its entities with _add and its calculations to COMPUTE_HOOKS.
+from . import entities_commercial, entities_ops  # noqa: E402,F401
