@@ -13,6 +13,7 @@ import {
 } from '../records'
 import { Icon, PageHead, ScrollTable, formatDate, todayIso } from '../ui'
 import { CptCalcPreview, ResultView, StandardsList, sheetOf, useCatalog, useSheetTools } from '../worksheets'
+import { LAB_QUALITY_FIELDS, LAB_QUALITY_HIDDEN, LabQualityPanel, NonconformitiesPage, SampleReceiptsPage, ViewSwitch } from './ErpOps'
 
 const COMMERCIAL_ROLES = ['admin', 'manager', 'finance']
 
@@ -749,6 +750,7 @@ function SheetResults({ sheet, result, utm }: { sheet: SheetInfo | null, result:
 // ---------------------------------------------------------------------------
 
 export function LabPage({ intent }: { intent?: Intent }) {
+  const [view, setView] = useState('tests')
   const [status, setStatus] = useState('open')
   const [printing, setPrinting] = useState<Rec | null>(null)
   const filter = useMemo(() => (r: Rec) => status === 'all' || (status === 'open' ? r.status !== 'done' : r.status === 'done'), [status])
@@ -758,17 +760,23 @@ export function LabPage({ intent }: { intent?: Intent }) {
   const catalog = useCatalog()
   const layout = useMemo<FormLayout>(() => ({
     first: ['test_type', 'borehole_id', 'sample_ref', 'depth_top', 'depth_base', 'status'],
+    // ISO/IEC 17025: sample receipt, equipment used (calibration checked) and authorisation of the results.
+    groups: [{ title: 'Quality: receipt, equipment and authorisation', fields: LAB_QUALITY_FIELDS }],
     // With raw data the results are calculated; the result fields are for tests reported without it.
     hide: data => sheetOf(catalog, 'lab', data.test_type)?.calc && Object.values(data.raw || {}).some(v => Array.isArray(v) ? v.length : v !== '' && v !== null && v !== undefined) ? ['results'] : [],
   }), [catalog])
+  const switcher = <ViewSwitch value={view} onChange={setView} label={t('Show')}
+    options={[['tests', 'Laboratory tests'], ['receipts', 'Sample receipts'], ['ncr', 'Nonconformities']]} />
+  if (view === 'receipts') return <SampleReceiptsPage switcher={switcher} />
+  if (view === 'ncr') return <NonconformitiesPage switcher={switcher} />
   return <>
-    <RecordsPage entityName="lab_tests" hideInView={r => r.calc && Object.keys(r.calc).length && !r.calc.error ? ['summary', 'results'] : ['summary']} formLayout={layout} openId={intent?.open} startNew={intent?.newWith} filter={filter}
+    <RecordsPage entityName="lab_tests" hideInView={r => [...(r.calc && Object.keys(r.calc).length && !r.calc.error ? ['summary', 'results'] : ['summary']), ...LAB_QUALITY_HIDDEN]} formLayout={layout} openId={intent?.open} startNew={intent?.newWith} filter={filter}
       description={t('Samples from the boreholes and their test results. Results feed the engineering analyses.')}
-      toolbar={<Segments value={status} onChange={setStatus} label={t('Show tests')} options={[['open', 'In progress'], ['done', 'Done'], ['all', 'All']]} />}
+      toolbar={<>{switcher}<Segments value={status} onChange={setStatus} label={t('Show tests')} options={[['open', 'In progress'], ['done', 'Done'], ['all', 'All']]} /></>}
       formTools={tools}
       defaults={{ received: todayIso(), status: 'received' }}
       actions={r => <button type="button" onClick={() => setPrinting(r)}><Icon name="print" />{t('Print')}</button>}
-      extra={r => <SheetResults sheet={sheetOf(catalog, 'lab', r.test_type)} result={r.calc} />} />
+      extra={r => <><LabQualityPanel record={r} /><SheetResults sheet={sheetOf(catalog, 'lab', r.test_type)} result={r.calc} /></>} />
     {printing && <WorksheetSheet record={printing} kind="lab" onClose={() => setPrinting(null)} />}
   </>
 }

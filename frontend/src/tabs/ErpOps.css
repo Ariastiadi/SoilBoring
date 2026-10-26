@@ -39,3 +39,10 @@
   .ops-pipeline li { border-bottom: 1px solid var(--line-soft); }
   .ops-live-head { flex-direction: column; }
 }
+
+/* Quality additions: inline forms, period pickers, register switch */
+.ops-inline { margin: 0 0 1rem; }
+.ops-period { display: flex; flex-wrap: wrap; gap: .75rem; }
+.ops-period .field { min-width: 11rem; margin: 0; }
+.ops-subhead { margin: 1rem 0 .35rem; font-size: .95rem; }
+.ops-switch { margin: 0 0 1rem; }

@@ -227,7 +227,7 @@ def test_procurement_quote_rules_budget_and_numbering(client, admin_headers):
     v1 = _post(client, "vendors", {"name": "Vendor A", "category": "parts"}, admin_headers)
     v2 = _post(client, "vendors", {"name": "Vendor B", "category": "parts"}, admin_headers)
     # Estimated 2 x 30 jt = 60 jt -> three quotations needed (from 50 jt). Two received; the chosen one (58 jt)
-    # is not the lowest (55 jt) and has no reason; 58 jt is 1 jt above the 57 jt budget.
+    # is not the lowest (55 jt) and has no reason; 58 jt is 1 jt above the 57 jt budget; no conflict-of-interest declaration.
     pr = _post(client, "procurements", {"date": "2026-10-10", "title": "Pompa lumpur", "cost_centre": "workshop", "budget": 57_000_000,
                                         "items": [{"description": "Pompa lumpur 3 inch", "qty": 2, "est_price": 30_000_000}],
                                         "quotations": [{"vendor_id": v1["id"], "amount": 58_000_000, "chosen": True},
@@ -236,19 +236,22 @@ def test_procurement_quote_rules_budget_and_numbering(client, admin_headers):
     assert pr["est_total"] == 60_000_000 and pr["quote_count"] == 2 and pr["required_quotes"] == 3
     assert pr["lowest_amount"] == 55_000_000 and pr["chosen_vendor"] == "Vendor A" and pr["approved_amount"] == 58_000_000
     texts = [w["text"] for w in pr["warnings"]]
-    assert len(texts) == 3 and any(t.startswith("{needed} quotations") for t in texts)
+    assert len(texts) == 4 and any(t.startswith("{needed} quotations") for t in texts)
+    assert "Record the conflict-of-interest declaration of the people choosing the vendor" in texts
+    assert pr["chosen_vendor_status"] == "not_evaluated"
     over = next(w for w in pr["warnings"] if w["text"].startswith("Above the budget"))
     assert over["vars"]["over"] == 1_000_000
     # With the reasons given the quotation warnings go; two chosen quotations are refused.
     fixed = client.put(f"/api/records/procurements/{pr['id']}", json={**{k: pr[k] for k in ("date", "title", "cost_centre", "items", "quotations")},
                                                                      "budget": 60_000_000, "selection_reason": "Garansi 2 tahun",
-                                                                     "exception_reason": "Hanya dua distributor resmi"}, headers=admin_headers).json()
+                                                                     "exception_reason": "Hanya dua distributor resmi", "coi_status": "none"},
+                     headers=admin_headers).json()
     assert fixed["warning_count"] == 0
     two = [{"vendor_id": v1["id"], "amount": 1, "chosen": True}, {"vendor_id": v2["id"], "amount": 2, "chosen": True}]
     assert client.post("/api/records/procurements", json={"date": "2026-10-10", "title": "X", "cost_centre": "office", "quotations": two},
                        headers=admin_headers).status_code == 422
     # Below 10 jt one quotation is enough.
-    small = _post(client, "procurements", {"date": "2026-10-11", "title": "ATK", "cost_centre": "office",
+    small = _post(client, "procurements", {"date": "2026-10-11", "title": "ATK", "cost_centre": "office", "coi_status": "none",
                                            "items": [{"description": "Kertas", "qty": 10, "est_price": 50_000}],
                                            "quotations": [{"vendor_name": "Toko", "amount": 500_000, "chosen": True}]}, admin_headers)
     # (records.save takes the number before the checks, so the refused card above used PR-2026-002.)
@@ -264,6 +267,7 @@ def test_procurement_flow_requester_to_paid(client, admin_headers):
     v2 = _post(client, "vendors", {"name": "Vendor D", "category": "parts"}, admin_headers)
     # 20 jt estimate -> two quotations needed; chosen 22.2 jt is the lowest.
     pr = _post(client, "procurements", {"date": "2026-10-12", "title": "Batang bor", "requester": "req@example.com", "cost_centre": "field_ops",
+                                        "coi_status": "none",
                                         "items": [{"description": "Batang bor NW 3 m", "qty": 10, "est_price": 2_000_000}],
                                         "quotations": [{"vendor_id": v1["id"], "amount": 22_200_000, "chosen": True},
                                                        {"vendor_id": v2["id"], "amount": 23_000_000}]}, requester)
@@ -367,7 +371,7 @@ def test_ops_overview_shape_and_roles(client, admin_headers):
     res = client.get("/api/erp/ops/overview", headers=admin_headers)
     assert res.status_code == 200, res.text
     data = res.json()
-    assert set(data) == {"as_of", "equipment", "maintenance", "procurement", "assets", "performance"}
+    assert set(data) == {"as_of", "equipment", "maintenance", "procurement", "assets", "performance", "laboratory"}
     assert data["equipment"]["total"] == 2 and data["equipment"]["by_status"] == {"available": 1, "broken": 1}
     assert data["maintenance"]["calibration_overdue"] == 1  # never calibrated
     assert data["assets"]["count"] == 1 and data["assets"]["cost"] == 24_000_000
@@ -384,3 +388,127 @@ def test_ops_overview_shape_and_roles(client, admin_headers):
 @pytest.mark.parametrize("value,expected", [(9_999_999, 1), (10_000_000, 2), (49_999_999, 2), (50_000_000, 3)])
 def test_required_quotes_thresholds(value, expected):
     assert erp_ops.required_quotes(value, erp_ops.DEFAULT_SETTINGS) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Vendor evaluation (ISO 9001:2015 8.4.1), conflict of interest, segregation of duties
+# --------------------------------------------------------------------------- #
+
+SCORES_OK = {"score_quality": "4", "score_delivery": "3", "score_price": "5", "score_hse": "4", "score_responsiveness": "2"}
+SCORES_BAD = {"score_quality": "2", "score_delivery": "2", "score_price": "3", "score_hse": "3", "score_responsiveness": "2"}
+
+
+def test_vendor_evaluation_scores_outcomes_and_standing(client, admin_headers):
+    v = _post(client, "vendors", {"name": "Bengkel Hidrolik", "category": "workshop"}, admin_headers)
+    # Weights 30/25/20/15/10; scores as % of 5: 80, 60, 100, 80, 40
+    # -> (30x80 + 25x60 + 20x100 + 15x80 + 10x40) / 100 = (2400 + 1500 + 2000 + 1200 + 400) / 100 = 75.0 -> approved (from 75).
+    e1 = _post(client, "vendor_evaluations", {"vendor_id": v["id"], "date": "2025-09-01", **SCORES_OK}, admin_headers)
+    assert e1["score_pct"] == 75 and e1["outcome"] == "approved" and e1["next_evaluation"] == "2026-09-01" and e1["warning_count"] == 0
+    assert e1["weights"] == {"quality": 30, "delivery": 25, "price": 20, "hse": 15, "responsiveness": 10}
+    st = erp_ops.vendor_standing(v["id"], erp_ops._list("vendor_evaluations"), TODAY)
+    assert st["status"] == "approved" and st["reevaluation_overdue"]  # due 1 Sep 2026, before 26 Oct 2026
+    # 40, 40, 60, 60, 40 -> (1200 + 1000 + 1200 + 900 + 400) / 100 = 47.0 -> below 60: blocked; no improvement actions written.
+    e2 = _post(client, "vendor_evaluations", {"vendor_id": v["id"], "date": "2026-10-20", **SCORES_BAD}, admin_headers)
+    assert e2["score_pct"] == 47 and e2["outcome"] == "blocked" and e2["warning_count"] == 1
+    st = erp_ops.vendor_standing(v["id"], erp_ops._list("vendor_evaluations"), TODAY)
+    assert st["status"] == "blocked" and st["date"] == "2026-10-20" and not st["reevaluation_overdue"]
+    # 68 would be conditional (60 to below 75); a serious breach blocks whatever the score, and needs a description.
+    assert erp_ops.vendor_outcome(68, False, erp_ops.DEFAULT_SETTINGS) == "conditional"
+    assert erp_ops.vendor_outcome(95, True, erp_ops.DEFAULT_SETTINGS) == "blocked"
+    assert client.post("/api/records/vendor_evaluations", json={"vendor_id": v["id"], "date": "2026-10-21", **SCORES_OK, "critical_issue": True},
+                       headers=admin_headers).status_code == 422
+    # Missing a score: no outcome yet.
+    part = _post(client, "vendor_evaluations", {"vendor_id": v["id"], "date": "2026-10-22", "score_quality": "5"}, admin_headers)
+    assert part["score_pct"] is None and part["outcome"] == "" and part["warning_count"] == 1
+    board = {b["name"]: b for b in client.get("/api/erp/ops/vendor-standing", headers=admin_headers).json()}
+    assert board["Bengkel Hidrolik"]["status"] == "blocked" and board["Bengkel Hidrolik"]["score"] == 47
+
+
+def test_blocked_vendor_purchase_order_and_segregation_of_duties(client, admin_headers):
+    requester = _h(client, "req2@example.com", "general")
+    manager = _h(client, "mgr2@example.com", "manager")
+    v = _post(client, "vendors", {"name": "Toko Bermasalah", "category": "parts"}, admin_headers)
+    _post(client, "vendor_evaluations", {"vendor_id": v["id"], "date": "2026-10-01", **SCORES_BAD, "actions": "Perbaiki pengiriman"}, admin_headers)
+    # 3 x 1 jt = 3 jt: one quotation is enough; a conflict of interest is declared without saying how it is handled.
+    pr = _post(client, "procurements", {"date": "2026-10-12", "title": "Seal hidrolik", "requester": "req2@example.com", "cost_centre": "workshop",
+                                        "items": [{"description": "Seal kit", "qty": 3, "est_price": 1_000_000}],
+                                        "quotations": [{"vendor_id": v["id"], "amount": 3_000_000, "chosen": True}],
+                                        "coi_status": "declared", "coi_details": "Pemohon bersaudara dengan pemilik toko"}, requester)
+    texts = [w["text"] for w in pr["warnings"]]
+    assert pr["chosen_vendor_status"] == "blocked"
+    assert texts == ["The chosen vendor is blocked after its evaluation on {date} (score {score}%): choose another vendor",
+                     "Describe the declared conflict of interest and how it is handled"]
+    assert pr["warnings"][0]["vars"] == {"date": "2026-10-01", "score": 47}
+    url = f"/api/records/procurements/{pr['id']}/workflow"
+    client.post(url, json={"action": "submit"}, headers=requester)
+    client.post(url, json={"action": "review"}, headers=manager)
+    assert client.post(url, json={"action": "approve"}, headers=admin_headers).json()["wf_status"] == "approved"
+    po = {"procurement_id": pr["id"], "vendor_id": v["id"], "date": "2026-10-15", "status": "issued",
+          "items": [{"description": "Seal kit", "qty": 3, "unit_price": 1_000_000}]}
+    # Issuing to a blocked vendor is refused; a draft is kept with warnings. The admin approved the card
+    # and also raises the order: segregation of duties is flagged.
+    res = client.post("/api/records/purchase_orders", json=po, headers=admin_headers)
+    assert res.status_code == 422 and "blocked" in res.json()["detail"]
+    draft = _post(client, "purchase_orders", {**po, "status": "draft"}, admin_headers)
+    texts = [w["text"] for w in draft["warnings"]]
+    assert "This vendor is blocked after its evaluation on {date}" in texts
+    assert any("segregation of duties" in t for t in texts)
+    # Raised by someone other than the approver: no segregation warning.
+    fin = _h(client, "fin3@example.com", "finance")
+    other = _post(client, "purchase_orders", {**po, "status": "draft"}, fin)
+    assert not any("segregation of duties" in w["text"] for w in other["warnings"])
+
+
+# --------------------------------------------------------------------------- #
+# Maintenance performance: availability, MTBF, MTTR, preventive share, PM compliance
+# --------------------------------------------------------------------------- #
+
+def test_maintenance_metrics_by_hand(client, admin_headers):
+    eq = _post(client, "equipment", {"code": "DR-09", "name": "Mesin bor 9", "category": "drill_rig", "status": "available",
+                                     "in_service_date": "2026-01-01", "service_days": 90, "calibration_months": 12,
+                                     "last_calibration": "2025-05-01"}, admin_headers)
+    _post(client, "equipment", {"code": "DR-10", "name": "Mesin bor baru", "category": "drill_rig", "status": "available",
+                                "in_service_date": "2026-07-01"}, admin_headers)
+    wo = lambda **kw: _post(client, "work_orders", {"equipment_id": eq["id"], "description": "x", **kw}, admin_headers)  # noqa: E731
+    # Repair reported 10 Feb, work 11-13 Feb: down from the report to restoration = 3 days.
+    r1 = wo(type="corrective", status="completed", date="2026-02-10", start_date="2026-02-11", completed_date="2026-02-13")
+    assert r1["downtime"] == 3
+    wo(type="corrective", status="completed", date="2026-04-01", completed_date="2026-04-02", downtime_days=0.5)
+    wo(type="corrective", status="open", date="2026-06-28")  # a failure still being repaired
+    # Service planned 31 Mar, done 20 Apr: window 20% x 90 = 18 days -> 18 Apr: late. Same-day work: 0 days down.
+    wo(type="preventive", status="completed", date="2026-03-25", planned_date="2026-03-31", start_date="2026-04-20", completed_date="2026-04-20")
+    # Calibration planned 1 May, done 10 May: window min(20% x 365, 28) = 28 days -> on time; 1 day down.
+    wo(type="calibration", status="completed", date="2026-05-01", planned_date="2026-05-01", completed_date="2026-05-10",
+       calibration_result="pass", certificate_no="C-1", downtime_days=1)
+    wo(type="preventive", status="open", date="2026-06-20", planned_date="2026-06-29")
+    m = erp_ops.maintenance_metrics(date(2026, 1, 1), date(2026, 6, 30), today=date(2026, 7, 1))
+    f = m["fleet"]
+    # Required 1 Jan - 30 Jun = 181 days (DR-10 not yet in service); down 3 + 0.5 + 0 + 1 = 4.5; up 176.5.
+    assert f["equipment"] == 1 and f["required_days"] == 181 and f["downtime_days"] == 4.5
+    assert f["availability_pct"] == 97.5  # 176.5 / 181 = 97.51 %
+    assert f["failures"] == 3 and f["mtbf_days"] == 58.8  # 176.5 / 3
+    assert f["repairs_completed"] == 2 and f["mttr_days"] == 1.75  # (3 + 0.5) / 2
+    assert f["preventive_pct"] == 50  # 2 scheduled of 4 completed
+    # PM compliance: calibration on time, service late, the open service (planned 29 Jun, window to 17 Jul) not counted yet.
+    assert (f["pm_on_time"], f["pm_late"], f["pm_compliance_pct"]) == (1, 1, 50)
+    assert m["equipment"][0]["pm_pending"] == 1 and m["tables"][0]["rows"][0][0] == "DR-09"
+    # On 26 Oct the open service is past its window: 1 of 3 on time.
+    assert erp_ops.maintenance_metrics(date(2026, 1, 1), date(2026, 6, 30), today=TODAY)["fleet"]["pm_compliance_pct"] == 33.3
+    res = client.get("/api/erp/ops/maintenance-metrics?from=2026-01-01&to=2026-06-30", headers=admin_headers)
+    assert res.status_code == 200 and res.json()["period"] == {"from": "2026-01-01", "to": "2026-06-30"}
+    assert client.get("/api/erp/ops/maintenance-metrics?from=2026-07-01&to=2026-06-30", headers=admin_headers).status_code == 422
+
+
+def test_impairment_indicated_on_fixed_asset(client, admin_headers):
+    # Land (not depreciated): book value 900 jt, recoverable 700 jt -> indicated impairment loss 200 jt.
+    land = _post(client, "fixed_assets", {"code": "FA-020", "name": "Tanah gudang", "category": "land", "acquisition_date": "2020-05-01",
+                                          "cost": 900_000_000, "tax_group": "none", "tax_method": "straight_line", "book_method": "same_as_tax",
+                                          "impairment_review_date": "2025-12-31", "impairment_indicators": ["value_decline"],
+                                          "recoverable_amount": 700_000_000}, admin_headers)
+    assert land["impairment_loss"] == 200_000_000 and land["book_value"] == 900_000_000
+    values = {v["label"]: v["value"] for v in land["schedule"]["values"]}
+    assert values["Impairment loss indicated (not in the schedule)"] == 200_000_000
+    assert any("PSAK 236" in n for n in land["schedule"]["notes"])
+    # Recoverable amount above the book value: no loss.
+    assert erp_ops.impairment_indicated({"recoverable_amount": 1_000_000_000}, 900_000_000, False) == 0
+    assert erp_ops.impairment_indicated({}, 900_000_000, False) is None

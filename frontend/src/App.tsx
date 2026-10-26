@@ -56,6 +56,9 @@ const ProcurementPage = opsPage('ProcurementPage')
 const PurchaseOrdersPage = opsPage('PurchaseOrdersPage')
 const FixedAssetsPage = opsPage('FixedAssetsPage')
 const PerformancePage = opsPage('PerformancePage')
+const SampleReceiptsPage = opsPage('SampleReceiptsPage')
+const NonconformitiesPage = opsPage('NonconformitiesPage')
+const VendorEvaluationsPage = opsPage('VendorEvaluationsPage')
 const OpsSettingsPage = lazy(() => opsModule().then(m => ({ default: m.OpsSettingsPage })))
 const comModule = () => import('./tabs/ErpCommercial')
 const comPage = (name: string) => lazy(() => comModule().then(m => ({ default: (m as any)[name] as (p: PageProps) => JSX.Element })))
@@ -273,6 +276,8 @@ export default function App() {
   const lab: NavItem[] = [
     { key: 'lab', label: t('Laboratory tests'), icon: 'flask', entity: 'lab_tests' },
     { key: 'samples', label: t('Sample register'), icon: 'sample', entity: 'lab_tests' },
+    { key: 'sample_receipts', label: t('Sample receipts'), icon: 'sample', entity: 'sample_receipts' },
+    { key: 'nonconformities', label: t('Nonconformities'), icon: 'check', entity: 'nonconformities' },
     { key: 'labsummary', label: t('Results summary'), icon: 'list', entity: 'lab_tests' },
   ]
   const engineering: NavItem[] = [
@@ -293,6 +298,7 @@ export default function App() {
     { key: 'procurements', label: t('Procurement cards'), icon: 'cart', entity: 'procurements' },
     { key: 'purchase_orders', label: t('Purchase orders'), icon: 'invoice', entity: 'purchase_orders' },
     { key: 'vendors', label: t('Vendors'), icon: 'building', entity: 'vendors' },
+    { key: 'vendor_evaluations', label: t('Vendor evaluations'), icon: 'check', entity: 'vendor_evaluations' },
     { key: 'fixed_assets', label: t('Fixed assets'), icon: 'tag', entity: 'fixed_assets' },
   ]
   const people: NavItem[] = [
@@ -329,7 +335,8 @@ export default function App() {
     work_orders: i => <WorkOrdersPage intent={i} />, vendors: i => <VendorsPage intent={i} />,
     procurements: i => <ProcurementPage intent={i} />, purchase_orders: i => <PurchaseOrdersPage intent={i} />,
     fixed_assets: i => <FixedAssetsPage intent={i} />, performance: i => <PerformancePage intent={i} />,
-    ops_settings: () => <OpsSettingsPage />,
+    ops_settings: () => <OpsSettingsPage />, sample_receipts: i => <SampleReceiptsPage intent={i} />,
+    nonconformities: i => <NonconformitiesPage intent={i} />, vendor_evaluations: i => <VendorEvaluationsPage intent={i} />,
     pbd: i => <PbdPage intent={i} />, client_decisions: i => <ClientDecisionsPage intent={i} />, work_plans: i => <WorkPlansPage intent={i} />,
     guarantees: i => <GuaranteesPage intent={i} />, client_cards: i => <ClientCardsPage intent={i} />,
     receivables: () => <ReceivablesPage />, pricing_settings: () => <PricingSettingsPage />, overview: () => <OverviewPage />,

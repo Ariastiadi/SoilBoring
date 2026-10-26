@@ -126,6 +126,18 @@ _add(Entity(
           help="Work orders above this cost should go through a procurement card with approval."),
         F("due_soon_days", "int", "Warn this many days before a service or calibration is due", min=0, max=365, default=30),
         F("due_soon_hours", "number", "Warn this many hour-meter hours before a service is due", min=0, max=10000, default=50),
+        F("weight_quality", "percent", "Weight: quality of goods or work (%)", min=0, max=100, default=30, section="Vendor evaluation"),
+        F("weight_delivery", "percent", "Weight: delivery on time and complete (%)", min=0, max=100, default=25, section="Vendor evaluation"),
+        F("weight_price", "percent", "Weight: price and terms (%)", min=0, max=100, default=20, section="Vendor evaluation"),
+        F("weight_hse", "percent", "Weight: HSE, legal and document compliance (%)", min=0, max=100, default=15, section="Vendor evaluation"),
+        F("weight_responsiveness", "percent", "Weight: responsiveness and service (%)", min=0, max=100, default=10, section="Vendor evaluation"),
+        F("vendor_approved_from", "percent", "Approved from score (%)", min=0, max=100, default=75, section="Vendor evaluation"),
+        F("vendor_conditional_from", "percent", "Conditional from score (%)", min=0, max=100, default=60, section="Vendor evaluation",
+          help="Below this score the vendor is blocked."),
+        F("vendor_reevaluate_months", "int", "Re-evaluate vendors every (months)", min=1, max=60, default=12, section="Vendor evaluation"),
+        F("lab_authorisation", "select", "Lab results not yet authorised", default="warn", section="Laboratory", options=[
+            ("warn", "Allow marking the test done, with a warning"), ("require", "Refuse marking the test done")],
+          help="ISO/IEC 17025 7.8.1.1: results are reviewed and authorised before release."),
     ],
 ))
 
@@ -154,6 +166,40 @@ _add(Entity(
         F("active", "bool", "Active", default=True, list=True),
         F("notes", "longtext", "Notes", maxlen=2000),
         F("files", "files", "Documents", help="e.g. company deed, NIB, NPWP, bank letter, price list."),
+    ],
+))
+
+SCORE_1_5: List[Option] = [("5", "5 – Excellent"), ("4", "4 – Good"), ("3", "3 – Adequate"), ("2", "2 – Poor"), ("1", "1 – Unacceptable")]
+
+VENDOR_OUTCOMES: List[Option] = [("approved", "Approved"), ("conditional", "Conditional"), ("blocked", "Blocked")]
+
+_add(Entity(
+    name="vendor_evaluations", label="Vendor evaluations", label_one="Vendor evaluation", title="vendor_id", group="operations",
+    sort="-date", read=ALL_ROLES, write=("admin", "manager", "finance"), own_write=("general", "lab"),
+    fields=[
+        F("vendor_id", "ref", "Vendor", required=True, ref="vendors", list=True),
+        F("date", "date", "Evaluated on", required=True, list=True),
+        F("period_from", "date", "Period from"),
+        F("period_to", "date", "Period to"),
+        F("evaluator", "user", "Evaluated by"),
+        F("basis", "longtext", "Basis of the evaluation", maxlen=2000,
+          help="Orders, deliveries, inspections, incidents and complaints reviewed."),
+        F("score_quality", "select", "Quality of goods or work", options=SCORE_1_5, section="Scores"),
+        F("score_delivery", "select", "Delivery on time and complete", options=SCORE_1_5, section="Scores"),
+        F("score_price", "select", "Price and terms", options=SCORE_1_5, section="Scores"),
+        F("score_hse", "select", "HSE, legal and document compliance", options=SCORE_1_5, section="Scores",
+          help="Safety record on site, permits and licences, tax and company documents, and sustainability."),
+        F("score_responsiveness", "select", "Responsiveness and service", options=SCORE_1_5, section="Scores"),
+        F("critical_issue", "bool", "Serious breach (blocks the vendor whatever the score)", section="Scores",
+          help="e.g. a serious safety incident, fraud or bribery, falsified documents."),
+        F("critical_note", "text", "What happened", maxlen=300, section="Scores"),
+        F("actions", "longtext", "Improvement actions agreed", maxlen=2000),
+        F("score_pct", "percent", "Score (%)", readonly=True, list=True),
+        F("outcome", "select", "Outcome", readonly=True, list=True, options=VENDOR_OUTCOMES),
+        F("next_evaluation", "date", "Next evaluation due", readonly=True),
+        F("weights", "json", "Weights used", readonly=True),
+        WARNINGS, WARNING_COUNT,
+        F("files", "files", "Evidence"),
     ],
 ))
 
@@ -322,6 +368,14 @@ _add(Entity(
           help="Required when the chosen quotation is not the lowest."),
         F("exception_reason", "longtext", "Reason for fewer quotations", maxlen=2000,
           help="Sole supplier, emergency repair, continuation of an existing contract, etc."),
+        F("coi_status", "select", "Conflict of interest", section="Conflict of interest", options=[
+            ("none", "None: no one choosing the vendor has an interest in it"), ("declared", "Declared")],
+          help="Family, ownership, employment or gifts linking anyone who chooses or approves the vendor to it."),
+        F("coi_details", "longtext", "Who has what interest", maxlen=2000, section="Conflict of interest"),
+        F("coi_mitigation", "longtext", "How it is handled", maxlen=2000, section="Conflict of interest",
+          help="e.g. the person takes no part in choosing or approving, an extra reviewer is added."),
+        F("coi_by", "user", "Declared by", section="Conflict of interest"),
+        F("coi_date", "date", "Declared on", section="Conflict of interest"),
         F("cancelled", "bool", "Cancelled"),
         F("files", "files", "Quotations & documents"),
         F("est_total", "money", "Estimated total", readonly=True),
@@ -330,6 +384,8 @@ _add(Entity(
         F("lowest_amount", "money", "Lowest quotation", readonly=True),
         F("chosen_vendor", "text", "Chosen vendor", readonly=True),
         F("chosen_vendor_id", "text", "Chosen vendor record", readonly=True),
+        F("chosen_vendor_status", "select", "Chosen vendor's evaluation", readonly=True, options=[
+            *VENDOR_OUTCOMES, ("not_evaluated", "Not evaluated yet")]),
         F("approved_amount", "money", "Amount to approve", readonly=True, list=True),
         WARNINGS, WARNING_COUNT,
         F("notes", "longtext", "Notes", maxlen=2000),
@@ -412,6 +468,15 @@ _add(Entity(
         F("disposal_type", "select", "Disposal", options=DISPOSAL_TYPES, section="Disposal"),
         F("disposal_proceeds", "money", "Proceeds (IDR)", min=0, max=1e14, section="Disposal",
           help="Sale price or insurance payment."),
+        F("impairment_review_date", "date", "Impairment review on", section="Impairment (PSAK 236)",
+          help="At each reporting date: is there any sign the asset may be impaired?"),
+        F("impairment_indicators", "multiselect", "Signs of impairment", options=erp_ops.IMPAIRMENT_INDICATORS,
+          section="Impairment (PSAK 236)"),
+        F("recoverable_amount", "money", "Recoverable amount (IDR)", min=0, max=1e14, section="Impairment (PSAK 236)",
+          help="The higher of fair value less costs of disposal and value in use; only when there is a sign of impairment."),
+        F("impairment_note", "longtext", "Impairment notes", maxlen=2000, section="Impairment (PSAK 236)"),
+        F("impairment_loss", "money", "Impairment loss indicated", readonly=True,
+          help="Book value less the recoverable amount; booked by the accountant, not deducted in the schedule."),
         F("tax_life_years", "number", "Tax useful life (years)", readonly=True),
         F("tax_rate_pct", "percent", "Tax rate per year (%)", readonly=True),
         F("book_life", "number", "Book useful life (years)", readonly=True),
@@ -488,6 +553,7 @@ _add(Entity(
 
 COMPUTE_HOOKS.update({
     "vendors": erp_ops.compute_vendor,
+    "vendor_evaluations": erp_ops.compute_vendor_evaluation,
     "equipment": erp_ops.compute_equipment,
     "mobilisations": erp_ops.compute_mobilisation,
     "work_orders": erp_ops.compute_work_order,
@@ -496,3 +562,6 @@ COMPUTE_HOOKS.update({
     "fixed_assets": erp_ops.compute_fixed_asset,
     "performance_cards": erp_ops.compute_performance,
 })
+
+# Laboratory quality entities (sample receipt, nonconformities) and the lab test checks.
+from . import entities_lab  # noqa: E402,F401

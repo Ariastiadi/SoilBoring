@@ -12,6 +12,7 @@ import { useNav, type Intent, type TabKey } from '../nav'
 import { display, invalidate, number, optionLabel, useList, useSchemas } from '../records'
 import { Icon, PageHead, ScrollTable, formatDate, todayIso } from '../ui'
 import { useCatalog } from '../worksheets'
+import { SampleReceiptForm } from './ErpOps'
 
 const GROUPS: Array<[string, string]> = [
   ['01', 'General'], ['02', 'Survey'], ['03', 'Geotechnical'], ['04', 'Geophysics'], ['05', 'Laboratory'], ['06', 'Geology'],
@@ -257,6 +258,15 @@ export function SampleRegisterPage() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [labels, setLabels] = useState<SampleRow[] | null>(null)
+  const [receiving, setReceiving] = useState<SampleRow | null>(null)
+  const [receipts, setReceipts] = useState<Rec[]>([])
+  const canReceipts = !!schemas?.sample_receipts?.can_read
+  const canReceive = !!schemas?.sample_receipts?.can_create
+  const receiptField = schemas?.sample_receipts?.fields.find(f => f.name === 'receipt_status')
+  const loadReceipts = () => { if (canReceipts) listRecords('sample_receipts').then(setReceipts).catch(() => setReceipts([])) }
+  useEffect(loadReceipts, [canReceipts])
+  const receiptOf = (s: SampleRow) => receipts.find(r => String(r.borehole_id).toLowerCase() === s.borehole_id.toLowerCase()
+    && ((s.ref && String(r.sample_ref).toLowerCase() === s.ref.toLowerCase()) || Math.abs(Number(r.depth_top) - Number(s.top)) < 0.01))
   const projectName = projects?.find(p => p.id === project)?.name || ''
   const load = () => { setRows(null); getSamples(projectName || undefined).then(setRows).catch(e => setError(e.message)) }
   useEffect(load, [projectName])
@@ -318,22 +328,30 @@ export function SampleRegisterPage() {
         </section>
       )}
       {labels && <SampleLabels samples={labels} onClose={() => setLabels(null)} />}
+      {receiving && <SampleReceiptForm sample={receiving} project={project} onDone={saved => { setReceiving(null); if (saved) { invalidate('sample_receipts'); loadReceipts() } }} />}
       {rows && (
         <ScrollTable>
           <table className="data-table sample-table">
             <thead><tr>
               <th style={{ width: '2rem' }}><input type="checkbox" aria-label={t('Select all')} checked={rows.length > 0 && chosen.length === rows.length}
                 onChange={e => setPicked(e.target.checked ? Object.fromEntries(rows.map(r => [key(r), true])) : {})} /></th>
-              <th>{t('Borehole')}</th><th>{t('Sample')}</th><th>{t('Type')}</th><th className="num">{t('From (m)')}</th><th className="num">{t('To (m)')}</th><th>{t('Laboratory tests')}</th>
+              <th>{t('Borehole')}</th><th>{t('Sample')}</th><th>{t('Type')}</th><th className="num">{t('From (m)')}</th><th className="num">{t('To (m)')}</th>
+              {canReceipts && <th>{t('Lab receipt')}</th>}<th>{t('Laboratory tests')}</th>
             </tr></thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={7} className="muted">{t('No samples recorded in the boreholes yet. Samples are added in a borehole under depth data.')}</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={canReceipts ? 8 : 7} className="muted">{t('No samples recorded in the boreholes yet. Samples are added in a borehole under depth data.')}</td></tr>}
               {rows.map(s => (
                 <tr key={key(s)}>
                   <td><input type="checkbox" aria-label={`${s.borehole_id} ${s.ref}`} checked={!!picked[key(s)]} onChange={e => setPicked({ ...picked, [key(s)]: e.target.checked })} /></td>
                   <td className="nowrap"><strong>{s.borehole_id}</strong><div className="bh-sub">{s.project}</div></td>
                   <td data-label={t('Sample')}>{s.ref || '–'}</td><td data-label={t('Type')}>{s.type}</td>
                   <td className="num" data-label={t('From (m)')}>{number(s.top)}</td><td className="num" data-label={t('To (m)')}>{number(s.base)}</td>
+                  {canReceipts && <td data-label={t('Lab receipt')}>{(() => {
+                    const r = receiptOf(s)
+                    if (r) return <><span className={`chip status-${r.receipt_status}`}>{receiptField ? optionLabel(receiptField, r.receipt_status) : r.receipt_status}</span>
+                      <div className="bh-sub">{r.number}{r.condition === 'deviation' ? ` · ${t('Deviation found')}` : ''}</div></>
+                    return canReceive ? <button type="button" className="small" onClick={() => setReceiving(s)}>{t('Receive')}</button> : <span className="muted">–</span>
+                  })()}</td>}
                   <td data-label={t('Laboratory tests')} className="tests">{s.tests.length ? s.tests.map(x => (
                     <span key={x.id} className={`chip status-${x.status}`}>{testField ? optionLabel(testField, x.test_type) : x.test_type}</span>
                   )) : <span className="muted">–</span>}</td>

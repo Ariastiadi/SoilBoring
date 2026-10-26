@@ -5,7 +5,7 @@
  * schedule as of a date, operations overview for the management dashboard).
  */
 import { ReactNode, useEffect, useMemo, useState } from 'react'
-import { apiGet, type CalcResult, type Rec } from '../api'
+import { apiGet, listRecords, type CalcResult, type Rec } from '../api'
 import { t } from '../i18n'
 import { useNav, type Intent, type TabKey } from '../nav'
 import {
@@ -33,8 +33,51 @@ function useLive<T>(path: string | null, refresh: unknown = 0): { data: T | null
   return { data, error }
 }
 
+// Tones of the statuses added by the quality modules (the shared table covers the others).
+const TONE: Record<string, string> = {
+  ...STATUS_TONE, authorised: 'ok', awaiting: 'warn', conditional: 'warn', blocked: 'bad', not_evaluated: '',
+  on_hold: 'warn', in_store: 'active', returned: '', correction: 'warn', corrective_action: 'active', verification: 'warn',
+  ok: 'ok', failed: 'bad', not_calibrated: 'bad', not_required: '',
+}
+
 function Tone({ value, label }: { value: string, label: string }) {
-  return <span className={`status ${STATUS_TONE[value] ?? ''}`}>{label}</span>
+  return <span className={`status ${TONE[value] ?? ''}`}>{label}</span>
+}
+
+/** Records of one kind, read again whenever `round` changes (after an inline save). */
+function useRecords(entity: string | null, round = 0) {
+  const [rows, setRows] = useState<Rec[] | null>(null)
+  useEffect(() => {
+    let live = true
+    if (!entity) return
+    listRecords(entity).then(r => { if (live) setRows(r) }).catch(() => { if (live) setRows([]) })
+    return () => { live = false }
+  }, [entity, round])
+  return rows
+}
+
+/** A new record of another kind, filled in without leaving the page. */
+function InlineForm({ entityName, title, defaults, layout, onDone }: {
+  entityName: string, title: string, defaults: Record<string, any>, layout?: FormLayout, onDone: (saved: Rec | null) => void
+}) {
+  const schemas = useSchemas()
+  const entity = schemas?.[entityName]
+  if (!entity) return null
+  return (
+    <section className="card ops-inline">
+      <h3 className="card-title">{title}</h3>
+      <RecordForm entity={entity} defaults={defaults} layout={layout} onSaved={r => { invalidate(entityName); onDone(r) }} onCancel={() => onDone(null)} />
+    </section>
+  )
+}
+
+/** Switch between related registers on one page (used until they get their own menu entries). */
+export function ViewSwitch({ value, onChange, options, label }: { value: string, onChange: (v: string) => void, options: Array<[string, string]>, label: string }) {
+  return (
+    <div className="segmented ops-switch" role="group" aria-label={label}>
+      {options.map(([k, l]) => <button key={k} type="button" aria-pressed={value === k} onClick={() => onChange(k)}>{t(l)}</button>)}
+    </div>
+  )
 }
 
 const fieldOf = (schemas: ReturnType<typeof useSchemas>, entity: string, field: string) =>
@@ -56,7 +99,10 @@ type Warning = { text: string, vars?: Record<string, string | number>, money?: s
 
 function warningText(w: Warning) {
   const vars: Record<string, string | number> = {}
-  for (const [k, v] of Object.entries(w.vars || {})) vars[k] = w.money?.includes(k) ? money(v) : typeof v === 'number' ? number(v) : String(v)
+  for (const [k, v] of Object.entries(w.vars || {})) {
+    vars[k] = w.money?.includes(k) ? money(v) : typeof v === 'number' ? number(v)
+      : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? formatDate(v) : String(v)
+  }
   return t(w.text, vars)
 }
 
@@ -141,7 +187,7 @@ function EquipmentBoard({ board, onOpen }: { board: EquipmentState[], onOpen: (i
   )
 }
 
-function EquipmentLive({ record, board }: { record: Rec, board: EquipmentState[] | null }) {
+function EquipmentLive({ record, board, metrics }: { record: Rec, board: EquipmentState[] | null, metrics: MaintenanceMetricsResult | null }) {
   const nav = useNav()
   const go = go2(nav.go)
   const schemas = useSchemas()
@@ -151,6 +197,7 @@ function EquipmentLive({ record, board }: { record: Rec, board: EquipmentState[]
   const orders = (useList('work_orders') || []).filter(w => w.equipment_id === record.id)
   const mobs = (useList('mobilisations') || []).filter(m => (m.equipment || []).some((r: Rec) => r.equipment_id === record.id))
   const b = board?.find(x => x.id === record.id)
+  const m = metrics?.equipment.find(x => x.id === record.id)
   const canWo = !!schemas?.work_orders?.can_create
   const newWo = (type: string) => go('work_orders', { newWith: { equipment_id: record.id, type, date: todayIso(), status: 'open', hour_meter: b?.hours_now ?? undefined } })
   return (
@@ -179,6 +226,17 @@ function EquipmentLive({ record, board }: { record: Rec, board: EquipmentState[]
             <div><dt>{t('Hour meter (h)')}</dt><dd>{number(b.hours_now)}</dd></div>
             <div><dt>{t('Open work orders')}</dt><dd>{b.open_work_orders}</dd></div>
           </dl>
+          {m && (
+            <>
+              <h4 className="ops-subhead">{t('Maintenance performance, {from} – {to}', { from: formatDate(metrics?.period.from), to: formatDate(metrics?.period.to) })}</h4>
+              <dl className="facts-grid compact">
+                <div><dt>{t('Availability')}</dt><dd>{pct(m.availability_pct)}</dd></div>
+                <div><dt>MTBF</dt><dd>{days(m.mtbf_days)}<div className="bh-sub">{t('{n} failures', { n: m.failures })}</div></dd></div>
+                <div><dt>MTTR</dt><dd>{days(m.mttr_days)}</dd></div>
+                <div><dt>{t('PM compliance')}</dt><dd>{pct(m.pm_compliance_pct)}</dd></div>
+              </dl>
+            </>
+          )}
         </section>
       )}
       {orders.length > 0 && (
@@ -235,6 +293,7 @@ const EQUIPMENT_LAYOUT: FormLayout = {
 export function EquipmentPage({ intent }: { intent?: Intent }) {
   const [round, setRound] = useState(0)
   const { data: board } = useLive<EquipmentState[]>('/api/erp/ops/equipment-status', round)
+  const { data: metrics } = useLive<MaintenanceMetricsResult>('/api/erp/ops/maintenance-metrics', round)
   const jump = useJump(intent)
   return (
     <RecordsPage key={jump.key} entityName="equipment" openId={jump.openId} startNew={intent?.newWith}
@@ -243,7 +302,7 @@ export function EquipmentPage({ intent }: { intent?: Intent }) {
       columns={['code', 'name', 'category', 'status', 'location', 'next_calibration_due', 'next_service_due']}
       formLayout={EQUIPMENT_LAYOUT}
       toolbar={board && board.length > 0 ? <EquipmentBoard board={board} onOpen={jump.open} /> : null}
-      extra={r => <EquipmentLive record={r} board={board} key={r.updated_at} />}
+      extra={r => <EquipmentLive record={r} board={board} metrics={metrics} key={r.updated_at} />}
       hideInView={['next_service_hours']}
       formTools={(_d, _s, place) => place === 'bottom' ? <p className="help">{t('The status shown in lists is the one set by hand; the status board above shows mobilised equipment from active mobilisations.')}</p> : null}
       actions={() => <button type="button" className="quiet" onClick={() => setRound(n => n + 1)}>{t('Refresh status')}</button>} />
@@ -366,6 +425,46 @@ function DueList({ onCreate }: { onCreate?: (item: DueItem) => void }) {
   )
 }
 
+type EquipmentMetrics = {
+  id: string, code: string, name: string, required_days: number, downtime_days: number, availability_pct: number | null,
+  failures: number, mtbf_days: number | null, repairs_completed: number, mttr_days: number | null, preventive_pct: number | null,
+  pm_on_time: number, pm_late: number, pm_pending: number, pm_compliance_pct: number | null, scheduled_done: number, corrective_done: number,
+}
+type FleetMetrics = Omit<EquipmentMetrics, 'id' | 'code' | 'name' | 'pm_pending'> & { equipment: number }
+export type MaintenanceMetricsResult = CalcResult & { period: { from: string, to: string }, fleet: FleetMetrics, equipment: EquipmentMetrics[] }
+
+const pct = (v: number | null | undefined) => v === null || v === undefined ? '–' : `${number(v)} %`
+const days = (v: number | null | undefined) => v === null || v === undefined ? '–' : t('{n} days', { n: number(v) })
+
+/** Availability, MTBF, MTTR, preventive share and PM compliance over a chosen period. */
+function MaintenanceMetrics() {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const query = [from && `from=${from}`, to && `to=${to}`].filter(Boolean).join('&')
+  const { data, error } = useLive<MaintenanceMetricsResult>(`/api/erp/ops/maintenance-metrics${query ? `?${query}` : ''}`)
+  const f = data?.fleet
+  return (
+    <details className="card ops-attention">
+      <summary>{t('Maintenance performance')} {f && <span className="muted small">· {t('availability {a}, MTBF {b}, MTTR {c}', { a: pct(f.availability_pct), b: days(f.mtbf_days), c: days(f.mttr_days) })}</span>}</summary>
+      <div className="ops-period">
+        <div className="field"><label htmlFor="mm-from">{t('Period from')}</label><DateInput id="mm-from" value={from || data?.period.from || ''} onChange={setFrom} /></div>
+        <div className="field"><label htmlFor="mm-to">{t('Period to')}</label><DateInput id="mm-to" value={to || data?.period.to || ''} onChange={setTo} /></div>
+      </div>
+      {error && <p className="notice error">{error}</p>}
+      {f && (
+        <div className="kpis" style={{ margin: '.5rem 0 1rem' }}>
+          <Kpi label={t('Availability')} value={pct(f.availability_pct)} sub={t('{n} days down', { n: number(f.downtime_days) })} />
+          <Kpi label="MTBF" value={days(f.mtbf_days)} sub={t('{n} failures', { n: f.failures })} />
+          <Kpi label="MTTR" value={days(f.mttr_days)} sub={t('{n} repairs completed', { n: f.repairs_completed })} />
+          <Kpi label={t('Preventive share')} value={pct(f.preventive_pct)} sub={t('{a} preventive, {b} corrective', { a: f.scheduled_done, b: f.corrective_done })} />
+          <Kpi label={t('PM compliance')} value={pct(f.pm_compliance_pct)} sub={t('{a} on time, {b} late', { a: f.pm_on_time, b: f.pm_late })} />
+        </div>
+      )}
+      {data && <ResultView result={{ tables: data.tables, notes: data.notes, method: data.method }} />}
+    </details>
+  )
+}
+
 function WorkOrderSummary({ record }: { record: Rec }) {
   const open = !['completed', 'cancelled'].includes(record.status) && record.start_date
   const running = open ? Math.max(0, Math.round((Date.parse(todayIso()) - Date.parse(record.start_date)) / 86400000)) : null
@@ -399,7 +498,7 @@ export function WorkOrdersPage({ intent }: { intent?: Intent }) {
       description={t('Preventive service, repairs, calibration and inspections, with parts, costs and downtime.')}
       defaults={{ date: todayIso(), status: 'open', type: 'corrective', priority: 'normal', performed_by: 'internal' }}
       columns={['number', 'equipment_id', 'type', 'status', 'date', 'total_cost', 'warning_count']}
-      toolbar={<DueList onCreate={schemas?.work_orders?.can_create ? create : undefined} />}
+      toolbar={<><DueList onCreate={schemas?.work_orders?.can_create ? create : undefined} /><MaintenanceMetrics /></>}
       formLayout={{
         first: ['equipment_id', 'type', 'priority', 'status', 'date', 'description'],
         groups: [{ title: 'Calibration certificate', fields: ['calibration_result', 'certificate_no'] }],
@@ -442,13 +541,130 @@ function VendorHistory({ record }: { record: Rec }) {
   )
 }
 
-export function VendorsPage({ intent }: { intent?: Intent }) {
+export type VendorStanding = {
+  id: string, name: string, category: string, active: boolean, status: string, score: number | null, date: string | null,
+  next_due: string | null, reevaluation_overdue: boolean, evaluation_id: string | null,
+}
+
+const VENDOR_STATUS: Record<string, string> = { approved: 'Approved', conditional: 'Conditional', blocked: 'Blocked', not_evaluated: 'Not evaluated yet' }
+
+function VendorBoard({ board, onOpen }: { board: VendorStanding[], onOpen: (id: string) => void }) {
+  const active = board.filter(v => v.active)
+  const count = (s: string) => active.filter(v => v.status === s).length
+  const attention = active.filter(v => ['blocked', 'conditional'].includes(v.status) || v.reevaluation_overdue)
   return (
-    <RecordsPage entityName="vendors" openId={intent?.open} startNew={intent?.newWith}
-      description={t('Suppliers, workshops, calibration laboratories and transporters, with their rating.')}
+    <section className="ops-board">
+      <div className="kpis">
+        <Kpi label={t('Approved')} value={count('approved')} />
+        <Kpi label={t('Conditional')} value={count('conditional')} />
+        <Kpi label={t('Blocked')} value={count('blocked')} />
+        <Kpi label={t('Not evaluated yet')} value={count('not_evaluated')} />
+        <Kpi label={t('Re-evaluation overdue')} value={active.filter(v => v.reevaluation_overdue).length} />
+      </div>
+      {attention.length > 0 && (
+        <details className="card ops-attention">
+          <summary>{t('Needs attention')} <span className="muted small">· {attention.length}</span></summary>
+          <ScrollTable>
+            <table className="data-table">
+              <thead><tr><th>{t('Vendor')}</th><th>{t('Evaluation')}</th><th className="num">{t('Score (%)')}</th><th>{t('Next evaluation due')}</th></tr></thead>
+              <tbody>
+                {attention.map(v => (
+                  <tr key={v.id} className="clickable" onClick={() => onOpen(v.id)}>
+                    <td><strong>{v.name}</strong></td>
+                    <td><Tone value={v.status} label={t(VENDOR_STATUS[v.status] || v.status)} /></td>
+                    <td className="num">{number(v.score)}</td>
+                    <td className="nowrap">{v.next_due ? formatDate(v.next_due) : '–'}{v.reevaluation_overdue && <div className="bh-sub">{t('Overdue')}</div>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollTable>
+        </details>
+      )}
+    </section>
+  )
+}
+
+const EVALUATION_LAYOUT: FormLayout = {
+  first: ['vendor_id', 'date', 'evaluator', 'score_quality', 'score_delivery', 'score_price', 'score_hse', 'score_responsiveness', 'actions'],
+  groups: [
+    { title: 'Period and basis', fields: ['period_from', 'period_to', 'basis'] },
+    { title: 'Serious breach', fields: ['critical_issue', 'critical_note'] },
+  ],
+}
+
+function VendorEvaluations({ record, standing, onChanged }: { record: Rec, standing: VendorStanding | undefined, onChanged: () => void }) {
+  const { email } = useNav()
+  const schemas = useSchemas()
+  const [round, setRound] = useState(0)
+  const [adding, setAdding] = useState(false)
+  const outcome = useOption('vendor_evaluations', 'outcome')
+  const rows = (useRecords('vendor_evaluations', round) || []).filter(e => e.vendor_id === record.id)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+  const canAdd = !!schemas?.vendor_evaluations?.can_create
+  return (
+    <section className="card ops-live">
+      <div className="ops-live-head">
+        <div>
+          <h3 className="card-title">{t('Vendor evaluation')}</h3>
+          {standing && <Tone value={standing.status} label={t(VENDOR_STATUS[standing.status] || standing.status)} />}
+          {standing?.score !== null && standing?.score !== undefined && <span className="muted small"> · {number(standing.score)} %</span>}
+          {standing?.next_due && <p className="help">{t('Next evaluation due {d}', { d: formatDate(standing.next_due) })}{standing.reevaluation_overdue ? ` · ${t('Overdue')}` : ''}</p>}
+        </div>
+        {canAdd && !adding && <button type="button" className="small" onClick={() => setAdding(true)}><Icon name="plus" />{t('New evaluation')}</button>}
+      </div>
+      {adding && (
+        <InlineForm entityName="vendor_evaluations" title={t('New evaluation')} layout={EVALUATION_LAYOUT}
+          defaults={{ vendor_id: record.id, date: todayIso(), evaluator: email }}
+          onDone={saved => { setAdding(false); if (saved) { setRound(n => n + 1); onChanged() } }} />
+      )}
+      {rows.length > 0 ? (
+        <ScrollTable>
+          <table className="data-table">
+            <thead><tr><th>{t('Evaluated on')}</th><th className="num">{t('Score (%)')}</th><th>{t('Outcome')}</th><th>{t('Improvement actions agreed')}</th></tr></thead>
+            <tbody>
+              {rows.map(e => (
+                <tr key={e.id}>
+                  <td className="nowrap">{formatDate(e.date)}</td><td className="num">{number(e.score_pct)}</td>
+                  <td>{e.outcome ? <Tone value={e.outcome} label={outcome(e.outcome)} /> : '–'}</td><td>{e.actions || '–'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollTable>
+      ) : <p className="muted">{t('No evaluation yet. ISO 9001 asks for criteria to evaluate, select, monitor and re-evaluate suppliers.')}</p>}
+    </section>
+  )
+}
+
+export function VendorEvaluationsPage({ intent, switcher }: { intent?: Intent, switcher?: ReactNode }) {
+  const { email } = useNav()
+  return (
+    <RecordsPage entityName="vendor_evaluations" openId={intent?.open} startNew={intent?.newWith}
+      description={t('Periodic scoring of vendors on quality, delivery, price, HSE and compliance, and responsiveness; the outcome approves, conditions or blocks the vendor.')}
+      defaults={{ date: todayIso(), evaluator: email }}
+      columns={['vendor_id', 'date', 'score_pct', 'outcome', 'warning_count']}
+      toolbar={switcher}
+      formLayout={EVALUATION_LAYOUT}
+      extra={r => <Checks record={r} />}
+      hideInView={['warning_count']} />
+  )
+}
+
+export function VendorsPage({ intent }: { intent?: Intent }) {
+  const [view, setView] = useState('vendors')
+  const [round, setRound] = useState(0)
+  const { data: board } = useLive<VendorStanding[]>('/api/erp/ops/vendor-standing', round)
+  const jump = useJump(intent)
+  const switcher = <ViewSwitch value={view} onChange={setView} label={t('Show')} options={[['vendors', 'Vendors'], ['evaluations', 'Vendor evaluations']]} />
+  if (view === 'evaluations') return <VendorEvaluationsPage switcher={switcher} />
+  return (
+    <RecordsPage key={jump.key} entityName="vendors" openId={jump.openId} startNew={intent?.newWith}
+      description={t('Suppliers, workshops, calibration laboratories and transporters, with their evaluation: approved, conditional or blocked.')}
       defaults={{ active: true }}
+      toolbar={<>{switcher}{board && board.length > 0 ? <VendorBoard board={board} onOpen={jump.open} /> : null}</>}
       formLayout={{ groups: [{ title: 'Tax and bank details', fields: ['npwp', 'bank_name', 'bank_account', 'bank_holder'] }] }}
-      extra={r => <VendorHistory record={r} />} />
+      extra={r => <><VendorEvaluations record={r} standing={board?.find(b => b.id === r.id)} onChanged={() => setRound(n => n + 1)} /><VendorHistory record={r} /></>} />
   )
 }
 
@@ -527,7 +743,8 @@ function ProcurementCard({ record, states }: { record: Rec, states: ProcurementS
       <Checks record={record} />
       <div className="kpis" style={{ margin: '.75rem 0' }}>
         <Kpi label={t('Estimated total')} value={money(record.est_total)} moneyValue />
-        <Kpi label={t('Amount to approve')} value={money(record.approved_amount)} moneyValue sub={record.chosen_vendor || undefined} />
+        <Kpi label={t('Amount to approve')} value={money(record.approved_amount)} moneyValue
+          sub={record.chosen_vendor ? <>{record.chosen_vendor}{record.chosen_vendor_status && <> · <Tone value={record.chosen_vendor_status} label={t(VENDOR_STATUS[record.chosen_vendor_status] || record.chosen_vendor_status)} /></>}</> : undefined} />
         <Kpi label={t('Quotations')} value={`${number(record.quote_count ?? 0)} / ${number(record.required_quotes ?? 1)}`} sub={t('received / required')} />
         {st && st.ordered !== null && st.orders.length > 0 && <Kpi label={t('Ordered')} value={money(st.ordered)} moneyValue sub={st.paid ? t('paid {amount}', { amount: money(st.paid) }) : undefined} />}
       </div>
@@ -578,16 +795,20 @@ export function ProcurementPage({ intent }: { intent?: Intent }) {
   return (
     <RecordsPage entityName="procurements" openId={intent?.open} startNew={intent?.newWith}
       description={t('Purchase request, quotation comparison and approval, then purchase orders, goods receipt and the vendor invoice.')}
-      defaults={{ date: todayIso(), requester: email, cost_centre: 'project' }}
+      defaults={{ date: todayIso(), requester: email, cost_centre: 'project', coi_by: email, coi_date: todayIso() }}
       columns={['number', 'title', 'date', 'requester', 'approved_amount', 'wf_status', 'warning_count']}
       toolbar={active.length > 0 ? <StagePipeline states={active} /> : null}
       formLayout={{
-        first: ['title', 'date', 'requester', 'cost_centre', 'project_id', 'needed_by', 'items', 'budget', 'quotations', 'selection_reason'],
-        groups: [{ title: 'Fewer quotations than required', fields: ['exception_reason'] }],
+        first: ['title', 'date', 'requester', 'cost_centre', 'project_id', 'needed_by', 'items', 'budget', 'quotations', 'selection_reason', 'coi_status'],
+        groups: [
+          { title: 'Fewer quotations than required', fields: ['exception_reason'] },
+          { title: 'Conflict of interest', fields: ['coi_details', 'coi_mitigation', 'coi_by', 'coi_date'] },
+        ],
+        hide: d => d.coi_status === 'declared' ? [] : ['coi_details', 'coi_mitigation'],
       }}
       formTools={tools}
       extra={r => <ProcurementCard record={r} states={states} />}
-      hideInView={r => ['warning_count', 'est_total', 'quote_count', 'required_quotes', 'lowest_amount', 'chosen_vendor_id', 'chosen_vendor', 'approved_amount',
+      hideInView={r => ['warning_count', 'est_total', 'quote_count', 'required_quotes', 'lowest_amount', 'chosen_vendor_id', 'chosen_vendor', 'approved_amount', 'chosen_vendor_status',
         ...(r.quotations || []).some((q: Rec) => q.amount !== null && q.amount !== undefined && q.amount !== '') ? ['quotations'] : [], ...(r.cancelled ? [] : ['cancelled'])]} />
   )
 }
@@ -705,7 +926,7 @@ export function FixedAssetsPage({ intent }: { intent?: Intent }) {
   const sum = (k: string) => held.reduce((s, a) => s + (Number(a[k]) || 0), 0)
   return (
     <RecordsPage entityName="fixed_assets" openId={intent?.open} startNew={intent?.newWith}
-      description={t('Fixed asset cards with tax depreciation (PMK 72/2023) and book depreciation (PSAK 216), book value and disposals.')}
+      description={t('Fixed asset cards with tax depreciation (PMK 72/2023) and book depreciation (PSAK 216), impairment review (PSAK 236), book value and disposals.')}
       defaults={{ tax_method: 'straight_line', book_method: 'same_as_tax' }}
       toolbar={!intent?.open && held.length > 0 ? (
         <div className="kpis" style={{ marginBottom: '1rem' }}>
@@ -720,6 +941,7 @@ export function FixedAssetsPage({ intent }: { intent?: Intent }) {
         groups: [
           { title: 'Location and purchase', fields: ['location', 'custodian', 'vendor_id', 'procurement_id', 'invoice_ref'] },
           { title: 'Disposal', fields: ['disposal_date', 'disposal_type', 'disposal_proceeds'] },
+          { title: 'Impairment (PSAK 236)', fields: ['impairment_review_date', 'impairment_indicators', 'recoverable_amount', 'impairment_note'] },
         ],
         hide: d => [...(d.book_method === 'same_as_tax' || d.book_method === 'none' ? ['book_life_years', 'residual_value'] : [])],
       }}
@@ -778,6 +1000,176 @@ export function PerformancePage({ intent }: { intent?: Intent }) {
 }
 
 // ---------------------------------------------------------------------------
+// Laboratory quality (ISO/IEC 17025): sample receipts, nonconformities, checks on a lab test
+// ---------------------------------------------------------------------------
+
+type CalibrationCheck = { equipment_id: string, code: string, name: string, status: string, last: string | null, due: string | null }
+
+const CAL_STATUS: Record<string, string> = {
+  ok: 'In calibration', overdue: 'Calibration overdue', failed: 'Failed calibration', not_calibrated: 'No calibration on record', not_required: 'No calibration needed',
+}
+
+/** Fields of a lab test added for ISO/IEC 17025 (for the form layout of the laboratory page). */
+export const LAB_QUALITY_FIELDS = ['receipt_id', 'equipment_used', 'authorised']
+/** Fields shown by LabQualityPanel instead of the plain record view. */
+export const LAB_QUALITY_HIDDEN = ['warning_count', 'report_disclaimer', 'result_status', 'authorised', 'authorised_by', 'authorised_at', 'results_entered_by']
+
+const NC_LAYOUT: FormLayout = {
+  first: ['date', 'source', 'description', 'risk', 'lab_test_id', 'equipment_id', 'project_id', 'detected_by'],
+  groups: [
+    { title: 'Control and correction', fields: ['correction', 'work_halted', 'impact', 'decision', 'customer_action', 'resumption_authorised_by', 'resumed_on'] },
+    { title: 'Corrective action', fields: ['corrective_action_needed', 'root_cause', 'corrective_action', 'action_owner', 'action_due', 'action_done_on',
+      'effectiveness_on', 'effective', 'effectiveness_note', 'risks_updated', 'system_change'] },
+    { title: 'Closure', fields: ['closed_on'] },
+  ],
+  hide: d => [
+    ...(d.work_halted ? [] : ['resumption_authorised_by', 'resumed_on']),
+    ...(d.corrective_action_needed === 'yes' ? [] : ['root_cause', 'corrective_action', 'action_owner', 'action_due', 'action_done_on',
+      'effectiveness_on', 'effective', 'effectiveness_note', 'risks_updated', 'system_change']),
+  ],
+}
+
+/** Release status, report disclaimer, calibration of the equipment used and nonconformities of one lab test. */
+export function LabQualityPanel({ record }: { record: Rec }) {
+  const { email } = useNav()
+  const schemas = useSchemas()
+  const release = useOption('lab_tests', 'result_status')
+  const stage = useOption('nonconformities', 'stage')
+  const deviation = useOption('sample_receipts', 'deviations')
+  const [round, setRound] = useState(0)
+  const [raising, setRaising] = useState(false)
+  const ncs = (useRecords(schemas?.nonconformities?.can_read ? 'nonconformities' : null, round) || []).filter(n => n.lab_test_id === record.id)
+  const receipts = useList(schemas?.sample_receipts?.can_read ? 'sample_receipts' : null)
+  const receipt = receipts?.find(r => r.id === record.receipt_id)
+  const checks: CalibrationCheck[] = Array.isArray(record.calibration_check) ? record.calibration_check : []
+  const canRaise = !!schemas?.nonconformities?.can_create
+  return (
+    <section className="card ops-live">
+      <div className="ops-live-head">
+        <div>
+          <h3 className="card-title">{t('Quality checks')}</h3>
+          {record.result_status && <Tone value={record.result_status} label={release(record.result_status)} />}
+          {record.authorised_by && <p className="help">{t('Authorised by {who} on {d}', { who: record.authorised_by, d: formatDate(record.authorised_at) })}</p>}
+          {record.results_entered_by && <p className="help">{t('Results entered by {who}', { who: record.results_entered_by })}</p>}
+          {receipt && <p className="help">{t('Sample receipt {n}, received {d}', { n: receipt.number, d: formatDate(receipt.received_on) })}</p>}
+        </div>
+        {canRaise && !raising && <button type="button" className="small" onClick={() => setRaising(true)}><Icon name="plus" />{t('Raise nonconformity')}</button>}
+      </div>
+      <Checks record={record} />
+      {record.report_disclaimer && <p className="notice warn"><strong>{t('Disclaimer for the report')}:</strong> {receipt
+        ? t('Sample received with deviations from the specified conditions ({detail}); the customer asked for testing. Results may be affected.', {
+          detail: [...(receipt.deviations || []).map((d: string) => deviation(d)), receipt.condition_note].filter(Boolean).join('; ') })
+        : record.report_disclaimer}</p>}
+      {checks.length > 0 && (
+        <ScrollTable>
+          <table className="data-table">
+            <thead><tr><th>{t('Equipment used')}</th><th>{t('Calibration on the test date')}</th><th>{t('Last calibration')}</th><th>{t('Due')}</th></tr></thead>
+            <tbody>
+              {checks.map(c => (
+                <tr key={c.equipment_id}>
+                  <td><strong>{c.code}</strong><div className="bh-sub">{c.name}</div></td>
+                  <td><Tone value={c.status} label={t(CAL_STATUS[c.status] || c.status)} /></td>
+                  <td className="nowrap">{c.last ? formatDate(c.last) : '–'}</td><td className="nowrap">{c.due ? formatDate(c.due) : '–'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollTable>
+      )}
+      {raising && (
+        <InlineForm entityName="nonconformities" title={t('Raise nonconformity')} layout={NC_LAYOUT}
+          defaults={{ date: todayIso(), source: checks.some(c => c.status !== 'ok' && c.status !== 'not_required') ? 'equipment' : 'testing',
+            risk: 'medium', lab_test_id: record.id, project_id: record.project_id || '', detected_by: email }}
+          onDone={saved => { setRaising(false); if (saved) setRound(n => n + 1) }} />
+      )}
+      {ncs.length > 0 && (
+        <>
+          <h4 className="ops-subhead">{t('Nonconformities')}</h4>
+          <ul className="ops-plain">
+            {ncs.map(n => <li key={n.id}><strong>{n.number}</strong> {n.description} · <Tone value={n.stage} label={stage(n.stage)} /></li>)}
+          </ul>
+        </>
+      )}
+    </section>
+  )
+}
+
+const NC_STEPS: Array<[string, string]> = [['open', 'Open'], ['correction', 'Correction'], ['corrective_action', 'Corrective action'], ['verification', 'Effectiveness check'], ['closed', 'Closed']]
+
+export function NonconformitiesPage({ intent, switcher }: { intent?: Intent, switcher?: ReactNode }) {
+  const { email } = useNav()
+  return (
+    <RecordsPage entityName="nonconformities" openId={intent?.open} startNew={intent?.newWith}
+      description={t('Work or results that do not conform: immediate correction, impact on earlier results, decision, customer notice, and corrective action checked for effectiveness (ISO/IEC 17025 7.10 and 8.7).')}
+      defaults={{ date: todayIso(), risk: 'medium', detected_by: email }}
+      columns={['number', 'date', 'source', 'risk', 'stage', 'closed_on', 'warning_count']}
+      toolbar={switcher}
+      formLayout={NC_LAYOUT}
+      extra={r => <><Steps steps={NC_STEPS} current={r.stage} label={t('Stage')} /><Checks record={r} /></>}
+      hideInView={['warning_count', 'stage']} />
+  )
+}
+
+const RECEIPT_LAYOUT: FormLayout = {
+  first: ['received_on', 'borehole_id', 'sample_ref', 'depth_top', 'depth_base', 'sample_type', 'condition', 'deviations', 'condition_note', 'storage_location'],
+  groups: [
+    { title: 'Deviation', fields: ['customer_consulted_on', 'customer_instruction', 'decision'] },
+    { title: 'Receipt details', fields: ['time', 'received_by', 'delivered_by', 'project_id', 'storage_condition'] },
+    { title: 'Chain of custody', fields: ['custody'] },
+    { title: 'Retention and disposal', fields: ['retain_until', 'disposed_on', 'disposal_method', 'disposal_by'] },
+  ],
+  hide: d => d.condition === 'deviation' ? [] : ['deviations', 'customer_consulted_on', 'customer_instruction', 'decision'],
+}
+
+function ReceiptSummary({ record }: { record: Rec }) {
+  const tests = (useList('lab_tests') || []).filter(x => x.receipt_id === record.id)
+  const testType = useOption('lab_tests', 'test_type')
+  const status = useOption('lab_tests', 'status')
+  return (
+    <>
+      <Checks record={record} />
+      <div className="kpis" style={{ margin: '.75rem 0' }}>
+        <Kpi label={t('Now held by')} value={record.current_holder || '–'} sub={record.current_location || undefined} />
+        <Kpi label={t('Days in store')} value={number(record.days_in_store)} sub={record.retain_until ? t('keep until {d}', { d: formatDate(record.retain_until) }) : undefined} />
+        <Kpi label={t('Laboratory tests')} value={tests.length} />
+      </div>
+      {tests.length > 0 && (
+        <ul className="ops-plain">
+          {tests.map(x => <li key={x.id}>{testType(x.test_type)} · <Tone value={x.status} label={status(x.status)} /></li>)}
+        </ul>
+      )}
+    </>
+  )
+}
+
+export function SampleReceiptsPage({ intent, switcher }: { intent?: Intent, switcher?: ReactNode }) {
+  const { email } = useNav()
+  return (
+    <RecordsPage entityName="sample_receipts" openId={intent?.open} startNew={intent?.newWith}
+      description={t('Samples arriving at the laboratory: condition on arrival, deviations and the customer’s decision, storage, chain of custody, retention and disposal (ISO/IEC 17025 7.4).')}
+      defaults={{ received_on: todayIso(), condition: 'as_specified', received_by: email }}
+      columns={['number', 'received_on', 'borehole_id', 'sample_ref', 'condition', 'receipt_status', 'warning_count']}
+      toolbar={switcher}
+      formLayout={RECEIPT_LAYOUT}
+      extra={r => <ReceiptSummary record={r} />}
+      hideInView={['warning_count', 'custody']} />
+  )
+}
+
+/** Receipt of one sample from the sample register, filled in without leaving the register. */
+export function SampleReceiptForm({ sample, project, onDone }: {
+  sample: { borehole_id: string, ref: string, top: number | null, base: number | null, type: string }, project?: string, onDone: (saved: Rec | null) => void
+}) {
+  const { email } = useNav()
+  return (
+    <InlineForm entityName="sample_receipts" title={t('Sample receipt: {s}', { s: `${sample.borehole_id} ${sample.ref}` })} layout={RECEIPT_LAYOUT}
+      defaults={{ received_on: todayIso(), condition: 'as_specified', received_by: email, borehole_id: sample.borehole_id,
+        sample_ref: sample.ref || `${sample.type}-${sample.top}`, depth_top: sample.top ?? '', depth_base: sample.base ?? '', project_id: project || '' }}
+      onDone={onDone} />
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Operations settings
 // ---------------------------------------------------------------------------
 
@@ -789,7 +1181,7 @@ export function OpsSettingsPage() {
   if (!entity || !rows) return <p className="muted">{t('Loading…')}</p>
   return (
     <div style={{ maxWidth: 820 }}>
-      <PageHead title={t('Operations settings')} description={t('Limits for quotations and work orders, and when due service and calibration are flagged.')} />
+      <PageHead title={t('Operations settings')} description={t('Limits for quotations and work orders, when due service and calibration are flagged, vendor evaluation weights and limits, and the rule for unauthorised laboratory results.')} />
       {saved && <p className="notice ok" role="status">{t('Saved.')}</p>}
       {entity.can_create ? (
         <RecordForm entity={entity} record={rows[0] || null} hide={['name']} onSaved={() => { invalidate('ops_settings'); setSaved(true) }} />
@@ -808,16 +1200,23 @@ export type OpsOverview = {
   maintenance: {
     calibration_overdue: number, calibration_due_soon: number, service_overdue: number, service_due_soon: number,
     open_work_orders: number, open_by_type: Record<string, number>, urgent_open: number, downtime_days_year: number, cost_year: number,
+    last_12_months?: { availability_pct: number | null, mtbf_days: number | null, mttr_days: number | null, failures: number,
+      preventive_pct: number | null, pm_compliance_pct: number | null, pm_late: number },
   } | null
   procurement: {
     by_stage: Record<string, number>, in_progress: number, waiting_approval: number, approval_value: number,
     spend_year: number | null, unpaid_invoices: number | null,
+    vendors?: { active: number, approved: number, conditional: number, blocked: number, not_evaluated: number, reevaluation_due: number },
   } | null
   assets: {
     count: number, cost: number, accumulated_book: number, book_value: number, tax_value: number, depreciation_year_book: number,
-    fully_depreciated: number, by_category: Record<string, { count: number, cost: number, book_value: number }>,
+    fully_depreciated: number, impairment_indicated?: number, by_category: Record<string, { count: number, cost: number, book_value: number }>,
   } | null
   performance: { cards: number, by_state: Record<string, number>, by_rating: Record<string, number>, average_score: number | null, average_score_approved: number | null } | null
+  laboratory?: {
+    tests_open: number, awaiting_authorisation: number, authorised: number, calibration_issues: number, nonconformities_open: number,
+    corrective_actions_overdue: number, samples_on_hold: number, samples_past_retention: number,
+  } | null
 }
 
 /** The operations part of the management dashboard; `onOpen` goes to a page by its suggested tab key. */
@@ -840,6 +1239,15 @@ export function OpsOverviewPanel({ onOpen }: { onOpen?: (tab: string) => void })
             <Kpi label={t('Open work orders')} value={data.maintenance.open_work_orders} sub={data.maintenance.urgent_open ? t('{n} urgent', { n: data.maintenance.urgent_open }) : undefined} />
             <Kpi label={t('Downtime this year (days)')} value={number(data.maintenance.downtime_days_year)} sub={t('maintenance cost {amount}', { amount: money(data.maintenance.cost_year) })} />
           </div>
+          {data.maintenance.last_12_months && (
+            <div className="kpis" style={{ marginTop: '.5rem' }}>
+              <Kpi label={t('Availability')} value={pct(data.maintenance.last_12_months.availability_pct)} sub={t('last 12 months')} />
+              <Kpi label="MTBF" value={days(data.maintenance.last_12_months.mtbf_days)} sub={t('{n} failures', { n: data.maintenance.last_12_months.failures })} />
+              <Kpi label="MTTR" value={days(data.maintenance.last_12_months.mttr_days)} />
+              <Kpi label={t('Preventive share')} value={pct(data.maintenance.last_12_months.preventive_pct)} />
+              <Kpi label={t('PM compliance')} value={pct(data.maintenance.last_12_months.pm_compliance_pct)} sub={data.maintenance.last_12_months.pm_late ? t('{n} late', { n: data.maintenance.last_12_months.pm_late }) : undefined} />
+            </div>
+          )}
         </section>
       )}
       {data.procurement && (
@@ -850,6 +1258,8 @@ export function OpsOverviewPanel({ onOpen }: { onOpen?: (tab: string) => void })
             <Kpi label={t('Waiting for approval')} value={data.procurement.waiting_approval} sub={money(data.procurement.approval_value)} />
             {data.procurement.spend_year !== null && <Kpi label={t('Ordered this year')} value={money(data.procurement.spend_year)} moneyValue />}
             {data.procurement.unpaid_invoices !== null && <Kpi label={t('Vendor invoices unpaid')} value={money(data.procurement.unpaid_invoices)} moneyValue />}
+            {data.procurement.vendors && <Kpi label={t('Vendors blocked')} value={data.procurement.vendors.blocked}
+              sub={t('{a} conditional, {b} re-evaluation due', { a: data.procurement.vendors.conditional, b: data.procurement.vendors.reevaluation_due })} />}
           </div>
         </section>
       )}
@@ -861,7 +1271,21 @@ export function OpsOverviewPanel({ onOpen }: { onOpen?: (tab: string) => void })
             <Kpi label={t('Acquisition cost')} value={money(data.assets.cost)} moneyValue />
             <Kpi label={t('Accumulated depreciation (books)')} value={money(data.assets.accumulated_book)} moneyValue />
             <Kpi label={t('Book value')} value={money(data.assets.book_value)} moneyValue sub={t('tax book value {amount}', { amount: money(data.assets.tax_value) })} />
-            <Kpi label={t('Depreciation this year (books)')} value={money(data.assets.depreciation_year_book)} moneyValue />
+            <Kpi label={t('Depreciation this year (books)')} value={money(data.assets.depreciation_year_book)} moneyValue
+              sub={data.assets.impairment_indicated ? t('{n} with signs of impairment', { n: data.assets.impairment_indicated }) : undefined} />
+          </div>
+        </section>
+      )}
+      {data.laboratory && (
+        <section className="hub-section">
+          <div className="hub-head"><h3>{t('Laboratory quality')}</h3>{link('lab', t('Laboratory tests'))}</div>
+          <div className="kpis">
+            <Kpi label={t('Awaiting authorisation')} value={data.laboratory.awaiting_authorisation} sub={t('{n} tests in progress', { n: data.laboratory.tests_open })} />
+            <Kpi label={t('Tests with calibration issues')} value={data.laboratory.calibration_issues} />
+            <Kpi label={t('Open nonconformities')} value={data.laboratory.nonconformities_open}
+              sub={data.laboratory.corrective_actions_overdue ? t('{n} corrective actions overdue', { n: data.laboratory.corrective_actions_overdue }) : undefined} />
+            <Kpi label={t('Samples on hold')} value={data.laboratory.samples_on_hold}
+              sub={data.laboratory.samples_past_retention ? t('{n} past retention', { n: data.laboratory.samples_past_retention }) : undefined} />
           </div>
         </section>
       )}

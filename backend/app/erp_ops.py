@@ -97,6 +97,9 @@ def _unique(entity: str, record: Dict[str, Any], key: str, label: str) -> None:
 DEFAULT_SETTINGS: Dict[str, float] = {
     "two_quotes_from": 10_000_000, "three_quotes_from": 50_000_000, "wo_approval_limit": 25_000_000,
     "due_soon_days": 30, "due_soon_hours": 50,
+    # Vendor evaluation (ISO 9001:2015 8.4.1 asks for criteria; the weights and limits are the company's own).
+    "weight_quality": 30, "weight_delivery": 25, "weight_price": 20, "weight_hse": 15, "weight_responsiveness": 10,
+    "vendor_approved_from": 75, "vendor_conditional_from": 60, "vendor_reevaluate_months": 12,
 }
 
 
@@ -112,12 +115,126 @@ def settings() -> Dict[str, float]:
     return out
 
 
+def lab_authorisation_mode() -> str:
+    """"require": a lab test cannot be marked done without authorised results; "warn" (default): it is flagged."""
+    from . import records
+
+    saved = records.get_singleton("ops_settings") or {}
+    return "require" if saved.get("lab_authorisation") == "require" else "warn"
+
+
+def role_of(email: str) -> str:
+    """Role of a user account ("" when unknown)."""
+    from . import auth
+
+    me = (email or "").lower()
+    return next((str(u.get("role") or "") for u in auth.list_users() if str(u.get("email") or "").lower() == me), "")
+
+
+def separation_on() -> bool:
+    """Different people for each control step unless company settings turn it off (see workflow.py)."""
+    from . import records
+
+    company = records.get_singleton("settings") or {}
+    return company.get("approval_separation") is not False
+
+
 # --------------------------------------------------------------------------- #
 # Vendors
 # --------------------------------------------------------------------------- #
 
 def compute_vendor(record: Dict[str, Any]) -> None:
     _unique("vendors", record, "name", "Name")
+
+
+# --------------------------------------------------------------------------- #
+# Vendor evaluation (ISO 9001:2015 8.4.1: criteria for the evaluation, selection, monitoring of
+# performance and re-evaluation of external providers, with records of the evaluations)
+# --------------------------------------------------------------------------- #
+
+VENDOR_CRITERIA: List[Tuple[str, str]] = [
+    ("quality", "Quality of goods or work"), ("delivery", "Delivery on time and complete"), ("price", "Price and terms"),
+    ("hse", "HSE, legal and document compliance"), ("responsiveness", "Responsiveness and service"),
+]
+
+
+def vendor_score(scores: Dict[str, Any], cfg: Dict[str, float]) -> Optional[float]:
+    """Weighted score in %: each criterion's score 1–5 as a share of 5, weighted by the settings.
+    None until every criterion with a weight has a score."""
+    total_w = 0.0
+    acc = 0.0
+    for key, _ in VENDOR_CRITERIA:
+        w = cfg.get(f"weight_{key}", 0.0)
+        if w <= 0:
+            continue
+        s = _opt(scores.get(key))
+        if s is None:
+            return None
+        total_w += w
+        acc += w * s / 5 * 100
+    return round(acc / total_w, 2) if total_w else None
+
+
+def vendor_outcome(score: Optional[float], critical: bool, cfg: Dict[str, float]) -> str:
+    if critical:
+        return "blocked"
+    if score is None:
+        return ""
+    if score >= cfg["vendor_approved_from"]:
+        return "approved"
+    if score >= cfg["vendor_conditional_from"]:
+        return "conditional"
+    return "blocked"
+
+
+def compute_vendor_evaluation(record: Dict[str, Any]) -> None:
+    cfg = settings()
+    pf, pt = _d(record.get("period_from")), _d(record.get("period_to"))
+    if pf and pt and pt < pf:
+        raise _error("Period to is before period from")
+    critical = bool(record.get("critical_issue"))
+    if critical and not str(record.get("critical_note") or "").strip():
+        raise _error("Describe the serious breach that blocks the vendor")
+    scores = {key: record.get(f"score_{key}") for key, _ in VENDOR_CRITERIA}
+    score = vendor_score(scores, cfg)
+    record["score_pct"] = score
+    record["outcome"] = vendor_outcome(score, critical, cfg)
+    when = _d(record.get("date"))
+    months = int(cfg["vendor_reevaluate_months"])
+    record["next_evaluation"] = add_months(when, months).isoformat() if (when and months) else None
+    record["weights"] = {key: cfg.get(f"weight_{key}", 0.0) for key, _ in VENDOR_CRITERIA}
+    warnings: List[Dict[str, Any]] = []
+    if score is None and not critical:
+        _warn(warnings, "Score every criterion")
+    if record["outcome"] in ("conditional", "blocked") and not str(record.get("actions") or "").strip():
+        _warn(warnings, "Write the improvement actions agreed with the vendor")
+    _set_warnings(record, warnings)
+
+
+def vendor_standing(vendor_id: str, evaluations: List[Dict[str, Any]], today: date) -> Dict[str, Any]:
+    """The vendor's status from its latest evaluation (by date): approved, conditional, blocked,
+    or not evaluated; and whether its re-evaluation is overdue."""
+    mine = [e for e in evaluations if e.get("vendor_id") == vendor_id and e.get("outcome")]
+    if not mine:
+        return {"status": "not_evaluated", "score": None, "date": None, "next_due": None, "reevaluation_overdue": False,
+                "evaluation_id": None}
+    last = max(mine, key=lambda e: (str(e.get("date") or ""), str(e.get("created_at") or "")))
+    due = _d(last.get("next_evaluation"))
+    return {"status": str(last.get("outcome")), "score": _opt(last.get("score_pct")), "date": last.get("date"),
+            "next_due": last.get("next_evaluation"), "reevaluation_overdue": bool(due and due < today),
+            "evaluation_id": last.get("id")}
+
+
+def vendor_board(today: Optional[date] = None) -> List[Dict[str, Any]]:
+    """Every vendor with its evaluation standing (live), for the approved vendor list."""
+    today = today or date.today()
+    evaluations = _list("vendor_evaluations")
+    out = []
+    for v in sorted(_list("vendors"), key=lambda x: str(x.get("name") or "").lower()):
+        row = {"id": v["id"], "name": v.get("name"), "category": v.get("category"), "active": v.get("active") is not False}
+        row.update(vendor_standing(v["id"], evaluations, today))
+        out.append(row)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -317,6 +434,137 @@ def maintenance_due(today: Optional[date] = None) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Maintenance performance: availability, MTBF, MTTR, preventive share, PM compliance
+# --------------------------------------------------------------------------- #
+
+SCHEDULED_TYPES = ("preventive", "calibration", "inspection")
+
+MAINTENANCE_NOTES = [
+    "Availability (time based, EN 13306): the share of the required time the equipment was able to perform = up time ÷ (up time + down time). Required time = calendar days in the period since the equipment came into service; down time = the downtime of the work orders completed in the period.",
+    "MTBF, mean operating time between failures (IEC 60050-192:2015, 192-05-13; EN 13306): up time in the period ÷ number of failures (repair work orders reported in the period). Operating hours are not logged, so up time is counted in calendar days.",
+    "MTTR, mean time to restoration (IEC 60050-192:2015, 192-07-23; EN 13306): the average time from the failure (taken as the day the repair was reported, 192-07-06 note 1) until the equipment was restored, over the repairs completed in the period, unless the downtime was entered by hand.",
+    "Preventive share: preventive, calibration and inspection work orders (maintenance carried out to a schedule, IEC 60050-192 192-06-05 and 192-06-12) as a share of all work orders completed in the period. SMRP measures planned work in labour hours (metric 5.3.1); labour hours are not recorded here, so work orders are counted.",
+    "PM compliance (after SMRP metric 5.4.14 as quoted on the SMRP member forum): a scheduled work order is on time when completed by its planned date plus 20% of the service or calibration interval, at most 28 days; work orders past that window and still open count as late; those still inside it are not counted yet.",
+    "Same-day work counts as 0 days of downtime unless the downtime is entered.",
+]
+
+
+def _pm_window_days(eq: Dict[str, Any], wo_type: str) -> float:
+    """Tolerance after the planned date: 20% of the interval, at most 28 days (0 when no interval)."""
+    if wo_type == "calibration":
+        freq = _n(eq.get("calibration_months")) * 365.0 / 12.0
+    else:
+        freq = _n(eq.get("service_days"))
+    return min(0.2 * freq, 28.0) if freq > 0 else 0.0
+
+
+def equipment_metrics(eq: Dict[str, Any], orders: List[Dict[str, Any]], start: date, end: date, today: date) -> Optional[Dict[str, Any]]:
+    """Maintenance performance of one equipment item over [start, end] (both days counted); None
+    when it was not in service in the period."""
+    since = _d(eq.get("in_service_date"))
+    begin = max(start, since) if since else start
+    if begin > end:
+        return None
+    required = float((end - begin).days + 1)
+    mine = [w for w in orders if w.get("equipment_id") == eq.get("id") and w.get("status") != "cancelled"]
+
+    def inside(d: Optional[date]) -> bool:
+        return bool(d and begin <= d <= end)
+
+    done = [w for w in mine if w.get("status") == "completed" and inside(_d(w.get("completed_date")))]
+    downtime = min(required, sum(_n(w.get("downtime")) for w in done))
+    up = required - downtime
+    failures = [w for w in mine if w.get("type") == "corrective" and inside(_d(w.get("date")))]
+    ttr = [_n(w.get("downtime")) for w in done if w.get("type") == "corrective" and _opt(w.get("downtime")) is not None]
+    scheduled_done = sum(1 for w in done if w.get("type") in SCHEDULED_TYPES)
+    corrective_done = sum(1 for w in done if w.get("type") == "corrective")
+    on_time = late = pending = 0
+    for w in mine:
+        if w.get("type") not in SCHEDULED_TYPES:
+            continue
+        required_on = _d(w.get("planned_date")) or _d(w.get("date"))
+        if not inside(required_on) or required_on is None:
+            continue
+        deadline = date.fromordinal(required_on.toordinal() + int(_pm_window_days(eq, str(w.get("type")))))
+        completed = _d(w.get("completed_date")) if w.get("status") == "completed" else None
+        if completed is not None:
+            if completed <= deadline:
+                on_time += 1
+            else:
+                late += 1
+        elif today > deadline:
+            late += 1
+        else:
+            pending += 1
+    return {
+        "id": eq.get("id"), "code": eq.get("code"), "name": eq.get("name"),
+        "required_days": required, "downtime_days": round(downtime, 2), "up_days": round(up, 2),
+        "availability_pct": round(up / required * 100, 1) if required else None,
+        "failures": len(failures),
+        "mtbf_days": round(up / len(failures), 1) if failures else None,
+        "repairs_completed": len(ttr),
+        "mttr_days": round(sum(ttr) / len(ttr), 2) if ttr else None,
+        "scheduled_done": scheduled_done, "corrective_done": corrective_done,
+        "preventive_pct": round(scheduled_done / (scheduled_done + corrective_done) * 100, 1) if (scheduled_done + corrective_done) else None,
+        "pm_on_time": on_time, "pm_late": late, "pm_pending": pending,
+        "pm_compliance_pct": round(on_time / (on_time + late) * 100, 1) if (on_time + late) else None,
+        "_ttr": ttr,
+    }
+
+
+def maintenance_metrics(start: Optional[date] = None, end: Optional[date] = None, today: Optional[date] = None) -> Dict[str, Any]:
+    """Availability, MTBF, MTTR, preventive share and PM compliance per equipment item and for the
+    whole fleet (equipment not disposed) over a period, default the last 12 months to today."""
+    today = today or date.today()
+    end = end or today
+    start = start or date.fromordinal(add_months(end, -12).toordinal() + 1)
+    if start > end:
+        raise _error("The period starts after it ends")
+    orders = _list("work_orders")
+    rows = []
+    for eq in sorted(_list("equipment"), key=lambda e: str(e.get("code") or "")):
+        if eq.get("status") == "disposed":
+            continue
+        m = equipment_metrics(eq, orders, start, end, today)
+        if m is not None:
+            rows.append(m)
+    req = sum(r["required_days"] for r in rows)
+    up = sum(r["up_days"] for r in rows)
+    fails = sum(r["failures"] for r in rows)
+    ttr = [x for r in rows for x in r["_ttr"]]
+    sched = sum(r["scheduled_done"] for r in rows)
+    corr = sum(r["corrective_done"] for r in rows)
+    on_time = sum(r["pm_on_time"] for r in rows)
+    late = sum(r["pm_late"] for r in rows)
+    fleet = {
+        "equipment": len(rows), "required_days": req, "up_days": round(up, 2), "downtime_days": round(req - up, 2),
+        "availability_pct": round(up / req * 100, 1) if req else None,
+        "failures": fails, "mtbf_days": round(up / fails, 1) if fails else None,
+        "repairs_completed": len(ttr), "mttr_days": round(sum(ttr) / len(ttr), 2) if ttr else None,
+        "scheduled_done": sched, "corrective_done": corr,
+        "preventive_pct": round(sched / (sched + corr) * 100, 1) if (sched + corr) else None,
+        "pm_on_time": on_time, "pm_late": late, "pm_compliance_pct": round(on_time / (on_time + late) * 100, 1) if (on_time + late) else None,
+    }
+    for r in rows:
+        r.pop("_ttr", None)
+    table_rows = [[r["code"], r["name"], r["availability_pct"], r["failures"], r["mtbf_days"], r["mttr_days"], r["preventive_pct"],
+                   r["pm_compliance_pct"], r["downtime_days"]] for r in rows]
+    out = result(
+        summary=[("Availability", fleet["availability_pct"], "%"), ("MTBF", fleet["mtbf_days"], "days"), ("MTTR", fleet["mttr_days"], "days")],
+        values=[("Availability", fleet["availability_pct"], "%"), ("MTBF", fleet["mtbf_days"], "days"), ("MTTR", fleet["mttr_days"], "days"),
+                ("Failures (repairs reported)", float(fails), ""), ("Preventive share of completed work orders", fleet["preventive_pct"], "%"),
+                ("PM compliance", fleet["pm_compliance_pct"], "%"), ("Down time", fleet["downtime_days"], "days")],
+        tables=[table("Maintenance performance per equipment", ["Code", "Equipment", "Availability (%)", "Failures", "MTBF (days)",
+                                                                 "MTTR (days)", "Preventive share (%)", "PM compliance (%)", "Down time (days)"],
+                      table_rows, key=["Code", "Availability (%)", "MTBF (days)", "MTTR (days)"])] if table_rows else [],
+        notes=MAINTENANCE_NOTES, method="EN 13306; IEC 60050-192:2015; SMRP Best Practices metrics")
+    out["period"] = {"from": start.isoformat(), "to": end.isoformat()}
+    out["fleet"] = fleet
+    out["equipment"] = rows
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # Mobilisation & demobilisation
 # --------------------------------------------------------------------------- #
 
@@ -387,7 +635,15 @@ def compute_work_order(record: Dict[str, Any]) -> None:
     record["parts_cost"] = _money(parts)
     record["total_cost"] = _money(parts + _n(record.get("labour_cost")) + _n(record.get("vendor_cost")))
     manual = _opt(record.get("downtime_days"))
-    record["downtime"] = manual if manual is not None else (float((done - start).days) if (start and done) else None)
+    reported = _d(record.get("date"))
+    if manual is not None:
+        record["downtime"] = manual
+    elif record.get("type") == "corrective" and reported and done and done >= reported:
+        # A repair: down from the failure (taken as the day it was reported) until restored
+        # (time to restoration, IEC 60050-192:2015 192-07-06 and its note 1).
+        record["downtime"] = float((done - reported).days)
+    else:
+        record["downtime"] = float((done - start).days) if (start and done) else None
     record["next_calibration_due"] = None
     cfg = settings()
     if record["total_cost"] > cfg["wo_approval_limit"] and not record.get("procurement_id") and record.get("status") != "cancelled":
@@ -398,14 +654,22 @@ def compute_work_order(record: Dict[str, Any]) -> None:
     if record.get("type") == "calibration" and record.get("status") == "completed":
         if not record.get("certificate_no"):
             _warn(warnings, "Enter the calibration certificate number")
-        if record.get("calibration_result") == "fail":
-            _warn(warnings, "Calibration failed: the equipment must not be used until it is repaired and calibrated again")
         from . import records
 
         try:
             eq = records.get_record("equipment", str(record.get("equipment_id") or ""))
         except records.NotFound:
             eq = {}
+        if record.get("calibration_result") == "fail":
+            _warn(warnings, "Calibration failed: the equipment must not be used until it is repaired and calibrated again")
+            if done:
+                from . import erp_lab
+
+                affected = erp_lab.tests_since_last_good_calibration(eq, _list("work_orders"), done, record.get("id"))
+                if affected["tests"]:
+                    _warn(warnings, "{n} laboratory tests used this equipment since its last good calibration ({since}): "
+                                    "raise a nonconformity and check their results (ISO/IEC 17025 6.4.9, 7.10)",
+                          n=len(affected["tests"]), since=affected["since"] or "–")
         months = int(_n(eq.get("calibration_months")))
         if months and done and record.get("calibration_result") != "fail":
             record["next_calibration_due"] = add_months(done, months).isoformat()
@@ -464,6 +728,23 @@ def compute_procurement(record: Dict[str, Any]) -> None:
         _warn(warnings, "Mark the chosen quotation")
     if pick and pick.get("vendor_id") and vendors.get(pick["vendor_id"], {}).get("active") is False:
         _warn(warnings, "The chosen vendor is marked inactive")
+    standing = vendor_standing(str(pick.get("vendor_id")), _list("vendor_evaluations"), date.today()) \
+        if (pick and pick.get("vendor_id")) else None
+    record["chosen_vendor_status"] = standing["status"] if standing else ""
+    if standing and standing["status"] == "blocked":
+        _warn(warnings, "The chosen vendor is blocked after its evaluation on {date} (score {score}%): choose another vendor",
+              date=standing["date"] or "", score=standing["score"] if standing["score"] is not None else "–")
+    elif standing and standing["status"] == "conditional":
+        _warn(warnings, "The chosen vendor is conditional after its evaluation on {date}: check the agreed improvement actions",
+              date=standing["date"] or "")
+    if standing and standing["reevaluation_overdue"]:
+        _warn(warnings, "The chosen vendor's re-evaluation was due on {date}", date=standing["next_due"] or "")
+    # Conflict of interest: the people choosing the vendor declare any interest in it.
+    if pick and not record.get("coi_status"):
+        _warn(warnings, "Record the conflict-of-interest declaration of the people choosing the vendor")
+    if record.get("coi_status") == "declared" and not (str(record.get("coi_details") or "").strip()
+                                                       and str(record.get("coi_mitigation") or "").strip()):
+        _warn(warnings, "Describe the declared conflict of interest and how it is handled")
     if pick and chosen_amount is not None and lowest is not None and chosen_amount > lowest \
             and not str(record.get("selection_reason") or "").strip():
         _warn(warnings, "The chosen quotation is not the lowest; give the reason for the choice")
@@ -507,6 +788,18 @@ def po_progress(po: Dict[str, Any]) -> str:
     return "ordered"
 
 
+def _issued_before(record: Dict[str, Any]) -> bool:
+    """The stored version of this purchase order was already issued (receipts and invoices of an
+    order issued before its vendor was blocked can still be recorded)."""
+    from . import records
+
+    try:
+        before = records.get_record("purchase_orders", str(record.get("id") or ""))
+    except records.NotFound:
+        return False
+    return before.get("status") in ("issued", "closed")
+
+
 def compute_purchase_order(record: Dict[str, Any]) -> None:
     from . import records
 
@@ -530,6 +823,19 @@ def compute_purchase_order(record: Dict[str, Any]) -> None:
         _warn(warnings, "The procurement card is cancelled")
     if pr.get("chosen_vendor_id") and record.get("vendor_id") and pr["chosen_vendor_id"] != record["vendor_id"]:
         _warn(warnings, "The vendor differs from the chosen quotation")
+    standing = vendor_standing(str(record.get("vendor_id") or ""), _list("vendor_evaluations"), date.today())
+    if standing["status"] == "blocked" and record.get("status") != "cancelled":
+        if record.get("status") in ("issued", "closed") and not _issued_before(record):
+            raise _error("This vendor is blocked after its last evaluation; a purchase order cannot be issued to it")
+        _warn(warnings, "This vendor is blocked after its evaluation on {date}", date=standing["date"] or "")
+    elif standing["status"] == "conditional" and record.get("status") != "cancelled":
+        _warn(warnings, "This vendor is conditional after its evaluation on {date}: check the agreed improvement actions",
+              date=standing["date"] or "")
+    # Segregation of duties: the person who approved the request does not also raise the order.
+    approver = next((str(h.get("by") or "").lower() for h in reversed(pr.get("wf_history") or []) if h.get("action") == "approve"), "")
+    if approver and approver == str(record.get("created_by") or "").lower():
+        _warn(warnings, "The person who approved the procurement card also raised this purchase order: "
+                        "have another person raise or check it (segregation of duties)")
     if pr and record.get("status") != "cancelled":
         ordered = record["total"] + sum(_n(p.get("total")) for p in _list("purchase_orders")
                                         if p.get("procurement_id") == pr.get("id") and p.get("id") != record.get("id")
@@ -671,7 +977,26 @@ ASSET_NOTES = [
     "Double declining balance uses twice the straight-line rate (2 ÷ useful life) and stops at the residual value.",
     "On disposal, depreciation runs to the end of the month of disposal; the gain or loss is the proceeds less the book value at that date (for tax, PMK 72/2023 Pasal 8: the tax book value is a loss and the proceeds are income).",
     "Land is not depreciated.",
+    "Impairment (PSAK 236 Penurunan Nilai Aset, formerly PSAK 48; IAS 36 paragraphs 9 and 12): at each reporting date check for signs that the asset may be impaired, such as physical damage or obsolescence, the asset becoming idle, worse economic performance than expected, a decline in its value, or adverse changes in technology, market or law. When there is a sign, estimate the recoverable amount.",
+    "When a recoverable amount below the book value is entered, the difference is shown as an indicated impairment loss. It is not deducted in the schedules above: the accountant books it and adjusts the later depreciation.",
 ]
+
+IMPAIRMENT_INDICATORS = [
+    ("value_decline", "Market value fell clearly more than expected"),
+    ("adverse_change", "Adverse change in technology, market, economy or law"),
+    ("interest_rates", "Higher market interest rates or required returns"),
+    ("damage_obsolete", "Physical damage or obsolescence"),
+    ("idle_or_disposal", "Idle, restructured or to be disposed of early"),
+    ("poor_performance", "Economic performance worse than expected"),
+]
+
+
+def impairment_indicated(record: Dict[str, Any], book_value: float, disposed: bool) -> Optional[float]:
+    """Book value less the recoverable amount entered, when positive (information for the accountant)."""
+    recoverable = _opt(record.get("recoverable_amount"))
+    if disposed or recoverable is None:
+        return None
+    return _money(max(0.0, book_value - recoverable))
 
 
 def asset_figures(record: Dict[str, Any], as_of: Optional[date] = None) -> Dict[str, Any]:
@@ -760,6 +1085,9 @@ def asset_schedule_result(record: Dict[str, Any], as_of: Optional[date] = None) 
         values += [("Proceeds", _money(_n(record.get("disposal_proceeds"))), "IDR"),
                    ("Gain / loss on disposal (books)", fig["gain_loss_book"], "IDR"),
                    ("Gain / loss on disposal (tax)", fig["gain_loss_tax"], "IDR")]
+    loss = impairment_indicated(record, fig["book_value"], fig["disposed"])
+    if loss:
+        values.append(("Impairment loss indicated (not in the schedule)", loss, "IDR"))
     summary = [("Tax useful life", fig["tax_life"] or None, "years"), ("Tax rate", fig["tax_rate"] or None, "%/year"),
                ("Book useful life", fig["book_life"] or None, "years")]
     out = result(summary=summary, values=values, tables=tables, notes=ASSET_NOTES,
@@ -787,6 +1115,7 @@ def compute_fixed_asset(record: Dict[str, Any]) -> None:
                 "gain_loss_book", "gain_loss_tax", "as_of"):
         record[key] = fig[key]
     record["asset_status"] = fig["status"]
+    record["impairment_loss"] = impairment_indicated(record, fig["book_value"], fig["disposed"])
     record["schedule"] = asset_schedule_result(record)
 
 
@@ -990,6 +1319,9 @@ def overview(role: str, email: str, today: Optional[date] = None) -> Dict[str, A
             "downtime_days_year": round(sum(_n(w.get("downtime")) for w in done_this_year), 1),
             "cost_year": _money(sum(_n(w.get("total_cost")) for w in done_this_year)),
         }
+        fleet = maintenance_metrics(today=today)["fleet"]
+        out["maintenance"]["last_12_months"] = {k: fleet[k] for k in (
+            "availability_pct", "mtbf_days", "mttr_days", "failures", "preventive_pct", "pm_compliance_pct", "pm_late")}
 
     prs = visible("procurements")
     if prs is None:
@@ -1010,6 +1342,12 @@ def overview(role: str, email: str, today: Optional[date] = None) -> Dict[str, A
             "spend_year": _money(sum(_n(p.get("total")) for p in year_pos)) if pos is not None else None,
             "unpaid_invoices": _money(sum(_n(p.get("invoice_amount")) for p in (pos or []) if p.get("invoice_amount") and not p.get("paid_date")
                                           and p.get("status") != "cancelled")) if pos is not None else None,
+        }
+        board = [v for v in vendor_board(today) if v["active"]]
+        out["procurement"]["vendors"] = {
+            "active": len(board),
+            **{s: sum(1 for v in board if v["status"] == s) for s in ("approved", "conditional", "blocked", "not_evaluated")},
+            "reevaluation_due": sum(1 for v in board if v["reevaluation_overdue"]),
         }
 
     assets = visible("fixed_assets")
@@ -1032,6 +1370,7 @@ def overview(role: str, email: str, today: Optional[date] = None) -> Dict[str, A
             "tax_value": _money(sum(f["tax_value"] for _, f in held)),
             "depreciation_year_book": _money(sum(f["dep_year_book"] for _, f in held)),
             "fully_depreciated": sum(1 for _, f in held if f["status"] == "fully_depreciated"),
+            "impairment_indicated": sum(1 for a, _ in held if a.get("impairment_indicators")),
             "by_category": {k: {"count": v["count"], "cost": _money(v["cost"]), "book_value": _money(v["book_value"])} for k, v in by_cat.items()},
         }
 
@@ -1053,4 +1392,10 @@ def overview(role: str, email: str, today: Optional[date] = None) -> Dict[str, A
             "average_score": round(sum(scored) / len(scored), 1) if scored else None,
             "average_score_approved": round(sum(approved_scored) / len(approved_scored), 1) if approved_scored else None,
         }
+
+    from . import erp_lab
+
+    tests = visible("lab_tests")
+    out["laboratory"] = None if tests is None else erp_lab.lab_overview(tests, visible("nonconformities") or [],
+                                                                        visible("sample_receipts") or [], today)
     return out

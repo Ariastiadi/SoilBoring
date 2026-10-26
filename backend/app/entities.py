@@ -352,6 +352,24 @@ _add(Entity(
         F("results", "json", "Results", variants_by="test_type", variants=LAB_RESULTS),
         F("files", "files", "Lab sheets"),
         F("remarks", "longtext", "Remarks", maxlen=2000),
+        # Laboratory quality (ISO/IEC 17025:2017, see erp_lab.py): sample receipt, equipment used, authorisation.
+        F("receipt_id", "ref", "Sample receipt", ref="sample_receipts", section="Quality",
+          help="Empty: linked automatically to the receipt of the same borehole and sample."),
+        F("equipment_used", "items", "Equipment used", max_items=20, section="Quality", fields=[
+            F("equipment_id", "ref", "Equipment", required=True, ref="equipment"),
+            F("note", "text", "Note", maxlen=120),
+        ], help="Measuring equipment that affects the result; its calibration on the test date is checked."),
+        F("authorised", "bool", "Results reviewed and authorised", section="Quality",
+          help="Tick when the results have been reviewed and may be released. Changing the results afterwards clears it."),
+        F("authorised_by", "user", "Authorised by", readonly=True),
+        F("authorised_at", "date", "Authorised on", readonly=True),
+        F("results_entered_by", "user", "Results entered by", readonly=True),
+        F("result_status", "select", "Release", readonly=True, list=True, options=[
+            ("in_progress", "Not finished"), ("awaiting", "Awaiting authorisation"), ("authorised", "Authorised")]),
+        F("report_disclaimer", "text", "Disclaimer for the report", readonly=True, maxlen=600),
+        F("calibration_check", "json", "Calibration on the test date", readonly=True),
+        F("warnings", "json", "Checks", readonly=True),
+        F("warning_count", "int", "Warnings", readonly=True),
     ],
 ))
 

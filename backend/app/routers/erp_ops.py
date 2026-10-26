@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from .. import erp_ops, records
+from .. import erp_lab, erp_ops, records
 from ..auth import get_current_user
 from ..entities import ENTITIES
 
@@ -50,6 +50,34 @@ def equipment_status(user=Depends(get_current_user)):
 def maintenance_due(user=Depends(get_current_user)):
     _need("equipment", user)
     return erp_ops.maintenance_due()
+
+
+@router.get("/maintenance-metrics")
+def maintenance_metrics(date_from: Optional[str] = Query(default=None, alias="from", max_length=10),
+                        date_to: Optional[str] = Query(default=None, alias="to", max_length=10), user=Depends(get_current_user)):
+    """Availability, MTBF, MTTR, preventive share and PM compliance (default: the last 12 months)."""
+    _need("work_orders", user)
+    try:
+        return erp_ops.maintenance_metrics(_as_of(date_from), _as_of(date_to))
+    except records.RecordError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/vendor-standing")
+def vendor_standing(user=Depends(get_current_user)):
+    """Each vendor's status from its latest evaluation (approved vendor list)."""
+    _need("vendors", user)
+    return erp_ops.vendor_board()
+
+
+@router.get("/lab/calibration")
+def lab_calibration(on: Optional[str] = Query(default=None, max_length=10), user=Depends(get_current_user)):
+    """Calibration status of every equipment item with a calibration interval on a date (default today)."""
+    _need("lab_tests", user)
+    when = _as_of(on) or date.today()
+    orders = records.list_records("work_orders")
+    return [erp_lab.calibration_on(e, orders, when) for e in sorted(records.list_records("equipment"), key=lambda e: str(e.get("code") or ""))
+            if e.get("calibration_months") and e.get("status") != "disposed"]
 
 
 @router.get("/procurement-status")
