@@ -243,7 +243,7 @@ Offline logging works as in the browser. Sign-in and offline logs stay on the ph
 
 **Install:** download the APK from [Releases](https://github.com/Ariastiadi/SoilBoring/releases/latest), or add `https://github.com/Ariastiadi/SoilBoring` in [Obtainium](https://github.com/ImranR98/Obtainium) or Komi Store to get updates.
 
-**Build and release:** the `android` workflow builds the APK on every change under `android/` (workflow artifact). To release, raise `versionCode` and `versionName` in `android/app/build.gradle.kts`, update `android/release-notes.md`, and push the tag `v<versionName>`: the workflow signs the APK and publishes the release. Signing uses the repository secret `SIGNING_KEY` (first line the keystore password, then the PKCS12 keystore with alias `soilboring` in base64); without it the APK is signed with a debug key and no release is made. A fork pointing at its own deployment changes `HOST` in `MainActivity.kt`.
+**Build and release:** the `android` workflow builds the APK on every change under `android/` (workflow artifact). To release, raise `versionCode` and `versionName` in `android/app/build.gradle.kts` and update `android/release-notes.md`: the next run on `main` finds no release for that version yet, signs the APK and publishes the release `v<versionName>` (pushing that tag does the same). Signing uses the repository secret `SIGNING_KEY` (first line the keystore password, then the PKCS12 keystore with alias `soilboring` in base64); without it the APK is signed with a debug key and no release is made. A fork pointing at its own deployment changes `HOST` in `MainActivity.kt`.
 
 ### AI without an API key: Qwen on this device
 

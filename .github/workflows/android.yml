@@ -1,8 +1,9 @@
 name: android
 
 # Builds the Android app (android/). On every change it uploads the APK as a workflow artifact.
-# Pushing a tag vX.Y.Z (equal to versionName) builds the signed APK and publishes a GitHub release
-# with it, where Obtainium and Komi Store pick it up; a release published by hand gets the APK too.
+# Releases: when versionName in android/app/build.gradle.kts has no release yet (vX.Y.Z), a run on
+# main signs the APK and publishes that release with it, where Obtainium and Komi Store pick it up.
+# Pushing a tag vX.Y.Z does the same; a release published by hand gets the APK attached.
 
 on:
   push:
@@ -16,7 +17,11 @@ on:
     types: [published]
 
 permissions:
-  contents: write   # needed only to attach the APK to a release
+  contents: write   # needed only to publish the release
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   apk:
@@ -40,11 +45,26 @@ jobs:
           gradle-version: "9.7.1"
 
       - name: Which release (if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAS_KEY: ${{ secrets.SIGNING_KEY != '' }}
         run: |
           TAG=""
-          if [ "${{ github.event_name }}" = "release" ]; then TAG="${{ github.event.release.tag_name }}"; fi
-          if [ "${{ github.ref_type }}" = "tag" ]; then TAG="${{ github.ref_name }}"; fi
+          CREATE=""
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            CREATE=1
+          elif [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" != "pull_request" ] \
+               && [ "$HAS_KEY" = "true" ] && ! gh release view "v$VERSION" > /dev/null 2>&1; then
+            TAG="v$VERSION"
+            CREATE=1
+            echo "::notice::Version $VERSION has no release yet: publishing $TAG."
+          fi
           echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "CREATE=$CREATE" >> "$GITHUB_ENV"
 
       - name: Check the release tag against the app version
         if: env.TAG != ''
@@ -115,15 +135,15 @@ jobs:
             android/${{ env.APK_NAME }}
             android/${{ env.APK_NAME }}.sha256
 
-      - name: Publish the release with the APK (tag push)
-        if: github.ref_type == 'tag'
+      - name: Publish the release with the APK
+        if: env.CREATE == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "$APK_NAME" "$APK_NAME.sha256" --clobber
           else
-            gh release create "$TAG" "$APK_NAME" "$APK_NAME.sha256" --verify-tag --latest \
+            gh release create "$TAG" "$APK_NAME" "$APK_NAME.sha256" --target "$GITHUB_SHA" --latest \
               --title "SoilBoring Android $TAG" --notes-file release-notes.md
           fi
 
