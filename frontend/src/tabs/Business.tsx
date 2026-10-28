@@ -916,6 +916,8 @@ function ReportSheet({ report, onClose }: { report: Rec, onClose: () => void }) 
           <tbody>{d.an.map(a => <tr key={a.id}><td>{a.title}<div className="doc-small">{anType ? optionLabel(anType, a.type) : a.type}</div></td><td>{a.borehole_id || '–'}</td><td>{translateServer(a.summary || '')}</td></tr>)}</tbody>
         </table>
         <p className="doc-small">{t('Methods: bearing capacity after Meyerhof/Vesic, pile capacity after Decourt (SPT), consolidation settlement with the 2:1 stress spread, liquefaction after Idriss & Boulanger (2014).')}</p>
+        {d.an.some(a => a.type === 'retaining_wall') && <p className="doc-small">{t('Retaining walls: Rankine or Coulomb earth pressure, Mononobe–Okabe for the seismic case; overturning, sliding and bearing after Das, required values as common practice with SNI 8460:2017.')}</p>}
+        {d.an.some(a => a.type === 'slope') && <p className="doc-small">{t('Slopes: simplified Bishop circular slip with a grid search (ordinary method of slices for comparison) or the infinite slope; minimum factors of safety after SNI 8460:2017.')}</p>}
       </>}
       {report.recommendations && <>{h(t('Recommendations'))}<p className="doc-text">{report.recommendations}</p></>}
       <div className="doc-approvals">

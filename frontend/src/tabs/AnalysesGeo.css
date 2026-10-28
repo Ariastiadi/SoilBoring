@@ -1,0 +1,28 @@
+/* Retaining wall and slope analyses: section drawing, preview and check cards */
+.geo-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 1rem 1.25rem; align-items: start; margin-top: .4rem; }
+.geo-preview { border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: .4rem; background: #fbfbf9; }
+.geo-preview .help { margin: .3rem .2rem 0; }
+.geo-section { margin: .75rem 0; }
+.geo-section svg { display: block; border: 1px solid var(--line); border-radius: var(--r-sm); max-width: 760px; }
+.geo-section.compact { margin: 0; }
+.geo-section.compact svg { border: 0; }
+.geo-legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .85rem; color: var(--ink-2); margin-top: .4rem; }
+.geo-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.geo-legend i { display: inline-block; width: 18px; height: 10px; border: 1px solid transparent; }
+.geo-legend i.tick { width: 2px; height: 10px; background: #1f5f8b; }
+.geo-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .6rem; margin: 0 0 .9rem; }
+.geo-check { display: flex; flex-direction: column; gap: .15rem; padding: .55rem .75rem; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); }
+.geo-check.ok { border-left: 4px solid var(--ok); }
+.geo-check.bad { border-left: 4px solid var(--danger); background: #fdf3f2; }
+.geo-check-name { font-size: .9rem; }
+.geo-check-value { font-family: var(--head); font-size: 1.35rem; line-height: 1.2; }
+.geo-grid input { min-width: 4.5rem; }
+.geo-result .notice { margin-top: 0; }
+@media (max-width: 899px) {
+  .geo-split { grid-template-columns: minmax(0, 1fr); }
+  .geo-preview { order: -1; }
+}
+@media print {
+  .geo-check.bad { background: none; }
+  .geo-section { break-inside: avoid; }
+}

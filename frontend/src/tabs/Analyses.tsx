@@ -6,6 +6,7 @@ import type { Intent } from '../nav'
 import { FieldInput, RecordsPage, number, useSchemas } from '../records'
 import { ResultView } from '../worksheets'
 import { ScrollTable } from '../ui'
+import { GEO_DEFAULTS, GeoResult, SlopeInputs, WallInputs, slopeFromData, wallFromData } from './AnalysesGeo'
 
 type Inputs = Record<string, any>
 
@@ -17,6 +18,7 @@ const DEFAULTS: Record<string, Inputs> = {
   bearing_table: { B_list: '1 1.5 2 2.5 3', Df_list: '1 1.5 2', LB: '1', c: '0', phi_deg: '30', gamma: '18', gamma_sat: '19', gw_depth: '', fs: '3' },
   site_class: { pga: '', ss: '', s1: '', tl: '20', site: '' },
   spt_correction: { energy_ratio: '60', borehole_diameter_mm: '100', rod_extra_m: '1.5', sampler_liners: 'no', gw_depth: '', gamma: '18' },
+  ...GEO_DEFAULTS,
 }
 
 const LABELS: Record<string, string> = {
@@ -183,6 +185,15 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
     } else if (meta.type === 'liquefaction') {
       setInputs(prev => ({ ...prev, gw_depth: gw ?? prev.gw_depth }))
       setHint(t('Fines and plasticity come from the grain size and Atterberg tests of the borehole when available.'))
+    } else if (meta.type === 'retaining_wall') {
+      const { patch, hint: h } = wallFromData(lab)
+      setInputs(prev => ({ ...prev, ...patch }))
+      setHint(h)
+    } else if (meta.type === 'slope') {
+      const d = await getDetails(meta.borehole_id).catch(() => null)
+      const { patch, hint: h } = slopeFromData({ ...inputs, mode: 'circular' }, d, lab, gw)
+      setInputs(prev => ({ ...prev, ...patch, mode: 'circular' }))
+      setHint(h)
     }
   }
 
@@ -280,6 +291,8 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
           <VsLayers rows={inputs.vs_layers || []} onChange={rows => set('vs_layers', rows)} />
           <p className="help wide">{t('PGA, Ss and S1 are bedrock (SB) values for the site from the 2024 national seismic hazard maps. With a borehole, N̄ of the top 30 m is used; with Vs layers (downhole or crosshole), Vs30 is used.')}</p>
         </>}
+        {meta.type === 'retaining_wall' && <WallInputs inputs={inputs} set={set} />}
+        {meta.type === 'slope' && <SlopeInputs inputs={inputs} set={set} />}
         {meta.type === 'spt_correction' && <>
           {['energy_ratio', 'borehole_diameter_mm', 'rod_extra_m', 'gamma', 'gw_depth'].map(k => <NumberField key={k} name={k} inputs={inputs} set={set} />)}
           <div className="field">
@@ -318,7 +331,9 @@ function clean(inputs: Inputs): Inputs {
       out.layers = v.map(row => Object.fromEntries(Object.entries(row).filter(([, x]) => x !== '' && x !== null).map(([kk, x]) => [kk, Number(x)])))
     } else if (k === 'vs_layers' && Array.isArray(v)) {
       out.vs_layers = v.filter(row => row.top !== '' && row.base !== '' && row.vs !== '').map(row => ({ top: Number(row.top), base: Number(row.base), vs: Number(row.vs) }))
-    } else if (['pile_type', 'borehole_id', 'B_list', 'Df_list', 'site', 'sampler_liners'].includes(k)) {
+    } else if ((k === 'surface' || k === 'phreatic') && Array.isArray(v)) {
+      out[k] = v.filter(row => row.x !== '' && row.y !== '').map(row => ({ x: Number(row.x), y: Number(row.y) }))
+    } else if (['pile_type', 'borehole_id', 'B_list', 'Df_list', 'site', 'sampler_liners', 'method', 'wall_type', 'passive', 'mode', 'geometry', 'water'].includes(k)) {
       out[k] = v
     } else if (v !== '' && v !== null && v !== undefined) {
       out[k] = num(v)
@@ -375,6 +390,7 @@ function LineChart({ points, xLabel, yLabel, refLine, invertY = true }: {
 }
 
 export function AnalysisResult({ type, result }: { type: string, result: Record<string, any> }) {
+  if (result.checks || result.section) return <GeoResult result={result} />
   if (Array.isArray(result.values) || Array.isArray(result.tables)) return <ResultView result={result} notesOpen />
   const notes: string[] = result.notes || []
   return (
@@ -443,7 +459,7 @@ const LIQ_STATUS: Record<string, string> = { liquefiable: 'Liquefiable', margina
 export default function AnalysesPage({ intent }: { intent?: Intent }) {
   return (
     <RecordsPage entityName="analyses" openId={intent?.open} startNew={intent?.newWith}
-      description={t('Bearing capacity, pile capacity, settlement and liquefaction from the field and laboratory data. Preliminary estimates to be checked by a geotechnical engineer.')}
+      description={t('Bearing capacity, pile capacity, settlement, liquefaction, retaining walls and slope stability from the field and laboratory data. Preliminary estimates to be checked by a geotechnical engineer.')}
       renderForm={props => <AnalysisForm {...props} />}
       extra={r => r.results && Object.keys(r.results).length ? <section className="card" style={{ marginBottom: '1rem' }}><h3>{t('Results')}</h3><AnalysisResult type={r.type} result={r.results} /></section> : null} />
   )

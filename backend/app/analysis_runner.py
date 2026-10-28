@@ -149,6 +149,12 @@ def run(kind: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         return seismic.site_class_analysis(inputs, pairs)
     if kind == "spt_correction":
         return _spt_correction(inputs)
+    if kind == "retaining_wall":
+        from . import eng_wall
+        return eng_wall.analyse(inputs)
+    if kind == "slope":
+        from . import eng_slope
+        return eng_slope.analyse(inputs)
     raise ValueError("Choose an analysis type")
 
 
