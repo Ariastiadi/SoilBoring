@@ -1,0 +1,76 @@
+/* Work coordination pages (ErpWork.tsx). Uses the shared colour tokens from styles.css only. */
+
+.wk-kpis { margin: 0 0 1rem; }
+.kpi.wk-kpi-bad p { color: var(--danger); }
+.kpi.wk-kpi-warn p { color: var(--warn); }
+
+.wk-checks ul { margin: .35rem 0 0; padding-left: 1.2rem; }
+.wk-checks li + li { margin-top: .2rem; }
+
+/* Task cards and the board */
+.wk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr)); gap: .75rem; margin-bottom: 1rem; }
+.wk-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; align-items: start; }
+.wk-queue { grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); }
+.wk-col { background: var(--sunken); border: 1px solid var(--line); border-radius: var(--r-md); padding: .6rem; min-width: 0; }
+.wk-col > h3 { display: flex; align-items: center; gap: .4rem; margin: .1rem .2rem .55rem; font-size: 1rem; }
+.wk-col .wk-card + .wk-card { margin-top: .55rem; }
+.wk-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: .65rem .75rem; display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+.wk-card.overdue { border-left: 4px solid var(--danger); }
+.wk-card.done { opacity: .8; }
+.wk-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+.wk-card-title { padding: 0; min-height: 0; text-align: left; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.wk-card-meta { display: flex; flex-wrap: wrap; gap: .15rem .6rem; font-size: .84rem; color: var(--ink-2); }
+.wk-card-meta span { overflow-wrap: anywhere; }
+.wk-prio { flex: none; font-size: .75rem; font-weight: 600; padding: .05rem .4rem; border-radius: var(--r-sm); background: var(--yellow-soft); color: var(--warn); }
+.wk-prio.urgent { background: var(--danger); color: #fff; }
+.wk-due { font-size: .85rem; color: var(--ink-2); }
+.wk-due.soon { color: var(--warn); font-weight: 600; }
+.wk-due.late { color: var(--danger); font-weight: 600; }
+.wk-blocked { margin: 0; font-size: .85rem; color: var(--danger); }
+.wk-warn-text { color: var(--warn); }
+.wk-check-toggle { display: flex; align-items: center; gap: .5rem; padding: 0; min-height: 1.6rem; color: var(--ink-2); width: 100%; }
+.wk-check-toggle .wk-bar { flex: 1; }
+.wk-checklist { list-style: none; margin: 0; padding: 0; }
+.wk-checklist li { padding: .15rem 0; font-size: .9rem; }
+.wk-status-pick .segmented { display: flex; flex-wrap: wrap; width: 100%; }
+.wk-status-pick .segmented button { flex: 1 1 auto; min-height: 2rem; font-size: .82rem; padding: .2rem .45rem; }
+
+.wk-bar { height: .45rem; background: var(--line-soft); border-radius: 999px; overflow: hidden; margin: .25rem 0; }
+.wk-bar span { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+
+.wk-detail { margin-bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.wk-detail .card-title { margin: 0; }
+.wk-detail .facts-grid { margin: .25rem 0; }
+.wk-order-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+
+.wk-plain { list-style: none; margin: 0; padding: 0; }
+.wk-plain > li { padding: .4rem 0; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.wk-plain > li:last-child { border-bottom: 0; }
+.wk-plain button.quiet { padding: 0; min-height: 0; font-weight: 600; }
+.wk-sub { margin: .2rem 0 0; padding-left: 1.1rem; font-size: .88rem; color: var(--ink-2); }
+.wk-kind { display: inline-block; min-width: 7.5rem; font-size: .8rem; color: var(--ink-2); }
+
+.wk-attention { margin: 0 0 1rem; padding: .75rem 1rem; }
+.wk-attention > summary { cursor: pointer; font-family: var(--head); font-weight: 600; font-size: 1.05rem; }
+.wk-attention[open] > summary { margin-bottom: .4rem; }
+.wk-inbox { margin-bottom: 1rem; }
+.wk-package { margin-bottom: 1rem; }
+
+.wk-daypick { margin-bottom: 1rem; }
+.wk-daypick-box { margin-top: .5rem; }
+.wk-daypick-box .checks { margin-bottom: .5rem; }
+
+.wk-group { padding: .5rem 0; border-bottom: 1px solid var(--line-soft); }
+.wk-group-head { margin-bottom: .3rem; }
+.wk-tests { padding-left: 1.6rem; }
+.wk-make { margin-top: .75rem; }
+
+@media (max-width: 1099px) {
+  .wk-board:not(.wk-queue) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 699px) {
+  .wk-board, .wk-board:not(.wk-queue) { grid-template-columns: minmax(0, 1fr); }
+  .wk-kind { min-width: 0; margin-right: .3rem; }
+}
+.wk-testpick { margin-top: 1rem; }
+.wk-testpick .wk-tests { padding-left: 0; margin: .35rem 0; }

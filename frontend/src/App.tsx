@@ -18,7 +18,7 @@ import type { Role, Session } from './api'
 import { BrandMark, Icon, PageHead, ROLE_LABELS } from './ui'
 import { NavContext, type Intent, type TabKey } from './nav'
 import { SchemaContext, invalidate } from './records'
-import { getApprovals, getSchemas, listAccountRequests, type Schemas } from './api'
+import { apiGet, getApprovals, getSchemas, listAccountRequests, type Schemas } from './api'
 import type { Intent as PageIntent } from './nav'
 
 // Business modules load when first opened, so the field log starts fast on a phone.
@@ -71,6 +71,13 @@ const ReceivablesPage = lazy(() => comModule().then(m => ({ default: m.Receivabl
 const PricingSettingsPage = lazy(() => comModule().then(m => ({ default: m.PricingSettingsPage })))
 const OverviewPage = lazy(() => erpModule().then(m => ({ default: m.OverviewPage })))
 const MonitoringPage = lazy(() => import('./tabs/Monitoring').then(m => ({ default: m.MonitoringPage })))
+const workModule = () => import('./tabs/ErpWork')
+const workPage = (name: string) => lazy(() => workModule().then(m => ({ default: (m as any)[name] as (p: PageProps) => JSX.Element })))
+const MyTasksPage = workPage('MyTasksPage')
+const TasksPage = workPage('TasksPage')
+const SubmissionsPage = workPage('SubmissionsPage')
+const RosterPage = workPage('RosterPage')
+const LabOrdersPage = workPage('LabOrdersPage')
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
@@ -196,6 +203,14 @@ export default function App() {
     getApprovals().then(list => { if (live) setApprovalCount(list.length) }).catch(() => {})
     return () => { live = false }
   }, [auth?.token, tab, navCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Work counters for the menu: my overdue tasks, field packages waiting, overdue lab work orders, crew warnings.
+  const [workCounts, setWorkCounts] = useState<Record<string, number | null>>({})
+  useEffect(() => {
+    if (!auth) return
+    let live = true
+    apiGet<Record<string, number | null>>('/api/erp/work/summary').then(c => { if (live) setWorkCounts(c) }).catch(() => {})
+    return () => { live = false }
+  }, [auth?.token, tab, navCount]) // eslint-disable-line react-hooks/exhaustive-deps
   // Account requests from the sign-in page, for administrators.
   const [requestCount, setRequestCount] = useState(0)
   const [requestTick, setRequestTick] = useState(0)
@@ -262,7 +277,10 @@ export default function App() {
   const switchLanguage = () => { if (confirmLeave()) setLang(lang() === 'id' ? 'en' : 'id') }
 
   const work: NavItem[] = [
+    { key: 'my_tasks', label: t('My tasks'), icon: 'target', entity: 'tasks' },
     { key: 'approvals', label: t('Approvals'), icon: 'check' },
+    { key: 'submissions', label: t('Field submissions'), icon: 'sheet', entity: 'field_submissions' },
+    { key: 'tasks', label: t('Project tasks'), icon: 'list', entity: 'tasks' },
     ...(auth.role === 'admin' || auth.role === 'manager' || auth.role === 'finance' ? [{ key: 'overview' as TabKey, label: t('Management overview'), icon: 'chart' }] : []),
   ]
   const comop: NavItem[] = [
@@ -290,6 +308,7 @@ export default function App() {
     { key: 'sample_receipts', label: t('Sample receipts'), icon: 'sample', entity: 'sample_receipts' },
     { key: 'nonconformities', label: t('Nonconformities'), icon: 'check', entity: 'nonconformities' },
     { key: 'labsummary', label: t('Results summary'), icon: 'list', entity: 'lab_tests' },
+    { key: 'lab_orders', label: t('Lab work orders'), icon: 'flask', entity: 'lab_work_orders' },
   ]
   const engineering: NavItem[] = [
     { key: 'analyses', label: t('Engineering analyses'), icon: 'calc', entity: 'analyses' },
@@ -314,6 +333,7 @@ export default function App() {
   ]
   const people: NavItem[] = [
     { key: 'performance', label: t('Work plan & performance cards'), icon: 'target', entity: 'performance_cards' },
+    { key: 'roster', label: t('Crew roster'), icon: 'users', entity: 'crew_deployments' },
   ]
   const analysis: NavItem[] = [
     { key: 'qa', label: 'Geo AI', icon: 'ai' },
@@ -352,6 +372,8 @@ export default function App() {
     guarantees: i => <GuaranteesPage intent={i} />, client_cards: i => <ClientCardsPage intent={i} />,
     receivables: () => <ReceivablesPage />, pricing_settings: () => <PricingSettingsPage />, overview: () => <OverviewPage />,
     monitoring: i => <MonitoringPage intent={i} />,
+    my_tasks: () => <MyTasksPage />, tasks: i => <TasksPage intent={i} />, submissions: i => <SubmissionsPage intent={i} />,
+    roster: i => <RosterPage intent={i} />, lab_orders: i => <LabOrdersPage intent={i} />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)
@@ -364,6 +386,10 @@ export default function App() {
       {item.key === 'boreholes' && outbox.length > 0 && <span className="count">{t('{n} waiting', { n: outbox.length })}</span>}
       {item.key === 'approvals' && approvalCount > 0 && <span className="count">{approvalCount}</span>}
       {item.key === 'users' && requestCount > 0 && <span className="count" title={t('Account requests')}>{requestCount}</span>}
+      {item.key === 'my_tasks' && (workCounts.tasks_overdue || 0) > 0 && <span className="count" title={t('Overdue')}>{workCounts.tasks_overdue}</span>}
+      {item.key === 'submissions' && (workCounts.submissions_waiting || 0) > 0 && <span className="count">{workCounts.submissions_waiting}</span>}
+      {item.key === 'lab_orders' && (workCounts.lab_overdue || 0) > 0 && <span className="count" title={t('Overdue')}>{workCounts.lab_overdue}</span>}
+      {item.key === 'roster' && (workCounts.roster_warnings || 0) > 0 && <span className="count" title={t('Safety documents expired or missing')}>{workCounts.roster_warnings}</span>}
     </button>
   )
   const accountButtons = (

@@ -523,3 +523,5 @@ from . import entities_commercial, entities_ops  # noqa: E402,F401
 
 # Monitoring instruments and their readings (worksheet list 03.11).
 from . import entities_monitor  # noqa: E402,F401
+# Work coordination: project tasks, field submissions, crew roster, laboratory work orders.
+from . import entities_work  # noqa: E402,F401

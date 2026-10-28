@@ -64,3 +64,8 @@ class Entity:
 # Calculations of the ERP modules, registered by their entity files: entity name -> function(record).
 # Called by records.compute() on every save, inside the entity lock; a hook may read other records.
 COMPUTE_HOOKS: Dict[str, Callable[[Dict[str, Any]], None]] = {}
+
+# Record locks of the ERP modules outside the approval flow: entity name -> function(record, role, action) returning
+# why the record cannot be changed ("edit") or deleted ("delete") now, or None (e.g. a field package sent to the office).
+# Before a delete, a guard may also remove dependent records that were generated and never used (inside the entity lock).
+LOCK_HOOKS: Dict[str, Callable[[Dict[str, Any], str, str], Optional[str]]] = {}
