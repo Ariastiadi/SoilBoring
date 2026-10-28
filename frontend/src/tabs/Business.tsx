@@ -712,7 +712,12 @@ export function FieldWorkPage({ intent }: { intent?: Intent }) {
   const [type, setType] = useState('all')
   const [printing, setPrinting] = useState<Rec | null>(null)
   const filter = useMemo(() => (r: Rec) => type === 'all' || r.type === type, [type])
-  const tools = useSheetTools('field', 'data', 'method')
+  const sheetTools = useSheetTools('field', 'data', 'method')
+  // The sand cone takes γd,max and OMC from a Proctor test of the laboratory.
+  const tools = useMemo(() => (data: Record<string, any>, setData: (u: (p: Record<string, any>) => Record<string, any>) => void, place: 'top' | 'bottom') =>
+    place === 'top' && data.method === 'sand_cone'
+      ? <>{sheetTools(data, setData, place)}<ProctorPicker projectId={data.project_id} setData={setData} /></>
+      : sheetTools(data, setData, place), [sheetTools])
   const catalog = useCatalog()
   const layout = useMemo<FormLayout>(() => ({
     first: ['type', 'method', 'code', 'date', 'project_id', 'borehole_id'],
@@ -730,6 +735,41 @@ export function FieldWorkPage({ intent }: { intent?: Intent }) {
       extra={r => <SheetResults sheet={sheetOf(catalog, 'field', r.method)} result={r.results_calc} utm={r.utm} />} />
     {printing && <WorksheetSheet record={printing} kind="field" onClose={() => setPrinting(null)} />}
   </>
+}
+
+/** Copies the maximum dry density and optimum water content of a laboratory Proctor (or CBR) test into the sand cone. */
+function ProctorPicker({ projectId, setData }: { projectId?: string, setData: (u: (p: Record<string, any>) => Record<string, any>) => void }) {
+  const schemas = useSchemas()
+  const readable = !!schemas?.lab_tests?.can_read
+  const tests = useList(readable ? 'lab_tests' : null)
+  const testField = schemas?.lab_tests?.fields.find(f => f.name === 'test_type')
+  const [picked, setPicked] = useState('')
+  const [msg, setMsg] = useState('')
+  if (!readable) return null
+  const all = (tests || []).filter(x => ['compaction', 'cbr'].includes(x.test_type) && x.results?.mdd)
+  const mine = projectId ? all.filter(x => x.project_id === projectId) : []
+  const list = mine.length ? mine : all
+  const label = (x: Rec) => `${x.borehole_id} · ${x.sample_ref} · ${testField ? optionLabel(testField, x.test_type) : x.test_type} · γd,max ${number(x.results.mdd)}${x.results.omc !== undefined && x.results.omc !== null ? ` · OMC ${number(x.results.omc)} %` : ''}`
+  const use = () => {
+    const x = list.find(r => r.id === picked)
+    if (!x) return
+    setData(prev => ({ ...prev, data: { ...(prev.data || {}), mdd: x.results.mdd, omc: x.results.omc ?? (prev.data || {}).omc ?? '',
+      proctor_ref: `${x.borehole_id} ${x.sample_ref} (${testField ? optionLabel(testField, x.test_type) : x.test_type})`.slice(0, 80) } }))
+    setMsg(t('γd,max and OMC copied from the laboratory test.'))
+  }
+  return (
+    <div className="ws-head">
+      <div className="field" style={{ margin: 0, flex: 1 }}>
+        <label htmlFor="proctor-pick">{t('Pick a Proctor test')}</label>
+        <select id="proctor-pick" value={picked} onChange={e => setPicked(e.target.value)}>
+          <option value="">{tests ? (list.length ? t('Select') : t('No Proctor test with a result yet')) : t('Loading…')}</option>
+          {list.map(x => <option key={x.id} value={x.id}>{label(x)}</option>)}
+        </select>
+        <p className="help">{msg || (projectId && !mine.length && all.length ? t('No Proctor test in this project; tests of all projects are listed.') : t('From the laboratory tests (Proctor or CBR) that have a result.'))}</p>
+      </div>
+      <div className="actions"><button type="button" disabled={!picked} onClick={use}>{t('Use this test')}</button></div>
+    </div>
+  )
 }
 
 function SheetResults({ sheet, result, utm }: { sheet: SheetInfo | null, result: any, utm?: Rec | null }) {
@@ -805,6 +845,22 @@ function SampleCodeInput({ setData }: { setData: (u: (p: Record<string, any>) =>
   )
 }
 
+/** Sign boxes of a printed field worksheet; the daily report and the permit to work have their own. */
+function fieldSigners(record: Rec): Array<[string, string]> {
+  const d = record.data || {}
+  if (record.method === 'predrill_checklist') {
+    return [['Prepared by (driller / foreman)', d.prepared_by || record.crew], ['Site supervisor / HSE', ''], ['Approved by (site manager / HSE)', d.approved_by]]
+  }
+  if (record.method === 'daily_report') {
+    return [['Prepared by', record.crew], ['Checked by', record.checked_by], ['Direction given by', d.pm_direction_by]]
+  }
+  return [['Prepared by', record.crew], ['Checked by', record.checked_by]]
+}
+
+/** The permit to work prints its Yes / No / N.A. answers once, in the checklist table of the results. */
+const printable = (record: Rec): Rec => record.method !== 'predrill_checklist' ? record
+  : { ...record, data: Object.fromEntries(Object.entries(record.data || {}).filter(([, v]) => !['yes', 'no', 'na'].includes(String(v)))) }
+
 function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' | 'lab' | 'cpt', onClose: () => void }) {
   const settings = useSettings()
   const schemas = useSchemas()
@@ -818,11 +874,11 @@ function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' 
   const result = kind === 'field' ? record.results_calc : kind === 'lab' ? record.calc : record.results
   const people: Array<[string, string]> = kind === 'lab'
     ? [['Tested by', record.technician], ['Checked by', record.checked_by]]
-    : kind === 'field' ? [['Prepared by', record.crew], ['Checked by', record.checked_by]] : [['Operator', record.operator], ['Checked by', '']]
+    : kind === 'field' ? fieldSigners(record) : [['Operator', record.operator], ['Checked by', '']]
   return (
     <PrintSheet title={`${title} ${number || ''}`} onClose={onClose}>
       <Letterhead settings={settings} title={title} number={number} date={date} />
-      {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} hideEmpty /></div>}
+      {entity && <div className="doc-ws"><RecordFields entity={entity} record={printable(record)} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} hideEmpty /></div>}
       {kind === 'cpt' && <CptPlot test={record} />}
       {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} notesOpen full /></>}
       {sheet && sheet.standards.length > 0 && <><h3 className="doc-h">{t('Standards')}</h3><StandardsList sheet={sheet} /></>}

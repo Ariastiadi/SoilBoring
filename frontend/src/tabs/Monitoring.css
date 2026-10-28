@@ -1,0 +1,16 @@
+/* Monitoring instruments page */
+.mon-filter .status { margin-right: .35rem; }
+.mon-filter .status::before { width: .5rem; height: .5rem; }
+.mon-head { margin-bottom: 1rem; }
+.mon-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin-bottom: .75rem; }
+.mon-head-row .status { font-weight: 600; font-size: 1rem; }
+.mon-stale { color: var(--danger); font-size: .88rem; font-weight: 500; }
+.mon-bad { color: var(--danger); }
+.mon-warn { color: #a15c00; }
+.mon-paste { align-items: flex-start; }
+.mon-paste-body { margin-top: .6rem; display: grid; gap: .5rem; }
+.mon-paste-body textarea { width: 100%; font-family: var(--mono, ui-monospace, monospace); font-size: .9rem; }
+@media (max-width: 640px) {
+  .mon-head .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mon-head .kpi p { font-size: 1.25rem; }
+}

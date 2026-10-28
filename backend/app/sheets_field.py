@@ -12,7 +12,11 @@ from . import calc_field as cf
 from .fields import F
 from .sheets import Sheet, register
 
-WEATHER = [("clear", "Clear / bright"), ("cloudy", "Cloudy"), ("drizzle", "Drizzle"), ("rain", "Rain"), ("heavy_rain", "Heavy rain")]
+# Weather list shared by the field worksheets. Older records keep their values (clear, cloudy, drizzle, rain,
+# heavy_rain); the other entries were added for the daily report.
+WEATHER = [("clear", "Clear / bright"), ("partly_cloudy", "Partly cloudy"), ("cloudy", "Cloudy"), ("overcast", "Overcast"),
+           ("fog", "Fog / mist"), ("haze", "Haze / smoke"), ("drizzle", "Drizzle"), ("light_rain", "Light rain"),
+           ("rain", "Rain"), ("heavy_rain", "Heavy rain"), ("storm", "Thunderstorm"), ("windy", "Strong wind")]
 HEMISPHERES = [("S", "South (S)"), ("N", "North (N)")]
 
 SNI_HORIZONTAL = ("SNI 19-6724-2002", "Horizontal control network")
@@ -100,8 +104,26 @@ GENERAL = [
             sel("weather_day", "Weather (midday)", WEATHER, section="Report"),
             sel("weather_afternoon", "Weather (afternoon)", WEATHER, section="Report"),
             t("work_hours", "Working hours", section="Report", help="e.g. 08.00-12.00, 13.00-17.00 WIB"),
+            sel("ground", "Ground condition", cf.GROUND_OPTIONS, section="Site conditions"),
+            sel("access", "Site access", cf.ACCESS_OPTIONS, section="Site conditions"),
+            n("rainfall", "Rainfall (mm)", min=0, max=1000, section="Site conditions",
+              help="From a rain gauge on site, or the nearest weather station."),
+            sel("fit_for_work", "Site fit for work", [("yes", "Yes"), ("partly", "Partly (some work stopped)"), ("no", "No")],
+                section="Site conditions"),
+            t("fit_reason", "Reason / restriction", maxlen=300, section="Site conditions",
+              help="Why work was stopped or limited, e.g. lightning, flooded access, community objection."),
+            F("crew_count", "int", "Crew on site (persons)", min=0, max=1000, section="Site conditions",
+              help="Empty: the total of the manpower table."),
             F("activities", "longtext", "Today's activities", maxlen=4000, section="Activities"),
             F("tomorrow", "longtext", "Plan for tomorrow", maxlen=3000, section="Activities"),
+            items("delays", "Delays and obstacles", max_items=50, section="Delays and obstacles", fields=[
+                sel("cause", "Delay cause", cf.DELAY_CAUSES, required=True), t("description", "Description", maxlen=200),
+                t("point", "Point / borehole", maxlen=40), n("hours", "Hours lost", min=0, max=24),
+                t("action", "Action taken", maxlen=200)]),
+            items("materials", "Materials used", max_items=50, section="Materials used", fields=[
+                t("material", "Material", required=True, maxlen=80), n("qty", "Quantity", min=0),
+                t("unit", "Unit", maxlen=20), t("remarks", "Remarks", maxlen=120)],
+                help="e.g. bentonite, cement, diesel, core boxes, PVC pipe, sample tubes."),
             items("drilling", "Drilling progress", max_items=100, section="Drilling progress", fields=[
                 t("borehole", "Borehole", required=True, maxlen=40), n("plan_depth", "Plan depth (m)", min=0, max=500),
                 n("prev_depth", "Previous depth (m)", min=0, max=500), n("today_depth", "Drilled today (m)", min=0, max=500),
@@ -123,9 +145,15 @@ GENERAL = [
                 t("job", "Work item", required=True, maxlen=80), n("qty", "Quantity", min=0), n("finish", "Finished", min=0),
                 sel("unit", "Unit", cf.UNIT_OPTIONS)]),
             F("safety", "longtext", "Safety incidents", maxlen=2000, section="Notes"),
+            F("safety_observations", "longtext", "Safety observations", maxlen=2000, section="Notes",
+              help="Unsafe acts or conditions seen and corrected, toolbox topics, near misses not yet in the HSE report."),
             F("concerns", "longtext", "Items of concern", maxlen=2000, section="Notes"),
             F("material", "longtext", "Soil / rock material description", maxlen=3000, section="Notes"),
             F("notes", "longtext", "Notes", maxlen=2000, section="Notes"),
+            F("pm_direction", "longtext", "Direction from the site manager / PM", maxlen=3000, section="Site manager / PM direction",
+              help="Filled in by the site manager or project manager after reviewing this report."),
+            F("pm_direction_by", "user", "Direction given by", section="Site manager / PM direction"),
+            F("pm_direction_date", "date", "Direction date", section="Site manager / PM direction"),
         ],
         calc=cf.daily_report,
     ),
@@ -1264,8 +1292,25 @@ EXAMPLES: Dict[str, Dict[str, Any]] = {'coordinates': {'zone': 48,
 # The SPT correction is also used by the engineering-analysis page with a borehole's SPT rows.
 spt_correction = cf.spt_correction
 
+# Site conditions, delays, materials and the site manager's direction added to the daily report example.
+EXAMPLES["daily_report"].update({
+    "ground": "moist", "access": "limited", "rainfall": 12.5, "fit_for_work": "partly",
+    "fit_reason": "Drilling stopped 14.00-16.00 for lightning; access to BH-06-2 muddy after rain",
+    "crew_count": 8,
+    "delays": [{"cause": "weather", "description": "Lightning stop rule", "point": "BH-06-2", "hours": 2,
+                "action": "Crew sheltered, rig mast lowered"},
+               {"cause": "access", "description": "Muddy access, rig moved with the winch", "point": "BH-06-2", "hours": 1.5,
+                "action": "Timber mats placed"}],
+    "materials": [{"material": "Bentonite", "qty": 2, "unit": "sack"}, {"material": "Diesel", "qty": 20, "unit": "l"},
+                  {"material": "Core box", "qty": 3, "unit": "pcs"}],
+    "safety_observations": "Helper without gloves at the rod rack, corrected. Toolbox topic: lightning and the stop rule.",
+})
+
 for _sheet in GENERAL + SURVEY + GEOTECHNICAL + GEOPHYSICS:
     if _sheet.key in EXAMPLES:
         _sheet.example = EXAMPLES[_sheet.key]
 
 register(*GENERAL, *SURVEY, *GEOTECHNICAL, *GEOPHYSICS)
+
+# Compaction control (sand cone, DCP), the pre-drilling checklist and the monitoring page.
+from . import sheets_qc  # noqa: E402,F401
