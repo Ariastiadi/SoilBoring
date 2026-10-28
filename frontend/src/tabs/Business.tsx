@@ -11,6 +11,7 @@ import {
   RecordFields, RecordForm, RecordsPage, type FormLayout, RecordTable, STATUS_TONE, display, invalidate, money, number, optionLabel,
   useList, useSchemas,
 } from '../records'
+import { SealMark } from '../seal'
 import { Icon, PageHead, ScrollTable, formatDate, todayIso } from '../ui'
 import { CptCalcPreview, ResultView, StandardsList, sheetOf, useCatalog, useSheetTools } from '../worksheets'
 import { LAB_QUALITY_FIELDS, LAB_QUALITY_HIDDEN, LabQualityPanel, NonconformitiesPage, SampleReceiptsPage, ViewSwitch } from './ErpOps'
@@ -208,7 +209,7 @@ function useSettings() {
   return rows?.[0] || null
 }
 
-function PrintSheet({ title, onClose, children }: { title: string, onClose: () => void, children: ReactNode }) {
+export function PrintSheet({ title, onClose, children }: { title: string, onClose: () => void, children: ReactNode }) {
   useEffect(() => {
     document.body.classList.add('printing-borelog')
     const before = document.title
@@ -770,7 +771,7 @@ export function LabPage({ intent }: { intent?: Intent }) {
   if (view === 'receipts') return <SampleReceiptsPage switcher={switcher} />
   if (view === 'ncr') return <NonconformitiesPage switcher={switcher} />
   return <>
-    <RecordsPage entityName="lab_tests" hideInView={r => [...(r.calc && Object.keys(r.calc).length && !r.calc.error ? ['summary', 'results'] : ['summary']), ...LAB_QUALITY_HIDDEN]} formLayout={layout} openId={intent?.open} startNew={intent?.newWith} filter={filter}
+    <RecordsPage entityName="lab_tests" hideInView={r => [...(r.calc && Object.keys(r.calc).length && !r.calc.error ? ['summary', 'results'] : ['summary']), ...LAB_QUALITY_HIDDEN, 'seal_hash', 'sealed_at']} formLayout={layout} openId={intent?.open} startNew={intent?.newWith} filter={filter}
       description={t('Samples from the boreholes and their test results. Results feed the engineering analyses.')}
       toolbar={<>{switcher}<Segments value={status} onChange={setStatus} label={t('Show tests')} options={[['open', 'In progress'], ['done', 'Done'], ['all', 'All']]} /></>}
       formTools={tools}
@@ -822,10 +823,11 @@ function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' 
   return (
     <PrintSheet title={`${title} ${number || ''}`} onClose={onClose}>
       <Letterhead settings={settings} title={title} number={number} date={date} />
-      {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values']} hideEmpty /></div>}
+      {entity && <div className="doc-ws"><RecordFields entity={entity} record={record} hide={['files', 'results', 'results_calc', 'calc', 'summary', 'utm', 'values', 'seal_code', 'seal_hash', 'sealed_at']} hideEmpty /></div>}
       {kind === 'cpt' && <CptPlot test={record} />}
       {result && Object.keys(result).length > 0 && <><h3 className="doc-h">{t('Results')}</h3><ResultView result={result} notesOpen full /></>}
       {sheet && sheet.standards.length > 0 && <><h3 className="doc-h">{t('Standards')}</h3><StandardsList sheet={sheet} /></>}
+      {kind === 'lab' && record.authorised && <SealMark code={record.seal_code} hash={record.seal_hash} />}
       <div className="doc-approvals">
         {people.map(([label, who]) => (
           <div key={label}><div className="doc-small">{t(label)}</div><div className="doc-sign-space" /><div>{who || '……………………'}</div></div>
@@ -835,108 +837,4 @@ function WorksheetSheet({ record, kind, onClose }: { record: Rec, kind: 'field' 
   )
 }
 
-// ---------------------------------------------------------------------------
-// Reports & recommendations
-// ---------------------------------------------------------------------------
-
-function ReportSheet({ report, onClose }: { report: Rec, onClose: () => void }) {
-  const settings = useSettings()
-  const schemas = useSchemas()
-  const [d, setD] = useState<{ project?: Rec, client?: Rec, logs: Rec[], ov: DepthOverview, cpt: Rec[], fa: Rec[], lab: Rec[], an: Rec[] } | null>(null)
-  useEffect(() => {
-    Promise.all([
-      listRecords('projects'), listRecords('clients'), listReports(), getDepthOverview().catch(() => ({})),
-      listRecords('cpt', report.project_id), listRecords('field_activities', report.project_id), listRecords('lab_tests'), listRecords('analyses', report.project_id),
-    ]).then(([projects, clients, logs, ov, cpt, fa, lab, an]) => {
-      const project = projects.find(p => p.id === report.project_id)
-      const client = clients.find(c => c.id === project?.client_id)
-      const mine = (logs as Rec[]).filter(r => String(r.ProjectName || '').toLowerCase() === String(project?.name || '').toLowerCase())
-      const ids = new Set(mine.map(r => String(r.BoreholeID).toLowerCase()))
-      setD({ project, client, logs: mine, ov: ov as DepthOverview, cpt, fa, lab: lab.filter(x => ids.has(String(x.borehole_id).toLowerCase()) && x.status === 'done'), an })
-    }).catch(() => setD({ logs: [], ov: {}, cpt: [], fa: [], lab: [], an: [] }))
-  }, [report.project_id])
-  const labDef = schemas?.lab_tests
-  const resultsOf = (x: Rec) => {
-    const f = labDef?.fields.find(ff => ff.name === 'results')
-    const sub = f?.variants?.[x.test_type] || []
-    return sub.filter(s => x.results?.[s.name] !== null && x.results?.[s.name] !== undefined).map(s => `${t(s.label)} ${display(s, x.results[s.name])}`).join('; ')
-  }
-  const testType = labDef?.fields.find(ff => ff.name === 'test_type')
-  const anType = schemas?.analyses?.fields.find(ff => ff.name === 'type')
-  const faMethod = schemas?.field_activities?.fields.find(ff => ff.name === 'method')
-  let n = 0
-  const h = (title: string) => <h2>{++n}. {title}</h2>
-  return (
-    <PrintSheet title={report.number} onClose={onClose}>
-      <Letterhead settings={settings} title={t('Report')} number={report.number} date={report.date} />
-      <h1 className="doc-h1">{report.title}</h1>
-      <table className="doc-meta"><tbody>
-        <tr><td>{t('Project')}</td><td>{d?.project ? `${d.project.name} (${d.project.code})` : '…'}</td></tr>
-        <tr><td>{t('Client')}</td><td>{d?.client?.name || '–'}</td></tr>
-        <tr><td>{t('Location')}</td><td>{d?.project?.location || '–'}</td></tr>
-        <tr><td>{t('Status')}</td><td>{optionLabel(schemas!.project_reports.fields.find(f => f.name === 'status')!, report.status)}</td></tr>
-      </tbody></table>
-      {report.summary && <>{h(t('Summary'))}<p className="doc-text">{report.summary}</p></>}
-      {report.scope && <>{h(t('Scope of work'))}<p className="doc-text">{report.scope}</p></>}
-      {d && d.logs.length > 0 && <>
-        {h(t('Boreholes'))}
-        <table className="doc-table">
-          <thead><tr><th>{t('Borehole')}</th><th>{t('Dates')}</th><th className="num">{t('Depth')}</th><th className="num">{t('Groundwater')}</th><th>USCS</th><th className="num">{t('Avg N')}</th><th>{t('Strata')}</th></tr></thead>
-          <tbody>{d.logs.map(r => (
-            <tr key={r.BoreholeID}><td className="nowrap">{r.BoreholeID}</td><td>{formatDate(r.StartDate)}</td><td className="num nowrap">{number(r.FinalDepth_m)} m</td><td className="num nowrap">{r.GroundwaterDepth_m ? `${number(r.GroundwaterDepth_m)} m` : '–'}</td><td>{r.USCS_Class}</td><td className="num">{r.Avg_SPT_N60 ? number(r.Avg_SPT_N60) : '–'}</td>
-              <td>{(d.ov[r.BoreholeID]?.layers || []).map(l => `${l.top}–${l.base} m ${l.uscs}`).join('; ') || '–'}</td></tr>
-          ))}</tbody>
-        </table>
-      </>}
-      {d && d.cpt.length > 0 && <>
-        {h(t('CPT / sondir'))}
-        <table className="doc-table">
-          <thead><tr><th>{t('Test ID')}</th><th>{t('Date')}</th><th className="num">{t('Final depth (m)')}</th><th className="num">{t('Max qc (kg/cm²)')}</th></tr></thead>
-          <tbody>{d.cpt.map(c => <tr key={c.id}><td>{c.test_id}</td><td>{formatDate(c.date)}</td><td className="num">{number(c.final_depth)}</td><td className="num">{number(Math.max(0, ...(c.readings || []).map((r: Rec) => r.qc || 0)))}</td></tr>)}</tbody>
-        </table>
-      </>}
-      {d && d.fa.length > 0 && <>
-        {h(t('Other field work'))}
-        <table className="doc-table">
-          <thead><tr><th>{t('Line / point ID')}</th><th>{t('Method')}</th><th>{t('Date')}</th><th>{t('Results')}</th></tr></thead>
-          <tbody>{d.fa.map(a => <tr key={a.id}><td>{a.code}</td><td>{faMethod ? optionLabel(faMethod, a.method) : a.method}</td><td>{formatDate(a.date)}</td><td style={{ whiteSpace: 'pre-wrap' }}>{a.results}</td></tr>)}</tbody>
-        </table>
-      </>}
-      {d && d.lab.length > 0 && <>
-        {h(t('Laboratory results'))}
-        <table className="doc-table">
-          <thead><tr><th>{t('Borehole')}</th><th>{t('Sample')}</th><th className="num">{t('Depth (m)')}</th><th>{t('Test')}</th><th>{t('Results')}</th></tr></thead>
-          <tbody>{d.lab.map(x => <tr key={x.id}><td>{x.borehole_id}</td><td>{x.sample_ref}</td><td className="num">{number(x.depth_top)}{x.depth_base ? `–${number(x.depth_base)}` : ''}</td><td>{testType ? optionLabel(testType, x.test_type) : x.test_type}</td><td>{resultsOf(x)}</td></tr>)}</tbody>
-        </table>
-      </>}
-      {d && d.an.length > 0 && <>
-        {h(t('Engineering analyses'))}
-        <table className="doc-table">
-          <thead><tr><th>{t('Analysis')}</th><th>{t('Borehole')}</th><th>{t('Result')}</th></tr></thead>
-          <tbody>{d.an.map(a => <tr key={a.id}><td>{a.title}<div className="doc-small">{anType ? optionLabel(anType, a.type) : a.type}</div></td><td>{a.borehole_id || '–'}</td><td>{translateServer(a.summary || '')}</td></tr>)}</tbody>
-        </table>
-        <p className="doc-small">{t('Methods: bearing capacity after Meyerhof/Vesic, pile capacity after Decourt (SPT), consolidation settlement with the 2:1 stress spread, liquefaction after Idriss & Boulanger (2014).')}</p>
-      </>}
-      {report.recommendations && <>{h(t('Recommendations'))}<p className="doc-text">{report.recommendations}</p></>}
-      <div className="doc-approvals">
-        {[['Prepared by', report.prepared_by], ['Reviewed by', report.reviewed_by], ['Approved by', report.approved_by]].map(([label, who]) => (
-          <div key={label}><div className="doc-small">{t(label)}</div><div className="doc-sign-space" /><div>{who || '……………………'}</div></div>
-        ))}
-      </div>
-      {settings?.report_footer && <p className="doc-small doc-footer">{settings.report_footer}</p>}
-    </PrintSheet>
-  )
-}
-
-export function ReportsPage({ intent }: { intent?: Intent }) {
-  const [printing, setPrinting] = useState<Rec | null>(null)
-  return (
-    <>
-      <RecordsPage entityName="project_reports" openId={intent?.open} startNew={intent?.newWith}
-        description={t('The report to the client: it collects the boreholes, CPT, other field work, lab results and analyses of the project, with your summary and recommendations.')}
-        defaults={{ date: todayIso(), status: 'draft' }}
-        actions={r => <button type="button" onClick={() => setPrinting(r)}>{t('Print report')}</button>} />
-      {printing && <ReportSheet report={printing} onClose={() => setPrinting(null)} />}
-    </>
-  )
-}
+// Reports & recommendations: see ClientReports.tsx

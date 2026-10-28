@@ -10,6 +10,7 @@ export type TabKey =
   | 'equipment' | 'mobilisations' | 'work_orders' | 'vendors' | 'procurements' | 'purchase_orders' | 'fixed_assets' | 'performance' | 'ops_settings'
   | 'pbd' | 'client_decisions' | 'work_plans' | 'guarantees' | 'receivables' | 'client_cards' | 'pricing_settings'
   | 'sample_receipts' | 'nonconformities' | 'vendor_evaluations'
+  | 'datachecks'
 
 /** Where to go, and what to open there: a record, or a new one with values filled in. */
 export type Intent = { open?: string, newWith?: Record<string, unknown>, borehole?: string }

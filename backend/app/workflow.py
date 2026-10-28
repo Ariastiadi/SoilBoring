@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from . import docstore, records
 from .entities import ENTITIES, Entity
+from .fields import ACTION_HOOKS
 
 ACTIONS = ("submit", "review", "approve", "return", "reopen")
 
@@ -74,6 +75,9 @@ def act(entity_name: str, record_id: str, action: str, note: str, role: str, ema
         record["wf_history"] = history[-200:]
         record["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         record["updated_by"] = email
+        hook = ACTION_HOOKS.get(entity_name)
+        if hook is not None:
+            hook(record, action, email, role)
         import json
         docstore.write_text(records._doc(entity_name, record_id), json.dumps(record, ensure_ascii=False, separators=(",", ":")))
     return record

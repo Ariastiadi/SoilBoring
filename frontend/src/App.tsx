@@ -24,7 +24,7 @@ import type { Intent as PageIntent } from './nav'
 // Business modules load when first opened, so the field log starts fast on a phone.
 const business = () => import('./tabs/Business')
 type PageProps = { intent?: PageIntent }
-const fromBusiness = (name: 'CptPage' | 'ClientsPage' | 'ContractsPage' | 'FieldWorkPage' | 'InvoicesPage' | 'LabPage' | 'ProjectsPage' | 'QuotesPage' | 'RatesPage' | 'ReportsPage' | 'SettingsPage') =>
+const fromBusiness = (name: 'CptPage' | 'ClientsPage' | 'ContractsPage' | 'FieldWorkPage' | 'InvoicesPage' | 'LabPage' | 'ProjectsPage' | 'QuotesPage' | 'RatesPage' | 'SettingsPage') =>
   lazy(() => business().then(m => ({ default: m[name] as (p: PageProps) => JSX.Element })))
 const ProjectsPage = fromBusiness('ProjectsPage')
 const ClientsPage = fromBusiness('ClientsPage')
@@ -33,7 +33,7 @@ const ContractsPage = fromBusiness('ContractsPage')
 const CptPage = fromBusiness('CptPage')
 const FieldWorkPage = fromBusiness('FieldWorkPage')
 const LabPage = fromBusiness('LabPage')
-const ReportsPage = fromBusiness('ReportsPage')
+const ReportsPage = lazy(() => import('./tabs/ClientReports').then(m => ({ default: m.ReportsPage })))
 const InvoicesPage = fromBusiness('InvoicesPage')
 const RatesPage = fromBusiness('RatesPage')
 const SettingsPage = fromBusiness('SettingsPage')
@@ -70,9 +70,11 @@ const ClientCardsPage = comPage('ClientCardsPage')
 const ReceivablesPage = lazy(() => comModule().then(m => ({ default: m.ReceivablesPage })))
 const PricingSettingsPage = lazy(() => comModule().then(m => ({ default: m.PricingSettingsPage })))
 const OverviewPage = lazy(() => erpModule().then(m => ({ default: m.OverviewPage })))
+const DataChecksPage = lazy(() => import('./tabs/DataChecks'))
+const ClientPortal = lazy(() => import('./tabs/ClientPortal'))
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
-const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
+const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance', 'client']
 const AUTH_STORAGE_KEY = 'soilboring-auth'
 // AI answers cached in the browser contain data from the logs, so they are cleared when the
 // session ends. The unsaved borehole form draft is kept on purpose so field work is never lost.
@@ -190,7 +192,7 @@ export default function App() {
   // Documents waiting for this user in the approval flow, refreshed on every page change.
   const [approvalCount, setApprovalCount] = useState(0)
   useEffect(() => {
-    if (!auth) return
+    if (!auth || auth.role === 'client') return
     let live = true
     getApprovals().then(list => { if (live) setApprovalCount(list.length) }).catch(() => {})
     return () => { live = false }
@@ -205,7 +207,7 @@ export default function App() {
     return () => { live = false }
   }, [auth?.token, auth?.role, tab, requestTick]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!auth) { setSchemas(null); invalidate(); return }
+    if (!auth || auth.role === 'client') { setSchemas(null); invalidate(); return }
     let active = true
     getSchemas().then(sc => { if (active) setSchemas(sc) }).catch(() => {})
     return () => { active = false }
@@ -245,6 +247,13 @@ export default function App() {
 
   if (!auth) {
     return <Login onLogin={handleLogin} onSetup={handleSetup} title={appTitle(orgName)} orgName={orgName} notice={authNotice} />
+  }
+  // Client accounts see only the client portal (their own projects' issued reports and logs).
+  if (auth.role === 'client') {
+    return <Suspense fallback={<p className="muted">{t('Loading…')}</p>}><ClientPortal email={auth.email} orgName={orgName} onLogout={handleLogout} onSession={session => {
+      setAuthToken(session.token)
+      setAuth({ token: session.token, email: session.email, role: session.role, expiresAt: Date.now() + session.expires_in * 1000 })
+    }} /></Suspense>
   }
 
   const go = (key: TabKey, next?: Intent) => {
@@ -319,6 +328,7 @@ export default function App() {
     { key: 'dashboard', label: t('Dashboard'), icon: 'chart' },
     { key: 'worksheets', label: t('Worksheet list'), icon: 'book' },
     { key: 'standards', label: t('Standards'), icon: 'book' },
+    ...(auth.role === 'admin' || auth.role === 'manager' ? [{ key: 'datachecks' as TabKey, label: t('Data checks'), icon: 'check' }] : []),
   ]
   const admin: NavItem[] = isAdmin ? [
     { key: 'users', label: t('Users'), icon: 'users' },
@@ -349,6 +359,7 @@ export default function App() {
     pbd: i => <PbdPage intent={i} />, client_decisions: i => <ClientDecisionsPage intent={i} />, work_plans: i => <WorkPlansPage intent={i} />,
     guarantees: i => <GuaranteesPage intent={i} />, client_cards: i => <ClientCardsPage intent={i} />,
     receivables: () => <ReceivablesPage />, pricing_settings: () => <PricingSettingsPage />, overview: () => <OverviewPage />,
+    datachecks: () => <DataChecksPage />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)

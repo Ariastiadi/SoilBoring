@@ -64,3 +64,8 @@ class Entity:
 # Calculations of the ERP modules, registered by their entity files: entity name -> function(record).
 # Called by records.compute() on every save, inside the entity lock; a hook may read other records.
 COMPUTE_HOOKS: Dict[str, Callable[[Dict[str, Any]], None]] = {}
+
+# Steps of the approval flow, registered by entity files: entity name -> function(record, action, email, role).
+# Called by workflow.act() inside the entity lock after the new state is set and before the record is
+# written; it may change the record or refuse the step (workflow.WorkflowError).
+ACTION_HOOKS: Dict[str, Callable[[Dict[str, Any], str, str, str], None]] = {}

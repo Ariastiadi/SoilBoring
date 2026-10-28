@@ -8,12 +8,14 @@ const BASE = String(import.meta.env.VITE_API_URL ?? "")
   .replace(/\/+$/, "")
   .replace(/\/api$/, "");
 
-export type Role = 'admin' | 'manager' | 'general' | 'lab' | 'finance'
+export type Role = 'admin' | 'manager' | 'general' | 'lab' | 'finance' | 'client'
 export type User = {
   email: string
   name?: string
   role: Role
   totp_enabled?: boolean
+  /** Client accounts: the client records whose projects they see. */
+  client_ids?: string[]
 }
 
 export type SummaryStats = {
@@ -73,6 +75,10 @@ export type DashboardResponse = {
   narrative_prompt?: NarrativePrompt | null
   period_range?: SummaryPeriodRange
   period_label?: string | null
+  depth_breakdown?: Array<[string, number]>
+  groundwater_breakdown?: Record<string, number>
+  groundwater_rate_pct?: number | null
+  strata_uscs_m?: Record<string, number>
 }
 
 let authToken: string | null = null;
@@ -260,7 +266,7 @@ export async function listUsers() {
   return parseJson<User[]>(r, t("Failed to load users"))
 }
 
-export async function createUser(payload: { email: string; password: string; role: User['role'] }) {
+export async function createUser(payload: { email: string; password: string; role: User['role']; client_ids?: string[] }) {
   const r = await fetch(`${BASE}/api/users`, {
     method: "POST",
     headers: buildHeaders({ "Content-Type": "application/json" }),
@@ -468,8 +474,17 @@ export async function listAccountRequests() {
   return parseJson<AccountRequest[]>(r, t("Failed to load users"))
 }
 
-export const approveAccountRequest = (email: string, role: Role) =>
-  postJson<User>(`/api/users/requests/${encodeURIComponent(email)}/approve`, { role }, t("Failed to create user"))
+export const approveAccountRequest = (email: string, role: Role, client_ids: string[] = []) =>
+  postJson<User>(`/api/users/requests/${encodeURIComponent(email)}/approve`, { role, client_ids }, t("Failed to create user"))
+
+export async function setClientLinks(email: string, client_ids: string[]) {
+  const r = await fetch(`${BASE}/api/users/${encodeURIComponent(email)}/clients`, {
+    method: "PUT",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ client_ids }),
+  })
+  return parseJson<{ email: string; client_ids: string[] }>(r, t("Could not save"))
+}
 
 export async function rejectAccountRequest(email: string) {
   const r = await fetch(`${BASE}/api/users/requests/${encodeURIComponent(email)}`, { method: "DELETE", headers: buildHeaders() })
