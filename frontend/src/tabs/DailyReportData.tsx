@@ -9,6 +9,7 @@ import { DateInput, Icon, PageHead, formatDate, todayIso } from '../ui'
 
 // The map library is only downloaded when the map is opened.
 const BoreholeMap = lazy(() => import('../BoreholeMap'))
+const AgsImport = lazy(() => import('./AgsImport'))
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 
@@ -100,6 +101,8 @@ export default function Boreholes({ user, outbox = [], onNew, openBorehole }: { 
   const [editOriginal, setEditOriginal] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [openId, setOpenId] = useState<string | null>(openBorehole || null)
+  const [showImport, setShowImport] = useState(false)
+  const canImport = ['admin', 'manager', 'general'].includes(user.role)
   const [showMap, setShowMap] = useState(() => {
     try { return localStorage.getItem('soilboring-show-map') === '1' } catch { return false }
   })
@@ -317,11 +320,12 @@ export default function Boreholes({ user, outbox = [], onNew, openBorehole }: { 
 
   const exportMenu = (
     <details className="menu">
-      <summary className="button-like"><Icon name="download" />{t('Export')}</summary>
+      <summary className="button-like"><Icon name="download" />{canImport ? t('Import / export') : t('Export')}</summary>
       <div className="menu-pop">
         <button type="button" onClick={exportCsv} disabled={!sorted.length}>{t('CSV (rows shown)')}</button>
         <button type="button" onClick={exportAgs} disabled={!projectFilter || busy}>{t('AGS4 for the chosen project')}</button>
         {!projectFilter && <p className="hint">{t('Choose a project in the Project filter first')}</p>}
+        {canImport && <button type="button" onClick={e => { const menu = e.currentTarget.closest('details'); if (menu) menu.open = false; setShowImport(true) }}>{t('Import AGS4 file…')}</button>}
       </div>
     </details>
   )
@@ -364,6 +368,12 @@ export default function Boreholes({ user, outbox = [], onNew, openBorehole }: { 
           {onNew && <button type="button" className="primary" onClick={onNew}><Icon name="plus" />{t('New log')}</button>}
         </>}
       />
+
+      {showImport && (
+        <Suspense fallback={<p className="muted">{t('Loading…')}</p>}>
+          <AgsImport onClose={() => setShowImport(false)} onImported={() => { void loadReports() }} />
+        </Suspense>
+      )}
 
       {editTarget && (
         <section className="card" style={{ marginBottom: '1rem' }} aria-label={t('Edit Borehole {id}', { id: editTarget })}>

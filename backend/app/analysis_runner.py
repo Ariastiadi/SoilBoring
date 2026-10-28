@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import calc_field, calcbase, details, engineering, records, seismic, storage
+from . import calc_field, calc_lab_ext, calcbase, details, engineering, records, seismic, storage
 
 
 def _opt(inputs: Dict[str, Any], key: str) -> Optional[float]:
@@ -100,6 +100,8 @@ def run(kind: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         except ValueError:
             result["profile"] = []
         result["summary"] = f"Q_allow = {result['Qallow']:g} kN, L = {result['inputs'].get('length', inputs.get('length'))} m" if isinstance(result.get("inputs"), dict) else f"Q_allow = {result['Qallow']:g} kN"
+        # Chemistry tests of the borehole: concrete exposure class and corrosion of steel piles.
+        result["notes"] = list(result.get("notes") or []) + calc_lab_ext.pile_notes(_lab_by_depth(data["report"]["BoreholeID"]))
         return result
     if kind == "settlement":
         layers = inputs.get("layers") or []
