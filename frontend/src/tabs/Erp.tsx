@@ -5,6 +5,7 @@ import { t, translateServer } from '../i18n'
 import { ENTITY_TAB, useNav, type Intent, type TabKey } from '../nav'
 import { CommercialOverviewPanel } from './ErpCommercial'
 import { OpsOverviewPanel } from './ErpOps'
+import { SubmissionsInboxCard, WorkOverviewPanel } from './ErpWork'
 import { PageHead, formatDate } from '../ui'
 
 const GROUPS: Array<[string, string, string]> = [
@@ -22,6 +23,7 @@ export function ApprovalsPage() {
     <div className="page">
       <PageHead title={t('Approvals')} description={t('Documents waiting for you in the approval flow: drafter, reviewer, approver.')} />
       {error && <p className="notice error">{error}</p>}
+      <SubmissionsInboxCard />
       {items && items.length === 0 && <p className="muted">{t('Nothing is waiting for you.')}</p>}
       {items && GROUPS.map(([state, title, help]) => {
         const list = items.filter(i => i.state === state)
@@ -71,6 +73,7 @@ export function OverviewPage() {
       )}
       <CommercialOverviewPanel onOpen={open} />
       <OpsOverviewPanel onOpen={tab => open(tab)} />
+      <WorkOverviewPanel onOpen={tab => open(tab)} />
     </div>
   )
 }

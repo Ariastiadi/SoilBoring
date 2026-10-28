@@ -19,7 +19,7 @@ from . import docstore
 from . import cpt_calc, geo, sheets
 from .calcbase import CalcError
 from .entities import ENTITIES, Entity, F
-from .fields import COMPUTE_HOOKS
+from .fields import COMPUTE_HOOKS, LOCK_HOOKS
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
 FILE_TYPES = {
@@ -513,6 +513,10 @@ def remove(entity_name: str, record_id: str) -> Dict[str, Any]:
     entity = ENTITIES[entity_name]
     with docstore.lock(_lock_name(entity_name)):
         record = get_record(entity_name, record_id)
+        guard = LOCK_HOOKS.get(entity_name)
+        reason = guard(record, "", "delete") if guard else None
+        if reason:
+            raise ConflictError(reason)
         users = references_to(entity_name, record_id)
         if users:
             raise ConflictError(f"Still used by: {', '.join(users[:5])}")
@@ -602,6 +606,11 @@ def can_see(entity: Entity, role: str, record: Dict[str, Any], user_email: str) 
 def locked_by_workflow(entity: Entity, record: Optional[Dict[str, Any]], role: str) -> Optional[str]:
     """Why a record in the approval flow cannot be changed now, or None.
     The reviewer may correct a submitted record and the approver a reviewed one (blueprint A.1)."""
+    guard = LOCK_HOOKS.get(entity.name)
+    if guard is not None and record is not None:
+        reason = guard(record, role, "edit")
+        if reason:
+            return reason
     if not entity.workflow or record is None:
         return None
     state = record.get("wf_status") or "draft"

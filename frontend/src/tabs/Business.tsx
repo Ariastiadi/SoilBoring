@@ -16,6 +16,7 @@ import { CptCalcPreview, ResultView, StandardsList, sheetOf, useCatalog, useShee
 import { LAB_QUALITY_FIELDS, LAB_QUALITY_HIDDEN, LabQualityPanel, NonconformitiesPage, SampleReceiptsPage, ViewSwitch } from './ErpOps'
 
 const COMMERCIAL_ROLES = ['admin', 'manager', 'finance']
+const ProjectWorkPanel = lazy(() => import('./ErpWork').then(m => ({ default: m.ProjectWorkPanel })))
 
 // ---------------------------------------------------------------------------
 // Projects: the hub of commercial operations
@@ -147,6 +148,7 @@ function ProjectHub({ project }: { project: Rec }) {
           </ScrollTable>
         ) : <p className="muted small">{t('Borehole logs whose Project is "{name}" appear here.', { name: project.name })}</p>}
       </section>
+      <Suspense fallback={null}><ProjectWorkPanel project={project} /></Suspense>
       {sections.map(s => <HubSection key={s.key} s={s} />)}
     </div>
   )

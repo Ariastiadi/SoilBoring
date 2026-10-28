@@ -233,7 +233,8 @@ function ItemsEditor({ f, rows, onChange, record }: { f: FieldDef, rows: Array<R
     const price = rate && record?.price_tier === 'internal' && rate.internal_price ? rate.internal_price : rate?.price
     onChange(rows.map((r, j) => (j === i ? { ...r, rate_id: rateId, ...(rate ? { description: rate.description, unit: rate.unit, unit_price: price } : {}) } : r)))
   }
-  const editable = subs.filter(s => s.type !== 'ref' || s.ref === 'rates')
+  // Rows pick other records too (equipment, worksheets, lab tests); price-list rows fill their own columns.
+  const editable = subs
   const pasteCols = editable.filter(s => s.type !== 'ref')
   const applyPaste = () => {
     const lines = (paste || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
@@ -459,7 +460,7 @@ export function RecordForm({ entity, record, defaults, onSaved, onCancel, hide =
 // ---------------------------------------------------------------------------
 
 function ItemsTable({ f, rows }: { f: FieldDef, rows: any[] }) {
-  const cols = (f.fields || []).filter(s => s.type !== 'ref')
+  const cols = (f.fields || []).filter(s => s.type !== 'ref' || s.ref !== 'rates')
   return (
     <section style={{ marginTop: '1rem' }}>
       <h3>{t(f.label)}{rows.length > 12 && <span className="muted small"> · {rows.length} {t('rows')}</span>}</h3>
