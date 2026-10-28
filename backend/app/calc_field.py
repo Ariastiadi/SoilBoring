@@ -279,7 +279,11 @@ def daily_report(data: Dict[str, Any]) -> Dict[str, Any]:
         qty, fin = num(r.get("qty")), num(r.get("finish")) or 0.0
         srows.append([_txt(r.get("job")), qty, fin, dict(UNIT_OPTIONS).get(_txt(r.get("unit")), _txt(r.get("unit"))),
                       rnd(fin / qty * 100, 4) if qty else None])
-    if not drows and not manpower and not srows:
+    delays = [r for r in _rows(data, "delays") if _txt(r.get("cause"))]
+    materials = [r for r in _rows(data, "materials") if _txt(r.get("material"))]
+    crew = num(data.get("crew_count"))
+    fit = _txt(data.get("fit_for_work"))
+    if not drows and not manpower and not srows and not delays and not materials and crew is None and not fit:
         raise CalcError("Enter drilling progress, manpower or the work summary")
     tables = []
     if drows:
@@ -291,18 +295,56 @@ def daily_report(data: Dict[str, Any]) -> Dict[str, Any]:
         tables.append(table("Manpower", ["Role", "Persons"], [[k, v] for k, v in manpower] + [["Total", total_people]]))
     if srows:
         tables.append(table("Work summary", ["Work item", "Quantity", "Finished", "Unit", "Progress (%)"], srows))
+    causes = dict(DELAY_CAUSES)
+    hours_lost = sum(num(r.get("hours")) or 0.0 for r in delays)
+    if delays:
+        per_cause: Dict[str, float] = {}
+        for r in delays:
+            name = causes.get(_txt(r.get("cause")), _txt(r.get("cause")))
+            per_cause[name] = per_cause.get(name, 0.0) + (num(r.get("hours")) or 0.0)
+        tables.append(table("Delays and obstacles", ["Delay cause", "Description", "Point / borehole", "Hours lost", "Action taken"],
+                            [[causes.get(_txt(r.get("cause")), _txt(r.get("cause"))), _txt(r.get("description")),
+                              _txt(r.get("point")), num(r.get("hours")), _txt(r.get("action"))] for r in delays]
+                            + [["Total", "", "", rnd(hours_lost, 4), ""]],
+                            key=["Delay cause", "Hours lost", "Description"]))
+        if len(per_cause) > 1:
+            tables.append(table("Hours lost by cause", ["Delay cause", "Hours lost", "Share (%)"],
+                                [[k, rnd(v, 4), rnd(v / hours_lost * 100, 3) if hours_lost else None]
+                                 for k, v in sorted(per_cause.items(), key=lambda kv: -kv[1])]))
+    if materials:
+        tables.append(table("Materials used", ["Material", "Quantity", "Unit", "Remarks"],
+                            [[_txt(r.get("material")), num(r.get("qty")), _txt(r.get("unit")), _txt(r.get("remarks"))] for r in materials]))
+    people = crew if crew is not None else (total_people if manpower else None)
+    notes = ["Cumulative values are the previous values plus today's values; progress is the cumulative depth over the planned depth."]
+    if crew is not None and manpower and abs(crew - total_people) > 0.5:
+        notes.append("The crew on site differs from the total of the manpower table; check both.")
+    if fit == "no":
+        notes.append("The site was not fit for work today; the reason is recorded in the site conditions.")
+    elif fit == "partly":
+        notes.append("Part of the work was stopped today; the restriction is recorded in the site conditions.")
+    if fit in ("no", "partly") and not _txt(data.get("fit_reason")):
+        notes.append("Give the reason why the site was not fully fit for work.")
+    if hours_lost > 24:
+        notes.append("More than 24 hours lost in one day: the hours are added over several rigs or crews.")
     values: List[Value] = []
     if drows:
         values += [("Drilled today", rnd(sums[0], 5), "m"), ("Drilled to date", rnd(sums[1], 5), "m"),
                    ("SPT today", sums[2], "")]
-    if manpower:
-        values.append(("Manpower", total_people, "persons"))
+    if people is not None:
+        values.append(("Manpower", people, "persons"))
+    if delays:
+        values.append(("Hours lost", rnd(hours_lost, 4), "h"))
+    if fit:
+        values.append(("Site fit for work", {"yes": "Yes", "partly": "Partly fit", "no": "No"}.get(fit, fit), ""))
+    rain = num(data.get("rainfall"))
+    if rain is not None:
+        values.append(("Rainfall", rain, "mm"))
     return result(
         summary=[("Drilled today", rnd(sums[0], 5) if drows else None, "m"),
                  ("Drilled to date", rnd(sums[1], 5) if drows else None, "m"),
-                 ("Manpower", total_people if manpower else None, "persons")],
-        values=values, tables=tables,
-        notes=["Cumulative values are the previous values plus today's values; progress is the cumulative depth over the planned depth."],
+                 ("Manpower", people, "persons"),
+                 ("Hours lost", rnd(hours_lost, 4) if delays else None, "h")],
+        values=values, tables=tables, notes=notes,
         method="Daily progress totals")
 
 
@@ -1819,6 +1861,15 @@ TEST_OPTIONS = [
     ("borehole", "Borehole / SPT"), ("cpt", "CPT / sondir"), ("cptu", "CPTu"), ("test_pit", "Test pit"),
     ("permeability", "Permeability test"), ("vane", "Vane shear test"), ("plt", "Plate load test"), ("cbr", "Field CBR"),
     ("resistivity", "Resistivity"), ("seismic", "Downhole / crosshole seismic"), ("survey", "Survey"), ("other", "Other"),
+]
+GROUND_OPTIONS = [("dry", "Dry"), ("moist", "Moist"), ("wet", "Wet"), ("muddy", "Muddy"), ("flooded", "Flooded / waterlogged"),
+                  ("rocky", "Rocky"), ("sandy", "Sandy")]
+ACCESS_OPTIONS = [("accessible", "Accessible"), ("limited", "Limited"), ("difficult", "Difficult"), ("none", "No access")]
+DELAY_CAUSES = [
+    ("weather", "Weather (rain, lightning)"), ("breakdown", "Equipment breakdown"), ("access", "Site access / ground"),
+    ("permit", "Permit or community"), ("utilities", "Underground utilities / obstruction"), ("instruction", "Waiting for instruction"),
+    ("material", "Waiting for material or water"), ("safety", "Safety stop"), ("moving", "Rig moving and setting up"),
+    ("other", "Other"),
 ]
 UNIT_OPTIONS = [("point", "point"), ("test", "test"), ("m", "m"), ("line", "line"), ("unit", "unit"), ("set", "set")]
 WALL_OPTIONS = [("north", "North wall"), ("east", "East wall"), ("south", "South wall"), ("west", "West wall"), ("all", "All walls")]

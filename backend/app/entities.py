@@ -518,3 +518,6 @@ def public_schema() -> Dict[str, Any]:
 
 # ERP modules (blueprint A.1–A.5): each file adds its entities with _add and its calculations to COMPUTE_HOOKS.
 from . import entities_commercial, entities_ops  # noqa: E402,F401
+
+# Monitoring instruments and their readings (worksheet list 03.11).
+from . import entities_monitor  # noqa: E402,F401

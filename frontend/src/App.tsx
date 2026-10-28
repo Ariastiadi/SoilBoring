@@ -70,6 +70,7 @@ const ClientCardsPage = comPage('ClientCardsPage')
 const ReceivablesPage = lazy(() => comModule().then(m => ({ default: m.ReceivablesPage })))
 const PricingSettingsPage = lazy(() => comModule().then(m => ({ default: m.PricingSettingsPage })))
 const OverviewPage = lazy(() => erpModule().then(m => ({ default: m.OverviewPage })))
+const MonitoringPage = lazy(() => import('./tabs/Monitoring').then(m => ({ default: m.MonitoringPage })))
 
 type AuthState = { token: string; email: string; role: Role; expiresAt?: number } | null
 const ROLES: Role[] = ['admin', 'manager', 'general', 'lab', 'finance']
@@ -281,6 +282,7 @@ export default function App() {
     { key: 'cpt', label: t('CPT / sondir'), icon: 'cone', entity: 'cpt' },
     { key: 'fieldwork', label: t('Field worksheets'), icon: 'sheet', entity: 'field_activities' },
     { key: 'coordinates', label: t('Coordinates & maps'), icon: 'pin' },
+    { key: 'monitoring', label: t('Monitoring instruments'), icon: 'activity', entity: 'instruments' },
   ]
   const lab: NavItem[] = [
     { key: 'lab', label: t('Laboratory tests'), icon: 'flask', entity: 'lab_tests' },
@@ -349,6 +351,7 @@ export default function App() {
     pbd: i => <PbdPage intent={i} />, client_decisions: i => <ClientDecisionsPage intent={i} />, work_plans: i => <WorkPlansPage intent={i} />,
     guarantees: i => <GuaranteesPage intent={i} />, client_cards: i => <ClientCardsPage intent={i} />,
     receivables: () => <ReceivablesPage />, pricing_settings: () => <PricingSettingsPage />, overview: () => <OverviewPage />,
+    monitoring: i => <MonitoringPage intent={i} />,
   }
   const loading = <p className="muted">{t('Loading…')}</p>
   const page = schemas && PAGES[tab] ? <Suspense fallback={loading}>{PAGES[tab]!(intent)}</Suspense> : (PAGES[tab] ? loading : null)

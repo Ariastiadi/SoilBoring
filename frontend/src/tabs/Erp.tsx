@@ -5,6 +5,7 @@ import { t, translateServer } from '../i18n'
 import { ENTITY_TAB, useNav, type Intent, type TabKey } from '../nav'
 import { CommercialOverviewPanel } from './ErpCommercial'
 import { OpsOverviewPanel } from './ErpOps'
+import { MonitoringOverview } from './Monitoring'
 import { PageHead, formatDate } from '../ui'
 
 const GROUPS: Array<[string, string, string]> = [
@@ -71,6 +72,7 @@ export function OverviewPage() {
       )}
       <CommercialOverviewPanel onOpen={open} />
       <OpsOverviewPanel onOpen={tab => open(tab)} />
+      <MonitoringOverview />
     </div>
   )
 }

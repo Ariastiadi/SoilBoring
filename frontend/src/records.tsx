@@ -707,6 +707,7 @@ export const STATUS_TONE: Record<string, string> = {
   active: 'ok', fully_depreciated: '', not_depreciated: '',
   outstanding: 'ok', very_good: 'ok', good: 'ok', needs_improvement: 'warn', unsatisfactory: 'bad',
   due_soon: 'warn', missing: 'bad',
+  normal: 'ok', alert: 'warn', action: 'bad', no_data: '',
 }
 
 export function Labeled({ label, children }: { label: string, children: ReactNode }) {
