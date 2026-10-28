@@ -121,6 +121,18 @@ function SettlementLayers({ rows, onChange }: { rows: Inputs[], onChange: (r: In
 
 const num = (v: any) => (v === '' || v === null || v === undefined ? undefined : Number(v))
 
+/** Lab findings that matter for any foundation on this borehole: concrete exposure and dispersive clay. */
+function labFindings(lab: Rec[]): string[] {
+  const out: string[] = []
+  const chem = lab.filter(x => x.test_type === 'chemistry' && x.results?.exposure).sort((a, b) => String(b.results.exposure).localeCompare(String(a.results.exposure)))[0]
+  if (chem && chem.results.exposure !== 'S0') out.push(t('Concrete in contact with the ground: sulfate exposure class {c} (sample {s}, ACI 318-19 / SNI 2847:2019).', { c: chem.results.exposure, s: chem.sample_ref }))
+  const steel = lab.find(x => x.test_type === 'chemistry' && x.results?.steel === 'aggressive')
+  if (steel) out.push(t('The ground is aggressive to steel (sample {s}).', { s: steel.sample_ref }))
+  const disp = lab.find(x => x.test_type === 'dispersivity' && x.results?.verdict === 'dispersive')
+  if (disp) out.push(t('Dispersive clay in sample {s}: protect against internal erosion.', { s: disp.sample_ref }))
+  return out
+}
+
 function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | null, defaults?: Record<string, any>, onSaved: (r: Rec) => void, onCancel: () => void }) {
   const schemas = useSchemas()
   const entity = schemas?.analyses
@@ -155,13 +167,19 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
     if (meta.type === 'bearing') {
       const shear = lab.find(x => x.test_type === 'direct_shear' || x.test_type === 'triaxial')
       const dens = lab.find(x => (x.test_type === 'density' || x.test_type === 'moisture') && x.results?.gamma_bulk)
+      // Sands without a shear test: φ' from the relative density (Meyerhof 1956: φ' = 28° + 0.15 Dr).
+      const rd = shear ? undefined : lab.find(x => x.test_type === 'relative_density' && x.results?.dr != null)
+      const phiRd = rd ? Math.round((28 + 0.15 * Math.min(100, Math.max(0, Number(rd.results.dr)))) * 10) / 10 : undefined
       setInputs(prev => ({
         ...prev,
-        ...(shear ? { c: String(shear.results?.c ?? prev.c), phi_deg: String(shear.results?.phi ?? prev.phi_deg) } : {}),
+        ...(shear ? { c: String(shear.results?.c ?? prev.c), phi_deg: String(shear.results?.phi ?? prev.phi_deg) }
+          : phiRd !== undefined ? { c: '0', phi_deg: String(phiRd) } : {}),
         ...(dens?.results?.gamma_bulk ? { gamma: String(dens.results.gamma_bulk) } : {}),
         gw_depth: gw ?? prev.gw_depth,
       }))
-      setHint(shear ? t('c and φ taken from sample {s} ({d} m).', { s: shear.sample_ref, d: shear.depth_top }) : t('No shear test for this borehole yet; c and φ are unchanged.'))
+      setHint(shear ? t('c and φ taken from sample {s} ({d} m).', { s: shear.sample_ref, d: shear.depth_top })
+        : rd ? t("φ' = {phi}° from the relative density of sample {s} (Dr = {dr} %, Meyerhof 1956); c = 0.", { phi: phiRd!, s: rd.sample_ref, dr: rd.results.dr })
+          : t('No shear test for this borehole yet; c and φ are unchanged.'))
     } else if (meta.type === 'settlement') {
       const d = await getDetails(meta.borehole_id).catch(() => null)
       if (!d?.layers.length) { setHint(t('This borehole has no strata yet.')); return }
@@ -184,6 +202,8 @@ function AnalysisForm({ record, defaults, onSaved, onCancel }: { record: Rec | n
       setInputs(prev => ({ ...prev, gw_depth: gw ?? prev.gw_depth }))
       setHint(t('Fines and plasticity come from the grain size and Atterberg tests of the borehole when available.'))
     }
+    const extra = labFindings(lab)
+    if (extra.length) setHint(h => [h, ...extra].filter(Boolean).join(' '))
   }
 
   const calculate = async () => {

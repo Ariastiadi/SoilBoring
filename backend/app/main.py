@@ -17,6 +17,7 @@ from . import config, docstore, mailer, signup
 from .auth import bootstrap_admin_from_env
 from .ollama_client import ai_server_configured
 from .routers import ai, auth, boreholes, dashboard, export, records, reports, summaries, users, workflow, worksheets, erp_ops, erp_commercial
+from .routers import ags_import as ags_import_router
 from .storage import AmbiguousReportError, SchemaMismatchError
 
 
@@ -152,6 +153,7 @@ app.include_router(worksheets.router)
 app.include_router(workflow.router)
 app.include_router(erp_ops.router)
 app.include_router(erp_commercial.router)
+app.include_router(ags_import_router.router)
 
 
 @app.get("/api/health")

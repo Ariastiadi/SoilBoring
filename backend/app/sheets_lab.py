@@ -778,3 +778,6 @@ register(
 for _key, _code, _fields, _fn, _std, _help in _SHEETS:
     register(Sheet(key=_key, kind="lab", group="lab", code=_code, label=_LABELS[_key], fields=_fields,
                    calc=_bounded(_key, _fn), standards=list(_std), example=EXAMPLES[_key], help=_help))
+
+# Tests 05.19 to 05.23 (chemistry, permeability, point load, relative density, dispersivity).
+from . import sheets_lab_ext  # noqa: E402,F401

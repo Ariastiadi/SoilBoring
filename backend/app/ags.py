@@ -14,7 +14,8 @@ What this app records maps to AGS4 like this:
 * WSTG  - the groundwater depth (when groundwater was encountered)
 
 * GEOL  - strata (top, base, description; GEOL_LEG from the USCS group where it maps)
-* ISPT  - SPT tests (seating and test blows, N, reported result, refusal penetration)
+* ISPT  - SPT tests (seating and test blows, N, reported result, refusal penetration, and the
+          blows and penetration of the seating drive and the two 150 mm test increments)
 * SAMP  - samples (top, base, standard AGS4 sample type, reference)
 * CORE  - core runs (TCR, SCR, RQD, core diameter of the wireline size)
 
@@ -299,7 +300,14 @@ def build_ags(
             pen = test.get("penetration_mm")
             test_pen = int(pen) if pen else 300
             reported = f"{n_value}/{test_pen}mm" if test_pen < 300 else f"N={n_value}"
+            # The two 150 mm test increments with their penetration (INC3/PEN3, INC4/PEN4), so the
+            # blows per increment survive an export and a later import.
+            first_pen = test_pen if inc2 is None else 150
+            increments = {"ISPT_INC1": str(seat), "ISPT_PEN1": "150", "ISPT_INC3": str(inc1), "ISPT_PEN3": str(first_pen)}
+            if inc2 is not None:
+                increments.update({"ISPT_INC4": str(int(inc2)), "ISPT_PEN4": str(max(test_pen - 150, 0))})
             ispt_rows.append({
+                **increments,
                 "LOCA_ID": loca_id,
                 "ISPT_TOP": _dp(test.get("depth"), 2),
                 "ISPT_SEAT": str(seat),
@@ -443,7 +451,8 @@ def build_ags(
             "ISPT",
             [("LOCA_ID", "", "ID"), ("ISPT_TOP", "m", "2DP"), ("ISPT_SEAT", "", "0DP"), ("ISPT_MAIN", "", "0DP"),
              ("ISPT_NPEN", "mm", "0DP"), ("ISPT_NVAL", "", "0DP"), ("ISPT_REP", "", "X"), ("ISPT_TYPE", "", "PA"),
-             ("ISPT_REM", "", "X")],
+             ("ISPT_INC1", "", "0DP"), ("ISPT_INC3", "", "0DP"), ("ISPT_INC4", "", "0DP"), ("ISPT_PEN1", "mm", "0DP"),
+             ("ISPT_PEN3", "mm", "0DP"), ("ISPT_PEN4", "mm", "0DP"), ("ISPT_REM", "", "X")],
             ispt_rows,
         ))
     if samp_rows:

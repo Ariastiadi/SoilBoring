@@ -60,7 +60,7 @@ def test_catalogue_examples_and_result_fields():
         assert out and out["summary"] and out["values"] and out["method"]
         allowed = {f.name for f in LAB_RESULTS[sheet.key]}
         assert set(out["lab"]) <= allowed, sheet.key
-    assert codes == sorted(codes) and codes[0] == "05.04" and codes[-1] == "05.18"
+    assert codes == sorted(codes) and codes[0] == "05.04" and codes[-1] == "05.23"
 
 
 def test_out_of_range_lab_values_are_not_copied_into_results():
