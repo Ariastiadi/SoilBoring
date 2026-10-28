@@ -161,10 +161,12 @@ export function BrandMark({ className = 'brand-mark' }: { className?: string }) 
 }
 
 /** Counts as horizontal bars, largest first (method mix, USCS classes). */
-export function Breakdown({ title, entries, label = (k: string) => k }: {
-  title: string, entries: Array<[string, number]>, label?: (key: string) => string
+export function Breakdown({ title, entries, label = (k: string) => k, ordered = false, format = (n: number) => String(n), note }: {
+  title: string, entries: Array<[string, number]>, label?: (key: string) => string,
+  /** Keep the order given (e.g. depth ranges) instead of largest first. */
+  ordered?: boolean, format?: (n: number) => string, note?: string
 }) {
-  const sorted = [...entries].sort((a, b) => b[1] - a[1])
+  const sorted = ordered ? entries : [...entries].sort((a, b) => b[1] - a[1])
   const max = Math.max(1, ...sorted.map(([, n]) => n))
   return (
     <section className="card">
@@ -174,10 +176,11 @@ export function Breakdown({ title, entries, label = (k: string) => k }: {
           <li key={key}>
             <span>{label(key)}</span>
             <span className="bar" aria-hidden="true"><span style={{ width: `${(n / max) * 100}%` }} /></span>
-            <span className="num">{n}</span>
+            <span className="num">{format(n)}</span>
           </li>
         ))}
       </ul>
+      {note && <p className="help" style={{ marginBottom: 0 }}>{note}</p>}
     </section>
   )
 }
@@ -187,6 +190,7 @@ export const prettyDates = (text?: string | null) => (text || '').replace(/\d{4}
 
 export const ROLE_LABELS: Record<string, string> = {
   admin: 'Administrator', manager: 'Project leader / commercial', general: 'Field user', lab: 'Laboratory', finance: 'Finance',
+  client: 'Client (read only)',
 }
 
 /** A wide table that says so: a fade on the edge and a hint while columns are hidden to the right. */

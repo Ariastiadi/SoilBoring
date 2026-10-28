@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import docstore
@@ -26,8 +26,12 @@ SECRET_DOC = ".token_secret"
 USER_FILE = docstore.path_for(USERS_DOC)  # only meaningful in file mode
 SECRET_FILE = docstore.path_for(SECRET_DOC)
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL", "28800"))  # 8 hours
-# general = field staff; manager = project leader / commercial; lab = laboratory; finance = invoices.
-VALID_ROLES = {"admin", "manager", "general", "lab", "finance"}
+# general = field staff; manager = project leader / commercial; lab = laboratory; finance = invoices;
+# client = read-only account of a customer, limited to the client portal (see CLIENT_PATHS).
+VALID_ROLES = {"admin", "manager", "general", "lab", "finance", "client"}
+# The only signed-in endpoints a client account may call (default deny: every other endpoint,
+# including ones added later, answers 403 for this role).
+CLIENT_PATHS = ("/api/auth/me", "/api/auth/change-password", "/api/auth/2fa/", "/api/auth/recovery-codes", "/api/client/")
 MIN_PASSWORD_LENGTH = 8
 
 # Password hashing: PBKDF2-HMAC-SHA256 (stdlib, no extra dependency).
@@ -121,7 +125,7 @@ _DUMMY_HASH = _hash_password(secrets.token_urlsafe(12))
 # --------------------------------------------------------------------------- #
 
 # Two-step verification and recovery codes, kept with the account in users.json.
-_EXTRA_FIELDS = ("name", "totp_secret", "totp_enabled", "totp_pending", "totp_last", "recovery_codes")
+_EXTRA_FIELDS = ("name", "totp_secret", "totp_enabled", "totp_pending", "totp_last", "recovery_codes", "client_ids")
 
 
 def _load_users() -> Dict[str, Dict[str, Any]]:
@@ -384,7 +388,7 @@ def _validate_token(token: str) -> Dict[str, Any]:
     return payload
 
 
-def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer)) -> Dict[str, Any]:
+def get_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer)) -> Dict[str, Any]:
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization header missing")
     payload = _validate_token(credentials.credentials)
@@ -400,7 +404,11 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
         fingerprint.encode("utf-8", "surrogateescape"), _credential_fingerprint(user).encode("ascii")
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer valid; sign in again")
-    return {"email": user["email"], "role": user.get("role", "general"), "totp_enabled": bool(user.get("totp_enabled"))}
+    role = user.get("role", "general")
+    if role == "client" and not any(request.url.path == p or (p.endswith("/") and request.url.path.startswith(p)) for p in CLIENT_PATHS):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Client accounts can only open the client portal")
+    return {"email": user["email"], "role": role, "totp_enabled": bool(user.get("totp_enabled")),
+            "client_ids": list(user.get("client_ids") or []) if role == "client" else []}
 
 
 def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
@@ -420,9 +428,24 @@ def list_users() -> List[Dict[str, Any]]:
     users = _load_users()
     return [
         {"email": u["email"], "name": u.get("name") or "", "role": u.get("role", "general"),
-         "totp_enabled": bool(u.get("totp_enabled"))}
+         "totp_enabled": bool(u.get("totp_enabled")), "client_ids": list(u.get("client_ids") or [])}
         for u in users.values()
     ]
+
+
+def set_client_links(email: str, client_ids: List[str]) -> Dict[str, Any]:
+    """The client records a client account belongs to (it sees only their projects)."""
+    email_key = (email or "").strip().lower()
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        user = users.get(email_key)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if user.get("role") != "client":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only client accounts are linked to clients")
+        user["client_ids"] = sorted(set(client_ids))
+        _save_users(users)
+    return {"email": user["email"], "client_ids": user["client_ids"]}
 
 
 def create_user(email: str, password: str, role: str) -> Dict[str, str]:

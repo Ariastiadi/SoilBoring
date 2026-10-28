@@ -431,7 +431,7 @@ def _exists(entity: str, record_id: str) -> bool:
 
 def _unique_check(entity: Entity, record: Dict[str, Any], record_id: Optional[str]) -> None:
     keys = {"clients": "name", "projects": "code", "contracts": "number", "quotes": "number",
-            "invoices": "number", "project_reports": "number", "cpt": "test_id", "rates": "code"}
+            "invoices": "number", "cpt": "test_id", "rates": "code"}  # project_reports: number + version, see client_reports.py
     key = keys.get(entity.name)
     if not key or not record.get(key):
         return

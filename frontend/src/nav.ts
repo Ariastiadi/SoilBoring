@@ -12,6 +12,7 @@ export type TabKey =
   | 'sample_receipts' | 'nonconformities' | 'vendor_evaluations'
   | 'monitoring'
   | 'my_tasks' | 'tasks' | 'submissions' | 'roster' | 'lab_orders'
+  | 'datachecks'
 
 /** Where to go, and what to open there: a record, or a new one with values filled in. */
 export type Intent = { open?: string, newWith?: Record<string, unknown>, borehole?: string }

@@ -19,6 +19,7 @@ from .ollama_client import ai_server_configured
 from .routers import ai, auth, boreholes, dashboard, export, records, reports, summaries, users, workflow, worksheets, erp_ops, erp_commercial
 from .routers import erp_work
 from .routers import ags_import as ags_import_router
+from .routers import client_reports, data_checks
 from .storage import AmbiguousReportError, SchemaMismatchError
 
 
@@ -156,6 +157,8 @@ app.include_router(erp_ops.router)
 app.include_router(erp_commercial.router)
 app.include_router(erp_work.router)
 app.include_router(ags_import_router.router)
+app.include_router(client_reports.router)
+app.include_router(data_checks.router)
 
 
 @app.get("/api/health")

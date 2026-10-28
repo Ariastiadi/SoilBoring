@@ -1,5 +1,5 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
-import { type AccountRequest, approveAccountRequest, createUser, deleteUser, listAccountRequests, listUsers, rejectAccountRequest, resetUserPassword, resetUserTwoFactor, User } from '../api'
+import { type AccountRequest, type Rec, approveAccountRequest, createUser, deleteUser, listAccountRequests, listRecords, listUsers, rejectAccountRequest, resetUserPassword, resetUserTwoFactor, setClientLinks, User } from '../api'
 import { t } from '../i18n'
 import { Icon, PageHead, ROLE_LABELS, formatDate } from '../ui'
 
@@ -7,6 +7,23 @@ type Props = {
   currentUserEmail: string
   /** Called after a request was approved or rejected (the menu shows how many wait). */
   onRequestsChanged?: () => void
+}
+
+const ROLE_CHOICES = ['general', 'lab', 'manager', 'finance', 'admin', 'client']
+
+/** Client records a client account belongs to (it sees only their projects' issued reports and logs). */
+function ClientPicker({ clients, value, onChange, id }: { clients: Rec[], value: string[], onChange: (v: string[]) => void, id: string }) {
+  if (!clients.length) return <p className="help">{t('Add the client under Clients first.')}</p>
+  return (
+    <div className="checks" id={id} role="group" aria-label={t('Client')}>
+      {clients.map(c => (
+        <label key={c.id} className="checkbox">
+          <input type="checkbox" checked={value.includes(c.id)} onChange={e => onChange(e.target.checked ? [...value, c.id] : value.filter(x => x !== c.id))} />
+          {c.name}
+        </label>
+      ))}
+    </div>
+  )
 }
 
 const DEPARTMENT_LABELS: Record<string, string> = {
@@ -25,6 +42,13 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
   const [busy, setBusy] = useState(false)
   const [resetTarget, setResetTarget] = useState<string | null>(null)
   const [resetPassword, setResetPassword] = useState('')
+  const [clients, setClients] = useState<Rec[]>([])
+  const [newClients, setNewClients] = useState<string[]>([])
+  const [requestClients, setRequestClients] = useState<Record<string, string[]>>({})
+  const [linkTarget, setLinkTarget] = useState<string | null>(null)
+  const [links, setLinks] = useState<string[]>([])
+  useEffect(() => { listRecords('clients').then(setClients).catch(() => setClients([])) }, [])
+  const clientNames = (ids?: string[]) => (ids || []).map(id => clients.find(c => c.id === id)?.name || id).join(', ')
 
   const loadUsers = async (silent = false) => {
     if (!silent) {
@@ -56,7 +80,8 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
     setBusy(true)
     setStatus(t('Creating user...'))
     try {
-      await createUser({ email: email.trim(), password, role })
+      await createUser({ email: email.trim(), password, role, client_ids: role === 'client' ? newClients : [] })
+      setNewClients([])
       setEmail('')
       setPassword('')
       setRole('general')
@@ -114,7 +139,7 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
     setBusy(true)
     try {
       if (approve) {
-        await approveAccountRequest(req.email, role)
+        await approveAccountRequest(req.email, role, role === 'client' ? (requestClients[req.email] || []) : [])
         setStatus(t('{email} can now sign in as {role}.', { email: req.email, role: t(ROLE_LABELS[role] || role) }))
       } else {
         await rejectAccountRequest(req.email)
@@ -132,7 +157,7 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
   const me = currentUserEmail.toLowerCase()
   return (
     <div>
-      <PageHead title={t('Users')} description={t('Who can sign in. Field users add logs and change their own; the laboratory records test results; project leaders run projects, quotations, contracts and reports; finance handles invoices; administrators can do everything and manage users.')} />
+      <PageHead title={t('Users')} description={t('Who can sign in. Field users add logs and change their own; the laboratory records test results; project leaders run projects, quotations, contracts and reports; finance handles invoices; administrators can do everything and manage users; client accounts only see the issued reports of their own projects.')} />
       {requests.length > 0 && (
         <section className="card" style={{ marginBottom: '1rem' }}>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>{t('Account requests')} <span className="count">{requests.length}</span></h2>
@@ -152,8 +177,12 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
                   <label className="sr-only" htmlFor={`req-role-${req.email}`}>{t('Role for {email}', { email: req.email })}</label>
                   <select id={`req-role-${req.email}`} value={requestRoles[req.email] || req.suggested_role}
                     onChange={e => setRequestRoles(r => ({ ...r, [req.email]: e.target.value as User['role'] }))}>
-                    {['general', 'lab', 'manager', 'finance', 'admin'].map(r => <option key={r} value={r}>{t(ROLE_LABELS[r])}</option>)}
+                    {ROLE_CHOICES.map(r => <option key={r} value={r}>{t(ROLE_LABELS[r])}</option>)}
                   </select>
+                  {(requestRoles[req.email] || req.suggested_role) === 'client' && (
+                    <ClientPicker id={`req-clients-${req.email}`} clients={clients} value={requestClients[req.email] || []}
+                      onChange={v => setRequestClients(r => ({ ...r, [req.email]: v }))} />
+                  )}
                   <button type="button" className="primary" disabled={busy} onClick={() => void decide(req, true)}>{t('Approve')}</button>
                   <button type="button" className="danger-quiet" disabled={busy} onClick={() => void decide(req, false)}>{t('Reject')}</button>
                 </div>
@@ -173,7 +202,7 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
                   <Fragment key={u.email}>
                     <tr>
                       <td><strong style={{ overflowWrap: 'anywhere' }}>{u.email}</strong>{u.name && <div className="bh-sub">{u.name}</div>}{u.email.toLowerCase() === me && <div className="bh-sub">{t('You')}</div>}</td>
-                      <td>{t(ROLE_LABELS[u.role] || u.role)}</td>
+                      <td>{t(ROLE_LABELS[u.role] || u.role)}{u.role === 'client' && <div className="bh-sub">{clientNames(u.client_ids) || t('Not linked to a client yet')}</div>}</td>
                       <td><span className={`status${u.totp_enabled ? ' ok' : ''}`}>{u.totp_enabled ? t('On') : t('Off')}</span></td>
                       <td className="nowrap" style={{ textAlign: 'right' }}>
                         <details className="menu" style={{ display: 'inline-block' }}>
@@ -181,6 +210,9 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
                           <div className="menu-pop">
                             {u.email.toLowerCase() !== me && (
                               <button type="button" onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setResetTarget(u.email); setResetPassword('') }} disabled={busy}>{t('Reset Password')}</button>
+                            )}
+                            {u.role === 'client' && (
+                              <button type="button" disabled={busy} onClick={e => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setLinkTarget(u.email); setLinks(u.client_ids || []) }}>{t('Choose clients')}</button>
                             )}
                             {u.totp_enabled && (
                               <button type="button" disabled={busy} onClick={async e => {
@@ -202,6 +234,29 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
                         </details>
                       </td>
                     </tr>
+                    {linkTarget === u.email && (
+                      <tr>
+                        <td colSpan={4}>
+                          <div className="field" style={{ margin: 0 }}>
+                            <label htmlFor="link-clients">{t('Clients of {email}', { email: u.email })}</label>
+                            <ClientPicker id="link-clients" clients={clients} value={links} onChange={setLinks} />
+                            <div className="actions">
+                              <button type="button" className="primary" disabled={busy} onClick={async () => {
+                                try {
+                                  await setClientLinks(u.email, links)
+                                  setStatus(t('Saved.'))
+                                  setLinkTarget(null)
+                                  await loadUsers(true)
+                                } catch (err: any) {
+                                  setStatus(t('Error: {message}', { message: err.message }))
+                                }
+                              }}>{t('Save')}</button>
+                              <button type="button" onClick={() => setLinkTarget(null)}>{t('Cancel')}</button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {resetTarget === u.email && (
                       <tr key={`${u.email}-reset`}>
                         <td colSpan={4}>
@@ -236,9 +291,16 @@ export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props
             <div className="field">
               <label htmlFor="new-user-role">{t('Role')}</label>
               <select id="new-user-role" value={role} onChange={e => setRole(e.target.value as User['role'])}>
-                {['general', 'lab', 'manager', 'finance', 'admin'].map(r => <option key={r} value={r}>{t(ROLE_LABELS[r])}</option>)}
+                {ROLE_CHOICES.map(r => <option key={r} value={r}>{t(ROLE_LABELS[r])}</option>)}
               </select>
+              {role === 'client' && <p className="help">{t('A client account only sees the approved reports, authorised lab results and borehole logs of its own projects.')}</p>}
             </div>
+            {role === 'client' && (
+              <div className="field">
+                <label htmlFor="new-user-clients">{t('Client')}</label>
+                <ClientPicker id="new-user-clients" clients={clients} value={newClients} onChange={setNewClients} />
+              </div>
+            )}
             <div className="actions"><button type="submit" className="primary" disabled={busy}>{t('Add user')}</button></div>
           </form>
         </section>

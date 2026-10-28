@@ -69,3 +69,7 @@ COMPUTE_HOOKS: Dict[str, Callable[[Dict[str, Any]], None]] = {}
 # why the record cannot be changed ("edit") or deleted ("delete") now, or None (e.g. a field package sent to the office).
 # Before a delete, a guard may also remove dependent records that were generated and never used (inside the entity lock).
 LOCK_HOOKS: Dict[str, Callable[[Dict[str, Any], str, str], Optional[str]]] = {}
+# Steps of the approval flow, registered by entity files: entity name -> function(record, action, email, role).
+# Called by workflow.act() inside the entity lock after the new state is set and before the record is
+# written; it may change the record or refuse the step (workflow.WorkflowError).
+ACTION_HOOKS: Dict[str, Callable[[Dict[str, Any], str, str, str], None]] = {}

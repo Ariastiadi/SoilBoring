@@ -12,6 +12,8 @@ function markdownBlock(text: string) {
 }
 import { DashboardResponse, getDashboard } from '../api'
 
+const GW_LABELS: Record<string, string> = { encountered: 'Encountered', not_encountered: 'Not encountered', not_recorded: 'Not recorded' }
+
 // "12.5 m", or "-" when the value was not recorded (never "- m").
 const metres = (value?: number | null) => (value === null || value === undefined ? '–' : `${value} m`)
 
@@ -41,6 +43,10 @@ export default function Dashboard() {
   const methodBreakdown = data?.method_breakdown ? Object.entries(data.method_breakdown) : []
   const uscsBreakdown = data?.uscs_breakdown ? Object.entries(data.uscs_breakdown) : []
   const recent = data?.recent_reports || []
+  const depthBreakdown = (data?.depth_breakdown || []).filter(() => (data?.total_boreholes || 0) > 0)
+  const gw = data?.groundwater_breakdown
+  const gwEntries: Array<[string, number]> = gw ? [['encountered', gw.encountered || 0], ['not_encountered', gw.not_encountered || 0], ...(gw.not_recorded ? [['not_recorded', gw.not_recorded] as [string, number]] : [])] : []
+  const strata = data?.strata_uscs_m ? Object.entries(data.strata_uscs_m) : []
   const periodLabel = data?.period_label || (data?.period_range ? `${data.period_range.from || '-'} -> ${data.period_range.to || '-'}` : null)
 
   return (
@@ -54,6 +60,7 @@ export default function Dashboard() {
             <div className="kpi"><h3>{t('Total Meterage (m)')}</h3><p>{data.total_meterage_m ?? '-'}</p></div>
             <div className="kpi"><h3>{t('Avg Final Depth (m)')}</h3><p>{data.avg_final_depth_m ?? '-'}</p></div>
             <div className="kpi"><h3>{t('Avg GW Depth (m)')}</h3><p>{data.avg_groundwater_depth_m ?? '-'}</p></div>
+            <div className="kpi"><h3>{t('Groundwater encountered')}</h3><p>{data.groundwater_rate_pct === null || data.groundwater_rate_pct === undefined ? '–' : `${data.groundwater_rate_pct}%`}</p></div>
             <div className="kpi"><h3>{t('Active Projects')}</h3><p>{data.active_projects ?? '-'}</p></div>
             <div className="kpi"><h3>{t('Top Contractor')}</h3><p style={{ fontSize: '1.15rem' }}>{data.top_contractor ?? '-'}</p></div>
           </div>
@@ -74,10 +81,15 @@ export default function Dashboard() {
             )}
           </section>
 
-          {(methodBreakdown.length > 0 || uscsBreakdown.length > 0) && (
+          {(methodBreakdown.length > 0 || uscsBreakdown.length > 0 || depthBreakdown.length > 0) && (
             <div className="account-grid">
               {methodBreakdown.length > 0 && <Breakdown title={t('Method Breakdown')} entries={methodBreakdown as Array<[string, number]>} label={methodLabel} />}
-              {uscsBreakdown.length > 0 && <Breakdown title={t('USCS Classes')} entries={uscsBreakdown as Array<[string, number]>} />}
+              {uscsBreakdown.length > 0 && <Breakdown title={t('USCS Classes')} entries={uscsBreakdown as Array<[string, number]>} note={t('USCS class recorded on each log.')} />}
+              {depthBreakdown.length > 0 && <Breakdown title={t('Final depth ranges')} entries={depthBreakdown} ordered note={t('Number of boreholes per range of final depth.')} />}
+              {gwEntries.some(([, n]) => n > 0) && <Breakdown title={t('Groundwater')} entries={gwEntries} ordered label={k => t(GW_LABELS[k] || k)}
+                note={data.groundwater_rate_pct === null || data.groundwater_rate_pct === undefined ? undefined : t('Encountered in {p}% of the boreholes where it was recorded.', { p: data.groundwater_rate_pct })} />}
+              {strata.length > 0 && <Breakdown title={t('Soil classes in the strata')} entries={strata} format={n => `${n}\u00a0m`}
+                note={t('Metres logged per USCS group (ASTM D2487) in the depth data.')} />}
             </div>
           )}
 

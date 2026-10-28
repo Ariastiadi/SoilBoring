@@ -525,3 +525,5 @@ from . import entities_commercial, entities_ops  # noqa: E402,F401
 from . import entities_monitor  # noqa: E402,F401
 # Work coordination: project tasks, field submissions, crew roster, laboratory work orders.
 from . import entities_work  # noqa: E402,F401
+# Client report templates, versions, approval flow and integrity seal (reports and lab results).
+from . import entities_report  # noqa: E402,F401
