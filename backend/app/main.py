@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
-from . import config, docstore, mailer
+from . import config, docstore, mailer, signup
 from .auth import bootstrap_admin_from_env
 from .ollama_client import ai_server_configured
 from .routers import ai, auth, boreholes, dashboard, export, records, reports, summaries, users, workflow, worksheets, erp_ops, erp_commercial
@@ -167,6 +167,7 @@ def public_config():
         "app_name": config.APP_NAME,
         "ai_server": ai_server_configured(),
         "email_reset": mailer.email_enabled(),
+        "signup": signup.enabled(),
     }
 
 

@@ -1,11 +1,12 @@
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
 
-from .. import audit, mailer
+from .. import audit, mailer, signup
 from ..auth import (
     TOKEN_TTL,
+    admin_emails,
     allow_reset_email,
     authenticate_user,
     change_own_password,
@@ -76,6 +77,50 @@ def current_user(user=Depends(get_current_user)):
         "totp_enabled": bool(user.get("totp_enabled")),
         "recovery_codes_left": recovery_codes_left(user["email"]),
     }
+
+
+class SignupRequest(BaseModel):
+    email: Email
+    password: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=120)
+    department: str = Field(default="other", max_length=20)
+    note: str = Field(default="", max_length=300)
+
+
+def _client_address(request: Request) -> str:
+    """The caller's address; behind Vercel or another proxy, the one the proxy saw."""
+    real = request.headers.get("x-real-ip", "").strip()
+    if real:
+        return real
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    return request.client.host if request.client else "unknown"
+
+
+def _tell_admins(name: str, email: str) -> None:
+    for admin in admin_emails():
+        mailer.send(
+            admin,
+            f"{producer_name()}: account request from {name}",
+            f"{name} <{email}> asked for an account.\n\n"
+            f"Approve it with a role, or reject it, under Users:\n{mailer.base_url()}/\n",
+        )
+
+
+@router.post("/signup", status_code=202)
+def request_account(payload: SignupRequest, request: Request, background: BackgroundTasks):
+    """Ask for an account. Nobody can sign in until an administrator approves the request.
+
+    The answer is the same whether or not the email already has an account or a request.
+    """
+    created = signup.submit(payload.email, payload.password, payload.name, payload.department, payload.note,
+                            _client_address(request))
+    if created:
+        audit.record(payload.email, "account.requested", payload.email, public=True)
+        if mailer.email_enabled():
+            background.add_task(_tell_admins, " ".join(payload.name.split()), payload.email)
+    return {"status": "pending"}
 
 
 class PasswordChange(BaseModel):

@@ -121,7 +121,7 @@ _DUMMY_HASH = _hash_password(secrets.token_urlsafe(12))
 # --------------------------------------------------------------------------- #
 
 # Two-step verification and recovery codes, kept with the account in users.json.
-_EXTRA_FIELDS = ("totp_secret", "totp_enabled", "totp_pending", "totp_last", "recovery_codes")
+_EXTRA_FIELDS = ("name", "totp_secret", "totp_enabled", "totp_pending", "totp_last", "recovery_codes")
 
 
 def _load_users() -> Dict[str, Dict[str, Any]]:
@@ -215,7 +215,7 @@ def _save_throttle(data: Dict[str, List[float]]) -> None:
 
 def _live(data: Dict[str, List[float]], now: float) -> Dict[str, List[float]]:
     def cutoff(key: str) -> float:
-        return now - (3600 if key.startswith("reset:") else LOCKOUT_WINDOW_SECONDS)
+        return now - (3600 if key.startswith(("reset:", "signup:")) else LOCKOUT_WINDOW_SECONDS)
 
     live = {k: [t for t in v if t > cutoff(k)] for k, v in data.items()}
     live = {k: v for k, v in live.items() if v}
@@ -419,7 +419,8 @@ def require_admin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str,
 def list_users() -> List[Dict[str, Any]]:
     users = _load_users()
     return [
-        {"email": u["email"], "role": u.get("role", "general"), "totp_enabled": bool(u.get("totp_enabled"))}
+        {"email": u["email"], "name": u.get("name") or "", "role": u.get("role", "general"),
+         "totp_enabled": bool(u.get("totp_enabled"))}
         for u in users.values()
     ]
 
@@ -448,6 +449,52 @@ def create_user(email: str, password: str, role: str) -> Dict[str, str]:
         users[email_key] = {"email": email, "password": _hash_password(password), "role": role}
         _save_users(users)
     return {"email": email, "role": role}
+
+
+def hash_new_password(password: str) -> str:
+    """Hash for a password that still waits for an account (a sign-up request)."""
+    _check_new_password(password)
+    return _hash_password(password)
+
+
+def create_user_with_hash(email: str, password_hash: str, role: str, name: str = "") -> Dict[str, str]:
+    """Account from an approved sign-up request: the applicant's own password, already hashed."""
+    if role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Role must be one of: {', '.join(sorted(VALID_ROLES))}"
+        )
+    if not password_hash.startswith(_HASH_PREFIX + "$"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The request has no usable password")
+    email = normalize_email(email)
+    with docstore.lock(USERS_DOC):
+        users = _load_users()
+        if email.lower() in users:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+        users[email.lower()] = {"email": email, "password": password_hash, "role": role, "name": name.strip()}
+        _save_users(users)
+    return {"email": email, "role": role, "name": name.strip()}
+
+
+def user_exists(email: str) -> bool:
+    return (email or "").strip().lower() in _load_users()
+
+
+def admin_emails() -> List[str]:
+    return [u["email"] for u in _load_users().values() if u.get("role") == "admin"]
+
+
+def allow_signup(source: str, per_hour: int) -> bool:
+    """At most per_hour sign-up requests per source (client address) per hour, across instances."""
+    key = "signup:" + (source or "unknown")
+    now = time.time()
+    with docstore.lock(THROTTLE_DOC):
+        data = _load_throttle()
+        recent = [t for t in data.get(key, []) if t > now - 3600]
+        if len(recent) >= per_hour:
+            return False
+        data[key] = recent + [now]
+        _save_throttle(_live(data, now))
+    return True
 
 
 def _check_new_password(password: str) -> None:

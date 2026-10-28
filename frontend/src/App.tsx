@@ -18,7 +18,7 @@ import type { Role, Session } from './api'
 import { BrandMark, Icon, PageHead, ROLE_LABELS } from './ui'
 import { NavContext, type Intent, type TabKey } from './nav'
 import { SchemaContext, invalidate } from './records'
-import { getApprovals, getSchemas, type Schemas } from './api'
+import { getApprovals, getSchemas, listAccountRequests, type Schemas } from './api'
 import type { Intent as PageIntent } from './nav'
 
 // Business modules load when first opened, so the field log starts fast on a phone.
@@ -195,6 +195,15 @@ export default function App() {
     getApprovals().then(list => { if (live) setApprovalCount(list.length) }).catch(() => {})
     return () => { live = false }
   }, [auth?.token, tab, navCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Account requests from the sign-in page, for administrators.
+  const [requestCount, setRequestCount] = useState(0)
+  const [requestTick, setRequestTick] = useState(0)
+  useEffect(() => {
+    if (!auth || auth.role !== 'admin') { setRequestCount(0); return }
+    let live = true
+    listAccountRequests().then(list => { if (live) setRequestCount(list.length) }).catch(() => {})
+    return () => { live = false }
+  }, [auth?.token, auth?.role, tab, requestTick]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!auth) { setSchemas(null); invalidate(); return }
     let active = true
@@ -351,6 +360,7 @@ export default function App() {
       <Icon name={item.icon} />{item.label}
       {item.key === 'boreholes' && outbox.length > 0 && <span className="count">{t('{n} waiting', { n: outbox.length })}</span>}
       {item.key === 'approvals' && approvalCount > 0 && <span className="count">{approvalCount}</span>}
+      {item.key === 'users' && requestCount > 0 && <span className="count" title={t('Account requests')}>{requestCount}</span>}
     </button>
   )
   const accountButtons = (
@@ -421,7 +431,7 @@ export default function App() {
           {tab === 'summary' && <Summary />}
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'about' && <AboutSoilBoring />}
-          {tab === 'users' && isAdmin && <UserAdmin currentUserEmail={auth.email} />}
+          {tab === 'users' && isAdmin && <UserAdmin currentUserEmail={auth.email} onRequestsChanged={() => setRequestTick(n => n + 1)} />}
           {tab === 'activity' && isAdmin && <Activity />}
           {tab === 'account' && (
             <>

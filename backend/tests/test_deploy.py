@@ -9,7 +9,7 @@ def test_public_config_exposes_only_org_name(client, monkeypatch):
     from backend.app import config
 
     monkeypatch.setattr(config, "ORG_NAME", "PT Contoh Geoteknik")
-    assert client.get("/api/config").json() == {"org_name": "PT Contoh Geoteknik", "app_name": "Soil Boring Ops", "ai_server": False, "email_reset": False}
+    assert client.get("/api/config").json() == {"org_name": "PT Contoh Geoteknik", "app_name": "Soil Boring Ops", "ai_server": False, "email_reset": False, "signup": True}
 
 
 def test_serves_built_ui_with_spa_fallback(tmp_path, monkeypatch):

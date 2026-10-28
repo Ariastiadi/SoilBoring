@@ -11,6 +11,7 @@ const BASE = String(import.meta.env.VITE_API_URL ?? "")
 export type Role = 'admin' | 'manager' | 'general' | 'lab' | 'finance'
 export type User = {
   email: string
+  name?: string
   role: Role
   totp_enabled?: boolean
 }
@@ -321,7 +322,7 @@ export function appTitle(orgName: string) {
 }
 
 // Public, non-secret settings (organisation name) from the backend's ORG_NAME.
-export type PublicConfig = { org_name: string; ai_server: boolean; email_reset: boolean }
+export type PublicConfig = { org_name: string; ai_server: boolean; email_reset: boolean; signup: boolean }
 
 let publicConfig: Promise<PublicConfig> | null = null
 
@@ -336,10 +337,11 @@ export function getPublicConfig(): Promise<PublicConfig> {
           org_name: typeof body?.org_name === "string" ? body.org_name.trim() : "",
           ai_server: body?.ai_server === true,
           email_reset: body?.email_reset === true,
+          signup: body?.signup === true,
         };
       } catch {
         publicConfig = null; // try again next time
-        return { org_name: "", ai_server: false, email_reset: false };
+        return { org_name: "", ai_server: false, email_reset: false, signup: false };
       }
     })();
   }
@@ -452,6 +454,27 @@ export const resetWithCode = (email: string, recovery_code: string, new_password
 export const requestResetEmail = (email: string) => postJson<{ status: string; email_enabled: boolean }>("/api/auth/forgot", { email }, t("Request failed"), false)
 export const resetWithToken = (token: string, new_password: string) =>
   postJson<{ status: string }>("/api/auth/reset", { token, new_password }, t("Reset failed"), false)
+
+// Account requests from the sign-in page; an admin approves them under Users.
+export type Department = 'field' | 'lab' | 'engineering' | 'finance' | 'management' | 'other'
+export type AccountRequest = {
+  email: string; name: string; department: Department; suggested_role: Role; note: string; requested_at: string
+}
+export const requestAccount = (body: { email: string; password: string; name: string; department: Department; note: string }) =>
+  postJson<{ status: string }>("/api/auth/signup", body, t("Request failed"), false)
+
+export async function listAccountRequests() {
+  const r = await fetch(`${BASE}/api/users/requests`, { headers: buildHeaders() })
+  return parseJson<AccountRequest[]>(r, t("Failed to load users"))
+}
+
+export const approveAccountRequest = (email: string, role: Role) =>
+  postJson<User>(`/api/users/requests/${encodeURIComponent(email)}/approve`, { role }, t("Failed to create user"))
+
+export async function rejectAccountRequest(email: string) {
+  const r = await fetch(`${BASE}/api/users/requests/${encodeURIComponent(email)}`, { method: "DELETE", headers: buildHeaders() })
+  return parseJson<{ status: string }>(r, t("Request failed"))
+}
 
 export async function resetUserTwoFactor(email: string) {
   const r = await fetch(`${BASE}/api/users/${encodeURIComponent(email)}/2fa`, { method: "DELETE", headers: buildHeaders() })

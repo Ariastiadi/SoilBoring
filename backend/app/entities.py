@@ -472,6 +472,8 @@ _add(Entity(
         F("signatory", "text", "Signatory name"),
         F("signatory_title", "text", "Signatory title"),
         F("report_footer", "longtext", "Report footer / disclaimer", maxlen=2000),
+        F("self_signup", "bool", "Account requests from the sign-in page", default=True,
+          help="People can ask for an account on the sign-in page; nobody gets in until an administrator approves the request under Users and chooses the role."),
         F("approval_separation", "bool", "Different people for drafting, review and approval", default=True,
           help="Turn off only when the company is too small for three people in the approval flow."),
         F("difficulty_factors", "items", "Project difficulty factors", max_items=30, section="Pricing policy", fields=[

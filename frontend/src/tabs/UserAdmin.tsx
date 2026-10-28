@@ -1,14 +1,23 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
-import { createUser, deleteUser, listUsers, resetUserPassword, resetUserTwoFactor, User } from '../api'
+import { type AccountRequest, approveAccountRequest, createUser, deleteUser, listAccountRequests, listUsers, rejectAccountRequest, resetUserPassword, resetUserTwoFactor, User } from '../api'
 import { t } from '../i18n'
-import { Icon, PageHead, ROLE_LABELS } from '../ui'
+import { Icon, PageHead, ROLE_LABELS, formatDate } from '../ui'
 
 type Props = {
   currentUserEmail: string
+  /** Called after a request was approved or rejected (the menu shows how many wait). */
+  onRequestsChanged?: () => void
 }
 
-export default function UserAdmin({ currentUserEmail }: Props) {
+const DEPARTMENT_LABELS: Record<string, string> = {
+  field: 'Field work (drilling, CPT, survey)', lab: 'Laboratory', engineering: 'Engineering / project leader',
+  finance: 'Finance', management: 'Management', other: 'Other',
+}
+
+export default function UserAdmin({ currentUserEmail, onRequestsChanged }: Props) {
   const [users, setUsers] = useState<User[]>([])
+  const [requests, setRequests] = useState<AccountRequest[]>([])
+  const [requestRoles, setRequestRoles] = useState<Record<string, User['role']>>({})
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<User['role']>('general')
@@ -22,8 +31,9 @@ export default function UserAdmin({ currentUserEmail }: Props) {
       setStatus(t('Loading users...'))
     }
     try {
-      const res = await listUsers()
+      const [res, open] = await Promise.all([listUsers(), listAccountRequests()])
       setUsers(res)
+      setRequests(open)
       if (!silent) {
         setStatus('')
       }
@@ -96,10 +106,62 @@ export default function UserAdmin({ currentUserEmail }: Props) {
     }
   }
 
+  const decide = async (req: AccountRequest, approve: boolean) => {
+    if (busy) return
+    const role = requestRoles[req.email] || req.suggested_role
+    if (approve && role === 'admin' && !window.confirm(t('Give {email} full administrator access?', { email: req.email }))) return
+    if (!approve && !window.confirm(t('Reject the account request of {email}?', { email: req.email }))) return
+    setBusy(true)
+    try {
+      if (approve) {
+        await approveAccountRequest(req.email, role)
+        setStatus(t('{email} can now sign in as {role}.', { email: req.email, role: t(ROLE_LABELS[role] || role) }))
+      } else {
+        await rejectAccountRequest(req.email)
+        setStatus(t('Request of {email} rejected.', { email: req.email }))
+      }
+      await loadUsers(true)
+      onRequestsChanged?.()
+    } catch (err: any) {
+      setStatus(t('Error: {message}', { message: err.message }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const me = currentUserEmail.toLowerCase()
   return (
     <div>
       <PageHead title={t('Users')} description={t('Who can sign in. Field users add logs and change their own; the laboratory records test results; project leaders run projects, quotations, contracts and reports; finance handles invoices; administrators can do everything and manage users.')} />
+      {requests.length > 0 && (
+        <section className="card" style={{ marginBottom: '1rem' }}>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>{t('Account requests')} <span className="count">{requests.length}</span></h2>
+          <p className="help">{t('People who asked for an account on the sign-in page. Check that you know them, choose their role, then approve. They sign in with the password they chose.')}</p>
+          <ul className="request-list">
+            {requests.map(req => (
+              <li key={req.email} className="request-item">
+                <div className="request-who">
+                  <strong>{req.name}</strong>
+                  <span className="bh-sub" style={{ overflowWrap: 'anywhere' }}>{req.email}</span>
+                  <span className="help" style={{ margin: 0 }}>
+                    {t(DEPARTMENT_LABELS[req.department] || 'Other')} · {t('Requested')} {formatDate(req.requested_at.slice(0, 10))}
+                  </span>
+                  {req.note && <span className="request-note">{req.note}</span>}
+                </div>
+                <div className="request-decide">
+                  <label className="sr-only" htmlFor={`req-role-${req.email}`}>{t('Role for {email}', { email: req.email })}</label>
+                  <select id={`req-role-${req.email}`} value={requestRoles[req.email] || req.suggested_role}
+                    onChange={e => setRequestRoles(r => ({ ...r, [req.email]: e.target.value as User['role'] }))}>
+                    {['general', 'lab', 'manager', 'finance', 'admin'].map(r => <option key={r} value={r}>{t(ROLE_LABELS[r])}</option>)}
+                  </select>
+                  <button type="button" className="primary" disabled={busy} onClick={() => void decide(req, true)}>{t('Approve')}</button>
+                  <button type="button" className="danger-quiet" disabled={busy} onClick={() => void decide(req, false)}>{t('Reject')}</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="users-layout">
         <section>
           <div className="table-wrap">
@@ -110,7 +172,7 @@ export default function UserAdmin({ currentUserEmail }: Props) {
                 {users.map(u => (
                   <Fragment key={u.email}>
                     <tr>
-                      <td><strong style={{ overflowWrap: 'anywhere' }}>{u.email}</strong>{u.email.toLowerCase() === me && <div className="bh-sub">{t('You')}</div>}</td>
+                      <td><strong style={{ overflowWrap: 'anywhere' }}>{u.email}</strong>{u.name && <div className="bh-sub">{u.name}</div>}{u.email.toLowerCase() === me && <div className="bh-sub">{t('You')}</div>}</td>
                       <td>{t(ROLE_LABELS[u.role] || u.role)}</td>
                       <td><span className={`status${u.totp_enabled ? ' ok' : ''}`}>{u.totp_enabled ? t('On') : t('Off')}</span></td>
                       <td className="nowrap" style={{ textAlign: 'right' }}>

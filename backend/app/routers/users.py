@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from .. import audit
+from .. import audit, signup
 from ..auth import MIN_PASSWORD_LENGTH, create_user, delete_user, disable_totp, get_current_user, list_users, require_admin, set_password
 from ..models import Email
 
@@ -33,6 +33,30 @@ def add_user(payload: UserCreate, admin=Depends(require_admin)):
     created = create_user(payload.email, payload.password, payload.role)
     audit.record(admin["email"], "user.created", created["email"], {"role": [None, created["role"]]})
     return created
+
+
+class RequestApproval(BaseModel):
+    role: Literal["admin", "manager", "general", "lab", "finance"]
+
+
+@router.get("/requests")
+def account_requests(admin=Depends(require_admin)):
+    """Open requests from the sign-in page, oldest first."""
+    return signup.pending()
+
+
+@router.post("/requests/{email:path}/approve", status_code=201)
+def approve_request(email: str, payload: RequestApproval, admin=Depends(require_admin)):
+    created = signup.approve(email, payload.role)
+    audit.record(admin["email"], "user.request_approved", created["email"], {"role": [None, created["role"]]})
+    return created
+
+
+@router.delete("/requests/{email:path}")
+def reject_request(email: str, admin=Depends(require_admin)):
+    signup.reject(email)
+    audit.record(admin["email"], "user.request_rejected", email)
+    return {"status": "rejected"}
 
 
 class PasswordReset(BaseModel):

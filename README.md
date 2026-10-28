@@ -113,8 +113,9 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 
 ### Authentication & Roles
 
-- Every API endpoint except `/api/auth/login`, `/api/auth/setup` (first admin only), `/api/config` and the health checks requires a signed-in user.
+- Every API endpoint except `/api/auth/login`, `/api/auth/setup` (first admin only), `/api/auth/signup` (account requests), `/api/config` and the health checks requires a signed-in user.
 - **First admin:** on a fresh install with no accounts, the sign-in page shows **Create admin account**; the first account created there is an admin and the form disappears afterwards. Alternatives: `ADMIN_EMAIL`/`ADMIN_PASSWORD` at startup, or the CLI below.
+- **Account requests:** the sign-in page has *No account yet? Request one*. The applicant gives their name, email, kind of work, a password and an optional note. Nobody can sign in until an admin approves the request under **Users** (the menu shows how many wait) and chooses the role; the applicant then signs in with the password they chose, which was stored only as a hash. Rejected requests are removed, and unhandled ones expire after 30 days. The answer is the same whether or not the email already has an account, at most 5 requests per connection per hour and 100 open requests are accepted, and admins get an email per request when SMTP is set up. Switch it off in **Company settings** or with `SELF_SIGNUP=false`.
 - Users live in `data/users.json` (never committed to git). Manage them in the **Users** tab (admins) or with the CLI:
 
   ```bash

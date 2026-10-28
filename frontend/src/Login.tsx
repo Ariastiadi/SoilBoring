@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getPublicConfig, getSetupStatus, requestResetEmail, resetWithCode, resetWithToken } from './api'
+import { type Department, getPublicConfig, getSetupStatus, requestAccount, requestResetEmail, resetWithCode, resetWithToken } from './api'
 import { lang, setLang, t } from './i18n'
 import { BrandMark } from './ui'
 import { FILL, GRAIN_WIDTH, type Pattern } from './soil'
@@ -12,7 +12,7 @@ type Props = {
   notice?: string
 }
 
-type Mode = 'login' | 'otp' | 'setup' | 'forgot' | 'reset-link'
+type Mode = 'login' | 'otp' | 'setup' | 'forgot' | 'reset-link' | 'signup' | 'signup-done'
 const MIN_PASSWORD_LENGTH = 8
 
 function resetTokenFromUrl(): string {
@@ -21,6 +21,15 @@ function resetTokenFromUrl(): string {
 }
 
 const fieldStyle = { display: 'flex', flexDirection: 'column' as const, gap: '.3rem' }
+
+const DEPARTMENTS: [Department, string][] = [
+  ['field', 'Field work (drilling, CPT, survey)'],
+  ['lab', 'Laboratory'],
+  ['engineering', 'Engineering / project leader'],
+  ['finance', 'Finance'],
+  ['management', 'Management'],
+  ['other', 'Other'],
+]
 
 // A cross-section of five boreholes: each column's width follows grain size.
 const SECTION: Pattern[][] = [
@@ -65,11 +74,15 @@ export default function Login({ onLogin, onSetup, title, orgName, notice }: Prop
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [emailReset, setEmailReset] = useState(false)
+  const [signupOn, setSignupOn] = useState(false)
+  const [name, setName] = useState('')
+  const [department, setDepartment] = useState<Department>('field')
+  const [note, setNote] = useState('')
 
   useEffect(() => {
     let active = true
     getSetupStatus().then(needed => { if (active && needed && mode === 'login') setMode('setup') })
-    getPublicConfig().then(cfg => { if (active) setEmailReset(cfg.email_reset) })
+    getPublicConfig().then(cfg => { if (active) { setEmailReset(cfg.email_reset); setSignupOn(cfg.signup) } })
     return () => { active = false }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -129,6 +142,16 @@ export default function Login({ onLogin, onSetup, title, orgName, notice }: Prop
         setResetOtp('')
         setMode('login')
         setStatus(t('Password changed. Sign in with the new password.'))
+      } else if (mode === 'signup') {
+        if (name.trim().length < 2) throw new Error(t('Enter your full name'))
+        checkNew()
+        setStatus(t('Sending the request...'))
+        await requestAccount({ email: email.trim(), password, name: name.trim(), department, note: note.trim() })
+        setPassword('')
+        setConfirm('')
+        setNote('')
+        setStatus('')
+        setMode('signup-done')
       } else if (mode === 'reset-link') {
         checkNew()
         await resetWithToken(resetTokenFromUrl(), password)
@@ -153,12 +176,15 @@ export default function Login({ onLogin, onSetup, title, orgName, notice }: Prop
     setup: t('Welcome! No accounts exist yet. Create the first administrator account; you can add operators afterwards under Users.'),
     forgot: t('Forgot your password? Use one of your recovery codes to set a new one. No codes? Ask an admin to reset your password.'),
     'reset-link': t('Choose a new password for your account.'),
+    signup: t('Ask for an account. An administrator checks the request and chooses your access; until then you cannot sign in.'),
+    'signup-done': t('Request sent. Once an administrator approves it, sign in with this email and the password you just chose. Ask your administrator if it takes long.'),
   }
   const button: Record<Mode, string> = {
     login: t('Sign In'), otp: t('Verify'), setup: t('Create admin account'), forgot: t('Set new password'), 'reset-link': t('Set new password'),
+    signup: t('Request an account'), 'signup-done': t('Request sent'),
   }
-  const needsEmail = mode === 'login' || mode === 'setup' || mode === 'forgot'
-  const needsNewPassword = mode === 'setup' || mode === 'forgot' || mode === 'reset-link'
+  const needsEmail = mode === 'login' || mode === 'setup' || mode === 'forgot' || mode === 'signup'
+  const needsNewPassword = mode === 'setup' || mode === 'forgot' || mode === 'reset-link' || mode === 'signup'
 
   return (
     <div className="auth">
@@ -183,7 +209,13 @@ export default function Login({ onLogin, onSetup, title, orgName, notice }: Prop
           </div>
           <p className="muted" style={{ margin: '.4rem 0 1.25rem' }}>{intro[mode]}</p>
           {notice && <p className="notice warn" role="alert">{notice}</p>}
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+      {mode !== 'signup-done' && <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+        {mode === 'signup' && (
+          <label style={fieldStyle}>
+            {t('Full name')}
+            <input value={name} onChange={e => setName(e.target.value)} autoComplete="name" maxLength={120} required />
+          </label>
+        )}
         {needsEmail && (
           <label style={fieldStyle}>
             {t('Email')}
@@ -216,10 +248,18 @@ export default function Login({ onLogin, onSetup, title, orgName, notice }: Prop
             <input value={resetOtp} onChange={e => setResetOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8} />
           </label>
         )}
+        {mode === 'signup' && (
+          <label style={fieldStyle}>
+            {t('Your work')}
+            <select value={department} onChange={e => setDepartment(e.target.value as Department)}>
+              {DEPARTMENTS.map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
+            </select>
+          </label>
+        )}
         {needsNewPassword && (
           <>
             <label style={fieldStyle}>
-              {mode === 'setup' ? t('Password') : t('New password')}
+              {mode === 'setup' || mode === 'signup' ? t('Password') : t('New password')}
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={MIN_PASSWORD_LENGTH}
                 placeholder={t('At least {n} characters', { n: MIN_PASSWORD_LENGTH })} autoComplete="new-password" required />
             </label>
@@ -229,14 +269,25 @@ export default function Login({ onLogin, onSetup, title, orgName, notice }: Prop
             </label>
           </>
         )}
+        {mode === 'signup' && (
+          <label style={fieldStyle}>
+            {t('Note for the administrator (optional)')}
+            <input value={note} onChange={e => setNote(e.target.value)} maxLength={300}
+              placeholder={t('e.g. project, site or supervisor')} />
+          </label>
+        )}
         <button type="submit" className="primary" disabled={busy}>{button[mode]}</button>
         {status && <p className="muted small" role="status" style={{ margin: 0 }}>{status}</p>}
         {error && <p className="notice error" role="alert" style={{ margin: 0 }}>{error}</p>}
-      </form>
+      </form>}
+      {mode === 'signup-done' && (
+        <button type="button" className="primary" style={{ width: '100%' }} onClick={() => switchMode('login')}>{t('Back to sign in')}</button>
+      )}
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem', fontSize: '.92rem' }}>
         {mode === 'login' && <a href="#" onClick={e => { e.preventDefault(); switchMode('forgot') }}>{t('Forgot password?')}</a>}
+        {mode === 'login' && signupOn && <a href="#" onClick={e => { e.preventDefault(); switchMode('signup') }}>{t('No account yet? Request one')}</a>}
         {mode === 'forgot' && emailReset && <a href="#" onClick={e => { e.preventDefault(); void sendLink() }}>{t('Email me a reset link instead')}</a>}
-        {(mode === 'forgot' || mode === 'otp' || mode === 'reset-link') && (
+        {(mode === 'forgot' || mode === 'otp' || mode === 'reset-link' || mode === 'signup') && (
           <a href="#" onClick={e => { e.preventDefault(); if (mode === 'reset-link') history.replaceState(null, '', window.location.pathname); switchMode('login') }}>{t('Back to sign in')}</a>
         )}
       </div>
