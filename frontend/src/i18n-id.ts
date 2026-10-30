@@ -6349,4 +6349,5 @@ export const ID: Record<string, string> = {
   "{what} {sample}: borehole {id} does not exist": "{what} {sample}: titik bor {id} tidak ada",
   "{what} {sample}: sample not in the samples of {id}": "{what} {sample}: sampel tidak ada di daftar sampel {id}",
   "CPT {id}: {n} readings": "Sondir {id}: {n} bacaan",
+  "Use your work or personal email address, not a temporary inbox": "Pakai email kantor atau email pribadi Anda, bukan email sementara",
 }

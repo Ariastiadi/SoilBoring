@@ -115,7 +115,7 @@ Both dev servers bind to `0.0.0.0` by default so they are reachable on your LAN.
 
 - Every API endpoint except `/api/auth/login`, `/api/auth/setup` (first admin only), `/api/auth/signup` (account requests), `/api/config`, the health checks and the public seal check `/api/verify/{code}` requires a signed-in user.
 - **First admin:** on a fresh install with no accounts, the sign-in page shows **Create admin account**; the first account created there is an admin and the form disappears afterwards. Alternatives: `ADMIN_EMAIL`/`ADMIN_PASSWORD` at startup, or the CLI below.
-- **Account requests:** the sign-in page has *No account yet? Request one*. The applicant gives their name, email, kind of work, a password and an optional note. Nobody can sign in until an admin approves the request under **Users** (the menu shows how many wait) and chooses the role; the applicant then signs in with the password they chose, which was stored only as a hash. Rejected requests are removed, and unhandled ones expire after 30 days. The answer is the same whether or not the email already has an account, at most 5 requests per connection per hour and 100 open requests are accepted, and admins get an email per request when SMTP is set up. Switch it off in **Company settings** or with `SELF_SIGNUP=false`.
+- **Account requests:** the sign-in page has *No account yet? Request one*. The applicant gives their name, email, kind of work, a password and an optional note. Nobody can sign in until an admin approves the request under **Users** (the menu shows how many wait) and chooses the role; the applicant then signs in with the password they chose, which was stored only as a hash. Rejected requests are removed, and unhandled ones expire after 30 days. The answer is the same whether or not the email already has an account, at most 5 requests per connection per hour and 100 open requests are accepted, and admins get an email per request when SMTP is set up. Requests from temporary inboxes (mailinator, 10minutemail and about 10,000 other such domains, list from [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains), CC0) are refused. Switch it off in **Company settings** or with `SELF_SIGNUP=false`.
 - Users live in `data/users.json` (never committed to git). Manage them in the **Users** tab (admins) or with the CLI:
 
   ```bash
@@ -232,7 +232,7 @@ The app is installable ("Add to home screen") and keeps its own files in the bro
 
 - **Two-step verification (TOTP):** *Account & security* → scan the QR code with any authenticator app (Google/Microsoft Authenticator, Aegis, ...). Sign-in then asks for the 6-digit code. Admins can turn it off for a user who lost their phone.
 - **Recovery codes:** 10 one-time codes, created when two-step verification is turned on or at any time on the same page. Each one can replace an authenticator code, or set a new password via *Forgot password?* on the sign-in page.
-- **Password reset by email:** optional. Set `SMTP_HOST`, `SMTP_PORT` (587, or 465 for SSL), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `APP_BASE_URL` (on Vercel the production domain is used automatically). The link is valid for 30 minutes and works once.
+- **Password reset by email:** optional. Set `SMTP_HOST`, `SMTP_PORT` (587, or 465 for SSL), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `APP_BASE_URL` (on Vercel the production domain is used automatically). The link is valid for 30 minutes and works once. The same server sends admins a note for every account request. Any SMTP service works; free ones without a credit card include a Gmail account with an [app password](https://support.google.com/accounts/answer/185833) (`smtp.gmail.com`, port 587, about 500 mails a day), Brevo (300 a day) and Mailjet (200 a day).
 - **Sign-in lockout:** 5 failed attempts per email in 15 minutes. The counter is stored with the data (file or database), so it holds across several app instances.
 - **Activity log:** admins see every change (logs, depth data, photos, accounts) in the *Activity* tab; other users see the history of a borehole. The newest 5000 events are kept; passwords and codes are never logged.
 
@@ -404,6 +404,18 @@ Vercel's Hobby plan and Neon's free Postgres need no credit card, and both accep
 4. Open the site: as long as no account exists, the sign-in page offers **Create admin account**. Do this right after the first deploy (or set `ADMIN_EMAIL`, so only that address can be used).
 
 Without `DATABASE_URL` the app still starts, but keeps its data in `/tmp`, which Vercel wipes regularly. The app page, `sw.js` and the manifest are served with an ETag taken from their content, so every deployment reaches the browsers (asset files are cached for a year under hashed names). `vercel.json` places the function in `cle1` (Ohio), next to Neon's AWS US East 2; pick the matching Vercel region if your database lives elsewhere. Every push to `main` redeploys.
+
+### Backups and uptime
+
+- **Daily database backup:** `.github/workflows/backup.yml` runs every night at 02:17 WIB (and on demand from the Actions tab). It dumps the database with `pg_dump`, encrypts the file with AES-256 (`openssl`, PBKDF2) using the passphrase in the `BACKUP_KEY` secret, and keeps it 30 days as a workflow artifact. Set the repository secrets `BACKUP_DATABASE_URL` (the same connection string as `DATABASE_URL` on Vercel) and `BACKUP_KEY` (a long random passphrase kept somewhere safe outside GitHub); without them the job only reports that backups are not set up. The file is encrypted because artifacts of a public repository can be downloaded by any signed-in GitHub user. To restore, download the artifact and run:
+
+  ```bash
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in soilboring-db-YYYY-MM-DD.dump.enc -out db.dump -pass pass:'<BACKUP_KEY>'
+  pg_restore --clean --if-exists --no-owner --no-privileges -d "<DATABASE_URL of the target database>" db.dump
+  ```
+
+  GitHub pauses scheduled workflows of a repository without commits for 60 days; a commit (or *Enable workflow* in the Actions tab) starts them again.
+- **Uptime:** point a free monitor such as [UptimeRobot](https://uptimerobot.com) (50 monitors, every 5 minutes, no card) at `https://<your-site>/api/health`. That endpoint does not touch the database, so the checks do not keep Neon's compute awake.
 
 ### Deploy on Render with a Neon database
 

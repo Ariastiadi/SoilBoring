@@ -40,6 +40,31 @@ DEPARTMENTS: Dict[str, str] = {
 }
 
 
+_DISPOSABLE: Optional[frozenset] = None
+
+
+def _disposable_domains() -> frozenset:
+    global _DISPOSABLE
+    if _DISPOSABLE is None:
+        path = os.path.join(os.path.dirname(__file__), "disposable_domains.txt")
+        try:
+            with open(path, encoding="utf-8") as handle:
+                _DISPOSABLE = frozenset(
+                    line.strip().lower() for line in handle if line.strip() and not line.startswith("#")
+                )
+        except OSError:
+            _DISPOSABLE = frozenset()
+    return _DISPOSABLE
+
+
+def is_disposable(email: str) -> bool:
+    """A temporary-inbox address (mailinator, 10minutemail, ...), also on subdomains of such services."""
+    domain = email.rsplit("@", 1)[-1].strip().lower().rstrip(".")
+    parts = domain.split(".")
+    blocked = _disposable_domains()
+    return any(".".join(parts[i:]) in blocked for i in range(len(parts) - 1))
+
+
 def enabled() -> bool:
     """Self sign-up is on unless SELF_SIGNUP=false or an admin switched it off in Company settings."""
     if os.environ.get("SELF_SIGNUP", "true").strip().lower() in {"0", "false", "no", "off"}:
@@ -86,6 +111,11 @@ def submit(email: str, password: str, name: str, department: str, note: str, sou
         email = normalize_email(email)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if is_disposable(email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use your work or personal email address, not a temporary inbox",
+        )
     name = " ".join((name or "").split())
     if len(name) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter your full name")

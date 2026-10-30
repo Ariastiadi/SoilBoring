@@ -1,0 +1,74 @@
+name: backup
+
+# Daily encrypted copy of the live database (Neon/Postgres), kept 30 days as a workflow artifact.
+# Needs two repository secrets: BACKUP_DATABASE_URL (the same connection string as DATABASE_URL
+# on Vercel) and BACKUP_KEY (a long passphrase). Without them the job only says it is not set up.
+# The copy is encrypted with BACKUP_KEY before it leaves the runner, because artifacts of a public
+# repository can be downloaded by any signed-in GitHub user. See "Backups" in the README to restore.
+
+on:
+  schedule:
+    - cron: "17 19 * * *"   # 02:17 WIB
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check the secrets
+        env:
+          DB: ${{ secrets.BACKUP_DATABASE_URL }}
+          KEY: ${{ secrets.BACKUP_KEY }}
+        run: |
+          if [ -z "$DB" ] || [ -z "$KEY" ]; then
+            echo "::notice::Backups are not set up: add the BACKUP_DATABASE_URL and BACKUP_KEY secrets."
+            echo "READY=" >> "$GITHUB_ENV"
+          else
+            echo "READY=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install the PostgreSQL client
+        if: env.READY == '1'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common > /dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y > /dev/null
+          sudo apt-get install -y -qq postgresql-client-18 > /dev/null
+          /usr/lib/postgresql/18/bin/pg_dump --version
+
+      - name: Dump and encrypt
+        if: env.READY == '1'
+        env:
+          DB: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+        run: |
+          set -euo pipefail
+          STAMP=$(TZ=Asia/Jakarta date +%Y-%m-%d)
+          NAME="soilboring-db-$STAMP.dump.enc"
+          /usr/lib/postgresql/18/bin/pg_dump "$DB" --format=custom --no-owner --no-privileges --file="$RUNNER_TEMP/db.dump"
+          SIZE=$(stat -c %s "$RUNNER_TEMP/db.dump")
+          /usr/lib/postgresql/18/bin/pg_restore --list "$RUNNER_TEMP/db.dump" > "$RUNNER_TEMP/toc.txt"
+          TABLES=$(grep -c " TABLE DATA " "$RUNNER_TEMP/toc.txt" || true)
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in "$RUNNER_TEMP/db.dump" -out "$NAME" -pass env:BACKUP_KEY
+          rm -f "$RUNNER_TEMP/db.dump"
+          sha256sum "$NAME" > "$NAME.sha256"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          echo "::notice::Backup $NAME: $SIZE bytes before encryption, $TABLES tables with data."
+
+      - name: Keep for 30 days
+        if: env.READY == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: |
+            ${{ env.NAME }}
+            ${{ env.NAME }}.sha256
+          retention-days: 30
+          if-no-files-found: error

@@ -87,3 +87,13 @@ def test_switched_off_by_environment(client, monkeypatch):
     monkeypatch.setenv("SELF_SIGNUP", "false")
     assert client.get("/api/config").json()["signup"] is False
     assert client.post("/api/auth/signup", json=REQUEST).status_code == 403
+
+
+def test_temporary_inboxes_are_refused(client, admin_headers):
+    for email in ("someone@mailinator.com", "x@sub.10minutemail.com", "y@MAILINATOR.COM"):
+        res = client.post("/api/auth/signup", json={**REQUEST, "email": email})
+        assert res.status_code == 400, email
+        assert "temporary inbox" in res.json()["detail"]
+    assert client.get("/api/users/requests", headers=admin_headers).json() == []
+    assert signup.is_disposable("a@mailinator.com") and not signup.is_disposable("a@gmail.com")
+    assert not signup.is_disposable("budi@contoh.co.id")
